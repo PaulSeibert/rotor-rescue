@@ -1,0 +1,25 @@
+# Ctrl+L then 0: invincible (for testing). Sitting landed under tank fire,
+# which tests/shotdown.agk shows is fatal within 500 frames, the chopper is
+# hit but carries on, with everyone still aboard; the score bar says GODMODE.
+# Then Ctrl+L, 5 (the hardest): mortal again, and the next shell gets it.
+start-at boarding
+key 0x63
+key 0x28
+wait 5
+key 0x0A
+wait 30
+expect-serial "difficulty=0"
+screenshot godmode
+expect-color godmode 268 14 0xFEC
+wait 700
+expect-serial "hit ignored[\s\S]*hit ignored"
+key 0x63
+key 0x28
+wait 5
+key 0x05
+wait 30
+screenshot hardest
+expect-color hardest 268 14 0xFEC
+wait-serial "chopper lost"
+expect-no-serial "chopper lost[\s\S]*difficulty=5"
+expect-serial "difficulty=5[\s\S]*chopper lost"

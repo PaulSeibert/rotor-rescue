@@ -1,0 +1,9 @@
+# The hills and ground bands (PF2, colours 9-15). Mission 1; logic.c has the others.
+0  0x000  transparent
+1  0x310  l1
+2  0x521  l2
+3  0x742  l3
+4  0x963  l4
+5  0xB84  l5
+6  0xDA6  l6
+7  0xEC8  l7

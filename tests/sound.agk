@@ -1,0 +1,15 @@
+# The title theme plays; in the air the rotor chops and the cannon fires.
+wait-serial "AGK t0"
+mark title
+wait 50
+mark title_end
+expect-sound title title_end
+press fire 2
+wait 125
+press up 30
+mark gun
+press fire 1
+wait 10
+mark gun_end
+expect-serial "AGK sfx cannon"
+expect-sound gun gun_end

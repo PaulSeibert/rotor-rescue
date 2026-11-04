@@ -1,0 +1,32 @@
+# A whole trip: fly to the nearest barracks, land, shoot it open, take 16
+# people aboard, fly home, land on the pad, they run into the hangar.
+wait-serial "AGK t0"
+press fire 2
+wait 125
+press up 30
+press left 170
+wait 60
+press down 70
+expect-serial "landed x=2334"
+press fire 1
+wait 25
+press fire 1
+wait 30
+expect-serial "barracks open=3"
+wait 90
+screenshot boarding
+checkpoint boarding
+wait 200
+expect-serial "aboard=16"
+screenshot full
+press up 30
+press right 180
+wait 50
+press down 70
+expect-serial "landed x=2910"
+wait 200
+screenshot home
+wait 120
+expect-serial "saved=16"
+expect-serial "trip=1"
+expect-no-serial "chopper lost"

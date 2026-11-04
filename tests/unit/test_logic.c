@@ -1,0 +1,538 @@
+// Host-side tests for src/logic.c (ROTOR RESCUE). Run with: agk unit
+#include <stdio.h>
+#include "logic.h"
+
+static int s_failures;
+
+#define CHECK(cond) do { \
+	if(!(cond)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); ++s_failures; } \
+} while(0)
+
+static tGame g;
+static const tInput NONE = {0};
+
+static void step(tInput in, int frames) {
+	for(int i = 0; i < frames; ++i) logicUpdate(&g, &in);
+}
+
+// A game in GS_PLAY, the chopper landed at the base
+static void newGame(void) {
+	logicInit(&g);
+	logicStartGame(&g);
+	step(NONE, INTRO_FRAMES + 1);
+}
+
+// Airborne at (x, y), facing left, still, no enemies
+static void flyAt(int16_t x, int16_t y) {
+	g.chop.x = x;
+	g.chop.y = y;
+	g.chop.landed = 0;
+	g.chop.vx = g.chop.vy = 0;
+	g.cam = (int16_t)(x - SCREEN_W / 2);
+	g.spawnTimer = 60000;
+}
+
+static uint8_t freeCount(void) {
+	uint8_t n = 0;
+	for(int i = 0; i < HOSTAGE_COUNT; ++i) n += g.pHostages[i].state == HS_FREE || g.pHostages[i].state == HS_TO_CHOPPER;
+	return n;
+}
+
+static void testTitleNeedsFire(void) {
+	logicInit(&g);
+	CHECK(g.state == GS_TITLE);
+	step(NONE, 100);
+	CHECK(g.state == GS_TITLE);
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.state == GS_INTRO);
+	step(NONE, INTRO_FRAMES + 1);
+	CHECK(g.state == GS_PLAY);
+}
+
+static void testStartsLandedAtBase(void) {
+	newGame();
+	CHECK(g.chop.landed && g.chop.alive);
+	CHECK(g.chop.x == START_X && g.chop.y == GROUND_Y);
+	CHECK(g.chop.face == FACE_LEFT);
+	CHECK(g.lives == LIVES_START && g.aboard == 0 && g.saved == 0 && g.killed == 0);
+}
+
+static void testTakeOffAndClimb(void) {
+	newGame();
+	step((tInput){.dy = -1}, 30);
+	CHECK(!g.chop.landed);
+	CHECK(g.chop.y < GROUND_Y - 40);
+	step((tInput){.dy = -1}, 300);
+	CHECK(g.chop.y == CEIL_Y);
+}
+
+static void testAcceleratesToMaxSpeed(void) {
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.dx = -1}, 60);
+	CHECK(g.chop.vx == -VX_MAX);
+	int16_t x0 = g.chop.x;
+	step((tInput){.dx = -1}, 10);
+	CHECK(x0 - g.chop.x == 30);   // 3 px a frame
+	step(NONE, 100);
+	CHECK(g.chop.vx == 0);        // coasts to a stop
+}
+
+static void testTurnThroughFront(void) {
+	newGame();
+	flyAt(2000, 120);
+	CHECK(g.chop.face == FACE_LEFT);
+	step((tInput){.dx = 1}, TURN_HOLD_FRAMES + TURN_STEP_FRAMES);
+	CHECK(g.chop.face == FACE_FRONT);
+	CHECK((logicChopperFrame(&g) & 0x7F) == CHOP_TURN);
+	step((tInput){.dx = 1}, TURN_STEP_FRAMES);
+	CHECK(g.chop.face == FACE_RIGHT);
+}
+
+static void testFrontNeedsLongPush(void) {
+	newGame();
+	flyAt(2000, 120);
+	g.chop.face = g.chop.faceTarget = FACE_FRONT;
+	step((tInput){.dx = -1}, TURN_HOLD_FRAMES * 2);
+	CHECK(g.chop.faceTarget == FACE_FRONT);   // strafing, still facing front
+	step((tInput){.dx = -1}, TURN_HOLD_FRAMES * 2 + TURN_STEP_FRAMES + 1);
+	CHECK(g.chop.face == FACE_LEFT);
+}
+
+static void testFire2Cycles(void) {
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, TURN_STEP_FRAMES);
+	CHECK(g.chop.face == FACE_FRONT);
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, TURN_STEP_FRAMES);
+	CHECK(g.chop.face == FACE_RIGHT);   // on through to the other side
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, TURN_STEP_FRAMES);
+	CHECK(g.chop.face == FACE_FRONT);
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, TURN_STEP_FRAMES);
+	CHECK(g.chop.face == FACE_LEFT);
+}
+
+static void testDownFireFacesFrontThenBombs(void) {
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.dy = 1, .fire = 1}, 1);
+	CHECK(g.chop.faceTarget == FACE_FRONT);
+	CHECK(!g.pShots[0].active);           // the press turned, it didn't shoot
+	step(NONE, TURN_STEP_FRAMES + 1);
+	g.chop.y = 120; g.chop.vy = 0;
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.pShots[0].active && g.pShots[0].kind == SHOT_BOMB);
+	CHECK(g.events & EV_BOMB);
+}
+
+static void testCannonFiresForwardAndRepeats(void) {
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.pShots[0].active && g.pShots[0].kind == SHOT_CANNON);
+	CHECK(g.pShots[0].vx < 0);            // facing left
+	step((tInput){.fire = 1}, FIRE_REPEAT);
+	CHECK(g.pShots[1].active);            // auto-fire
+}
+
+static void testCannonOpensBarracks(void) {
+	newGame();
+	int16_t bx = g.pBarracks[3].x;
+	flyAt((int16_t)(bx + 80), FEET_Y - 8);
+	g.chop.y = GROUND_Y - 4;   // low, still airborne... land to shoot level
+	g.chop.landed = 1; g.chop.y = GROUND_Y;
+	// shot y = GROUND_Y - 6 = 230, inside the barracks (212..240)
+	step((tInput){.fire = 1}, 1);
+	step(NONE, 30);
+	CHECK(g.pBarracks[3].hp == 1);
+	step((tInput){.fire = 1}, 1);
+	int opened = 0;
+	for(int i = 0; i < 30; ++i) { step(NONE, 1); if(g.events & EV_OPEN) opened = 1; }
+	CHECK(opened);
+	CHECK(g.pBarracks[3].hp == 0);
+	step(NONE, 20 * 12 + 40);
+	CHECK(g.pBarracks[3].released == HOSTAGES_PER_BARRACKS);
+}
+
+static void testBombOpensBarracks(void) {
+	newGame();
+	int16_t bx = g.pBarracks[2].x;
+	flyAt(bx, 100);
+	g.chop.face = g.chop.faceTarget = FACE_FRONT;
+	step((tInput){.fire = 1}, 1);
+	step(NONE, 60);
+	CHECK(g.pBarracks[2].hp == 0);
+}
+
+static void openBarracks(int b) {
+	g.pBarracks[b].hp = 0;
+	g.pBarracks[b].timer = 0;
+	for(int i = 0; i < 16 * 13 + 2; ++i) step(NONE, 1);
+}
+
+static void testHostagesBoardLandedChopperUpToSixteen(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	flyAt((int16_t)(g.pBarracks[3].x + 200), 100);  // away from them
+	openBarracks(3);
+	openBarracks(2);
+	// land between the two barracks' people? no: next to barracks 3 only
+	g.chop.x = (int16_t)(g.pBarracks[3].x + 60);
+	g.chop.y = GROUND_Y - 1;
+	g.chop.vy = 32;
+	step(NONE, 1);
+	CHECK(g.chop.landed);
+	step(NONE, 300);
+	CHECK(g.aboard == 16 - (g.killed));
+	// all boarded from barracks 3 (minus any squashed on landing)
+	CHECK(g.aboard + g.killed == 16);
+	CHECK(g.aboard <= CABIN_MAX);
+}
+
+static void testCabinFullStopsBoarding(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	flyAt(1400, 100);
+	openBarracks(1);
+	openBarracks(2);
+	// gather everyone near x = 1400 (between the barracks)
+	for(int i = 16; i < 48; ++i) { if(g.pHostages[i].state != HS_DEAD) logicHostageOut(&g, (uint8_t)i, HS_FREE, (int16_t)(1340 + i)); }
+	g.chop.x = 1300; g.chop.y = GROUND_Y - 1; g.chop.vy = 32;
+	step(NONE, 1);
+	CHECK(g.chop.landed);
+	step(NONE, 400);
+	CHECK(g.aboard == CABIN_MAX);
+	CHECK(freeCount() == 32 - CABIN_MAX);
+}
+
+static void testLandingOnPeopleKillsThem(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	logicHostageOut(&g, 0, HS_FREE, 800);
+	flyAt(800, GROUND_Y - 1);
+	g.chop.vy = 32;
+	step(NONE, 1);
+	CHECK(g.chop.landed);
+	CHECK(g.pHostages[0].state == HS_DEAD);
+	CHECK(g.killed == 1);
+}
+
+static void testUnloadAtBaseSavesAndCountsTrip(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	for(int i = 0; i < 5; ++i) g.pHostages[i].state = HS_ABOARD;
+	g.aboard = 5;
+	step(NONE, 5 * UNLOAD_FRAMES + 1);
+	CHECK(g.aboard == 0);
+	CHECK(g.trip == 1);
+	step(NONE, 200);
+	CHECK(g.saved == 5);
+	CHECK(g.score >= 500);
+}
+
+static void testNoUnloadAwayFromBase(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	g.pHostages[0].state = HS_ABOARD;
+	g.aboard = 1;
+	flyAt(1500, GROUND_Y - 1);
+	g.chop.vy = 32;
+	step(NONE, 100);
+	CHECK(g.chop.landed && g.aboard == 1);
+}
+
+static void testShotDownLosesPassengers(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	for(int i = 0; i < 7; ++i) g.pHostages[i].state = HS_ABOARD;
+	g.aboard = 7;
+	flyAt(1500, 150);
+	// an enemy shell right on the chopper
+	g.pEShots[0] = (tShot){.x = 1500, .y = 144, .vx = 0, .vy = 0, .active = 1, .kind = ESHOT_SHELL, .life = 50};
+	step(NONE, 1);
+	CHECK(!g.chop.alive);
+	CHECK(g.killed == 7 && g.aboard == 0);
+	CHECK(g.lives == LIVES_START - 1);
+	CHECK(g.state == GS_LOST);
+	step(NONE, LOST_FRAMES + 1);
+	CHECK(g.state == GS_PLAY);
+	CHECK(g.chop.alive && g.chop.landed && g.chop.x == START_X);
+}
+
+static void testGameOverAfterLastChopper(void) {
+	newGame();
+	for(int life = 0; life < LIVES_START; ++life) {
+		g.spawnTimer = 60000;
+		flyAt(1500, 150);
+		g.pEShots[0] = (tShot){.x = 1500, .y = 144, .active = 1, .kind = ESHOT_SHELL, .life = 50};
+		step(NONE, 1);
+		step(NONE, LOST_FRAMES + 1);
+	}
+	CHECK(g.lives == 0);
+	CHECK(g.state == GS_OVER);
+	step(NONE, OVER_FRAMES + 1);
+	CHECK(g.state == GS_TITLE);
+}
+
+static void testMissionClearWhenAllAccountedFor(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	for(int i = 0; i < HOSTAGE_COUNT; ++i) g.pHostages[i].state = HS_SAVED;
+	g.saved = 60;
+	g.killed = 4;
+	step(NONE, 1);
+	CHECK(g.state == GS_CLEAR);
+	step(NONE, CLEAR_FRAMES + 1);
+	CHECK(g.state == GS_INTRO && g.mission == 1);
+	CHECK(g.saved == 0 && g.trip == 0);
+	CHECK(g.lives == LIVES_START);   // lives carry over
+}
+
+static void testVictoryAfterLastMission(void) {
+	newGame();
+	g.mission = MISSION_COUNT - 1;
+	g.saved = HOSTAGE_COUNT;
+	step(NONE, 1);
+	CHECK(g.state == GS_CLEAR);
+	step(NONE, CLEAR_FRAMES + 1);
+	CHECK(g.state == GS_VICTORY);
+}
+
+static void testDifficultySchedule(void) {
+	newGame();
+	CHECK(logicTankLimit(&g) == 1);
+	CHECK(!logicJetsOn(&g) && !logicMinesOn(&g));
+	g.trip = 1;
+	CHECK(logicTankLimit(&g) == 2 && logicJetsOn(&g) && !logicMinesOn(&g));
+	g.trip = 2;
+	CHECK(logicMinesOn(&g));
+	g.trip = 9;
+	CHECK(logicTankLimit(&g) == TANK_MAX);
+}
+
+static void testTankShootsLowChopper(void) {
+	newGame();
+	flyAt(1500, GROUND_Y - 10);
+	g.pTanks[0] = (tTank){.x = 1400, .active = 1, .hp = 2, .dir = 1, .cool = 0};
+	step(NONE, 1);
+	CHECK(g.events & EV_TANKFIRE);
+	CHECK(g.pEShots[0].active && g.pEShots[0].vx > 0);
+}
+
+static void testTankIgnoresHighChopper(void) {
+	newGame();
+	flyAt(1500, 80);
+	g.pTanks[0] = (tTank){.x = 1400, .active = 1, .hp = 2, .dir = 1, .cool = 0};
+	step(NONE, 5);
+	CHECK(!g.pEShots[0].active);
+}
+
+static void testTanksStayInEnemyGround(void) {
+	newGame();
+	flyAt(START_X - 40, 200);
+	g.pTanks[0] = (tTank){.x = BORDER_X - 30, .active = 1, .hp = 2, .dir = 1, .cool = 255};
+	step(NONE, 100);
+	CHECK(g.pTanks[0].x <= BORDER_X - 24);
+}
+
+static void testBombKillsTank(void) {
+	newGame();
+	flyAt(1500, 150);
+	g.pTanks[0] = (tTank){.x = 1500, .active = 1, .hp = 2, .dir = 1, .cool = 255};
+	g.chop.face = g.chop.faceTarget = FACE_FRONT;
+	step((tInput){.fire = 1}, 1);
+	step(NONE, 40);
+	CHECK(!g.pTanks[0].active);
+	CHECK(g.score >= 50);
+}
+
+static void testCannonKillsJet(void) {
+	newGame();
+	flyAt(1500, 120);
+	g.trip = 0; g.mission = 0;   // jets off: place one by hand
+	g.pJets[0] = (tJet){.x = 1440, .y = 114, .dir = 1, .active = 1, .hp = 1, .cool = 200};
+	step((tInput){.fire = 1}, 3);
+	CHECK(!g.pJets[0].active);
+	CHECK(g.chop.alive);
+}
+
+static void testMineContactDestroysChopper(void) {
+	newGame();
+	flyAt(1500, 120);
+	g.pMines[0] = (tMine){.x = 1500, .y = 112, .active = 1};
+	step(NONE, 1);
+	CHECK(!g.chop.alive);
+}
+
+static void testCameraFollowsWithLead(void) {
+	newGame();
+	flyAt(1500, 120);
+	step(NONE, 100);
+	CHECK(g.cam == 1500 - SCREEN_W / 2 - 56);   // facing left: more room ahead
+}
+
+static void testScrollMaths(void) {
+	CHECK(logicScrollDelay(0) == 0 && logicScrollByteOffset(0) == -2);
+	CHECK(logicScrollDelay(1) == 15 && logicScrollByteOffset(1) == 0);
+	CHECK(logicScrollDelay(16) == 0 && logicScrollByteOffset(16) == 0);
+	CHECK(logicScrollDelay(17) == 15 && logicScrollByteOffset(17) == 2);
+	CHECK(logicBandOffset(1000, 2, 320) == 250 - 0);
+	CHECK(logicBandOffset(2000, 2, 320) == 500 - 320);
+	CHECK(logicBandOffset(2000, 1, 336) == 1000 - 672);
+}
+
+static void testSkyGradient(void) {
+	CHECK(logicSkyColor(0, 0) == 0x214);
+	CHECK(logicSkyColor(0, SKY_LINES - 1) == 0xE75);
+}
+
+static void testDrawListShowsBaseAtStart(void) {
+	newGame();
+	tDraw d[DRAW_MAX];
+	uint8_t n = logicDraw(&g, d);
+	int isHangar = 0;
+	for(int i = 0; i < n; ++i) isHangar |= d[i].bob == BOB_HANGAR;
+	CHECK(isHangar);
+	CHECK(n < DRAW_MAX);
+}
+
+static void testRank(void) {
+	CHECK(logicRank(0)[0] == 'R');
+	CHECK(logicRank(192)[0] == 'L');
+}
+
+static void testDeterministic(void) {
+	// The same inputs give the same game
+	tInput in = {.dx = -1, .dy = -1, .fire = 1};
+	newGame();
+	step(in, 500);
+	uint32_t s1 = g.score; int16_t x1 = g.chop.x; uint16_t r1 = g.lfsr;
+	newGame();
+	step(in, 500);
+	CHECK(g.score == s1 && g.chop.x == x1 && g.lfsr == r1);
+}
+
+static void testDifficultyDefaultsToNormalAndPersists(void) {
+	logicInit(&g);
+	CHECK(g.difficulty == DIFFICULTY_NORMAL);
+	logicSetDifficulty(&g, 5);
+	logicStartGame(&g);
+	CHECK(g.difficulty == 5);              // a new game keeps it
+	logicSetDifficulty(&g, DIFFICULTY_MAX + 1);
+	CHECK(g.difficulty == 5);              // out of range: ignored
+}
+
+static void testInvincibleSurvivesHits(void) {
+	newGame();
+	logicSetDifficulty(&g, DIFFICULTY_INVINCIBLE);
+	for(int i = 0; i < 5; ++i) g.pHostages[i].state = HS_ABOARD;
+	g.aboard = 5;
+	flyAt(1500, 150);
+	g.pEShots[0] = (tShot){.x = 1500, .y = 144, .active = 1, .kind = ESHOT_SHELL, .life = 50};
+	step(NONE, 1);
+	CHECK(g.chop.alive && g.state == GS_PLAY);
+	CHECK(g.lives == LIVES_START && g.aboard == 5 && g.killed == 0);
+	CHECK(!g.pEShots[0].active);           // the shell still bursts on it
+	CHECK(g.events & EV_SHRUG);
+	g.pMines[0] = (tMine){.x = 1500, .y = 142, .active = 1};
+	step(NONE, 1);
+	CHECK(g.chop.alive && !g.pMines[0].active);
+	CHECK(!(g.events & EV_CRASH));
+}
+
+static void testInvincibleKeepsHiScore(void) {
+	newGame();
+	logicSetDifficulty(&g, DIFFICULTY_INVINCIBLE);
+	uint32_t ulHi = g.hiScore;
+	flyAt(1500, 150);
+	g.pTanks[0] = (tTank){.x = 1500, .active = 1, .hp = 2, .dir = 1, .cool = 255};
+	g.chop.face = g.chop.faceTarget = FACE_FRONT;
+	g.score = ulHi;                        // the next points would beat it
+	step((tInput){.fire = 1}, 1);
+	step(NONE, 40);
+	CHECK(!g.pTanks[0].active && g.score > ulHi);
+	CHECK(g.hiScore == ulHi);
+}
+
+static void testDifficultyScalesEnemies(void) {
+	newGame();
+	g.trip = 1;
+	logicSetDifficulty(&g, 1);
+	uint8_t ubEasyTanks = logicTankLimit(&g);
+	CHECK(ubEasyTanks >= 1 && !logicJetsOn(&g));   // easy: no jets after one trip
+	logicSetDifficulty(&g, 3);
+	CHECK(logicTankLimit(&g) == 2 && logicJetsOn(&g) && !logicMinesOn(&g));   // normal: as before
+	logicSetDifficulty(&g, 5);
+	CHECK(logicTankLimit(&g) > 2 && logicMinesOn(&g));
+	g.trip = 0;
+	CHECK(logicJetsOn(&g));                // hardest: jets from the start
+	logicSetDifficulty(&g, 0);
+	CHECK(logicTankLimit(&g) == 1 && !logicJetsOn(&g));   // invincible plays like normal
+}
+
+static void testHarderTanksFireSooner(void) {
+	// the same tank and target: frames until its second shell, per difficulty
+	int pFrames[DIFFICULTY_MAX + 1];
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newGame();
+		logicSetDifficulty(&g, d);
+		flyAt(1500, GROUND_Y - 10);
+		g.pTanks[0] = (tTank){.x = 1400, .active = 1, .hp = 2, .dir = 1, .cool = 0};
+		step(NONE, 1);
+		int n = 0;
+		while(g.pTanks[0].cool && n < 1000) { step(NONE, 1); ++n; }
+		pFrames[d] = n;
+	}
+	CHECK(pFrames[1] > pFrames[3] && pFrames[3] > pFrames[5]);
+}
+
+int main(void) {
+	testTitleNeedsFire();
+	testStartsLandedAtBase();
+	testTakeOffAndClimb();
+	testAcceleratesToMaxSpeed();
+	testTurnThroughFront();
+	testFrontNeedsLongPush();
+	testFire2Cycles();
+	testDownFireFacesFrontThenBombs();
+	testCannonFiresForwardAndRepeats();
+	testCannonOpensBarracks();
+	testBombOpensBarracks();
+	testHostagesBoardLandedChopperUpToSixteen();
+	testCabinFullStopsBoarding();
+	testLandingOnPeopleKillsThem();
+	testUnloadAtBaseSavesAndCountsTrip();
+	testNoUnloadAwayFromBase();
+	testShotDownLosesPassengers();
+	testGameOverAfterLastChopper();
+	testMissionClearWhenAllAccountedFor();
+	testVictoryAfterLastMission();
+	testDifficultySchedule();
+	testTankShootsLowChopper();
+	testTankIgnoresHighChopper();
+	testTanksStayInEnemyGround();
+	testBombKillsTank();
+	testCannonKillsJet();
+	testMineContactDestroysChopper();
+	testCameraFollowsWithLead();
+	testScrollMaths();
+	testSkyGradient();
+	testDrawListShowsBaseAtStart();
+	testRank();
+	testDeterministic();
+	testDifficultyDefaultsToNormalAndPersists();
+	testInvincibleSurvivesHits();
+	testInvincibleKeepsHiScore();
+	testDifficultyScalesEnemies();
+	testHarderTanksFireSooner();
+	if(s_failures) {
+		printf("%d check(s) failed\n", s_failures);
+		return 1;
+	}
+	printf("all logic tests passed\n");
+	return 0;
+}

@@ -1,0 +1,21 @@
+# ROTOR RESCUE palette (dual playfield).
+# Playfield 1 (0-7): every BOB - buildings, people, tanks, jets, shots, the HUD.
+# Playfield 2 (8-15): the parallax bands; the copper loads each band's and each
+# mission's colours (logic.c), these are mission 1's mountains.
+# 17-31: the chopper (attached sprites, from art/chopper.txt).
+0  0x000  sky (the copper colours it)
+1  0x111  outline
+2  0x564  olive drab
+3  0x998  stone
+4  0xFEC  cream white
+5  0xD42  red
+6  0xFC3  yellow
+7  0x36B  blue
+8  0x000  (PF2 transparent)
+9  0x413  m1
+10 0x524  m2
+11 0x635  m3
+12 0x746  m4
+13 0x857  m5
+14 0xA68  m6
+15 0xC9A  m7

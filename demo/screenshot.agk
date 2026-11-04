@@ -1,0 +1,15 @@
+# The release picture (agk.toml [release] screenshot): people running out of
+# an opened barracks to the landed chopper (the route of tests/rescue.agk).
+wait-serial "AGK t0"
+press fire 2
+wait 125
+press up 30
+press left 170
+wait 60
+press down 70
+press fire 1
+wait 25
+press fire 1
+wait 30
+wait 90
+screenshot boarding

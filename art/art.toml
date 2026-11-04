@@ -1,0 +1,84 @@
+# ROTOR RESCUE art, converted by agk (agk art / agk build). Reference: agk help-art
+# Everything is drawn by art/tools/draw.py (python3 art/tools/draw.py).
+[art]
+depth = 3                 # playfield 1: BOBs, 7 colours
+
+[chopper]                 # 32x20, 15 colours: two attached pairs (channels 0-3)
+source = "chopper.txt"
+kind = "sprite"
+attached = true
+channel = 0
+mirror = true
+
+[hangar]
+source = "hangar.txt"
+kind = "bob"
+
+[fence]
+source = "fence.txt"
+kind = "bob"
+
+[barracks]
+source = "barracks.txt"
+kind = "bob"
+
+[tank]
+source = "tank.txt"
+kind = "bob"
+
+[hostage]
+source = "hostage.txt"
+kind = "bob"
+
+[jet]
+source = "jet.txt"
+kind = "bob"
+
+[mine]
+source = "mine.txt"
+kind = "bob"
+
+[shot]
+source = "shot.txt"
+kind = "bob"
+
+[bomb]
+source = "bomb.txt"
+kind = "bob"
+
+[shell]
+source = "shell.txt"
+kind = "bob"
+
+[boom]
+source = "boom.txt"
+kind = "bob"
+
+[flag]
+source = "flag.txt"
+kind = "bob"
+
+[logo]
+source = "logo.txt"
+kind = "bob"
+
+[mountains]               # PF2 band, camera / 4
+source = "mountains.txt"
+kind = "bitmap"
+depth = 3
+palette = "mtn_pal.txt"
+wrap_x = 320
+
+[hills]                   # PF2 band, camera / 2
+source = "hills.txt"
+kind = "bitmap"
+depth = 3
+palette = "land_pal.txt"
+wrap_x = 320
+
+[ground]                  # PF2 band, camera / 1
+source = "ground.txt"
+kind = "bitmap"
+depth = 3
+palette = "land_pal.txt"
+wrap_x = 320

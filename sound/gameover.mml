@@ -1,0 +1,10 @@
+; ROTOR RESCUE - game over. 4 slow bars, D minor.
+#title Game Over
+#tempo 84
+#grid 4
+#inst lead pulse25 vol=40 decay=1
+#inst bass triangle vol=50
+A @lead
+A o5 d4 c4 o4 b-4 a4 | o4 g4 f4 e2 | o4 f4 e4 d4 c+4 | o4 d1
+B @bass l2
+B o2 d o2 g | o2 c o2 a | o2 b- o2 a | o2 d r

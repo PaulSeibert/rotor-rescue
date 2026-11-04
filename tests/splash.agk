@@ -1,0 +1,25 @@
+# Boot: the Desert Palms Software logo (loaded from the floppy, its own
+# copper lists: 16 colours, 4 of them reloaded line by line) fades in and
+# holds; fire skips to the title, which credits the author and the publisher.
+wait 60
+screenshot logo
+expect-serial "splash_colors=837"
+# the top sunset stripe, and colours only the per-line copper changes make:
+# a mid stripe, a deeper one, and the lettering below line 255 of the beam
+expect-color logo 120 22 0xFA2
+expect-color logo 100 100 0xF52
+expect-color logo 100 124 0xC32
+expect-color logo 200 208 0xFD9
+# the palm, and nothing below the picture (bitplanes off after its last line)
+expect-color logo 160 46 0x001
+expect-color logo 100 252 0x001
+expect-color logo 300 252 0x001
+press fire 2
+wait-serial "splash done"
+wait-serial "AGK t0"
+wait 60
+screenshot title
+# "(c) 2026 DESERT PALMS SOFTWARE" under the author: the copyright sign's C
+expect-color title 51 112 0xFEC
+expect-color title 50 110 0xFEC
+expect-no-serial "AGK ERR"

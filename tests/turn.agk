@@ -1,0 +1,17 @@
+# Turning: the second button (or X) cycles left -> front -> right; down+fire
+# faces front to bomb.
+wait-serial "AGK t0"
+press fire 2
+wait 125
+press up 40
+press fire2 1
+wait 20
+expect-serial "face=1"
+screenshot front
+press fire2 1
+wait 20
+expect-serial "face=2"
+screenshot right
+press down+fire 1
+wait 20
+expect-serial "face=1"

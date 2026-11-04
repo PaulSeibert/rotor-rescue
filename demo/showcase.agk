@@ -1,0 +1,23 @@
+# README demo: the Desert Palms Software logo, the title, then a whole
+# rescue trip (same route as tests/rescue.agk), with a little extra time on
+# the title and at the end. The logo takes the first 4.6 s of the video.
+# Record with:  agk record demo/showcase.agk --readme --gif demo/rotor-rescue.gif --gif-start 8.6 --gif-seconds 12
+wait 230
+wait-serial "AGK t0"
+wait 100
+press fire 2
+wait 125
+press up 30
+press left 170
+wait 60
+press down 70
+press fire 1
+wait 25
+press fire 1
+wait 30
+wait 290
+press up 30
+press right 180
+wait 50
+press down 70
+wait 320

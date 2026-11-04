@@ -1,0 +1,15 @@
+; ROTOR RESCUE - mission complete fanfare. 4 bars, D major.
+#title Mission Complete
+#tempo 140
+#grid 4
+#inst lead pulse25 vol=48 decay=1
+#inst bass triangle vol=52
+#inst kick kick vol=58
+#inst snare snare vol=46
+A @lead
+A o4 a8 a8 a8 o5 d8 f+4 a4 | o5 g8 g8 g8 e8 c+4 e4 | o5 f+8 e8 d8 e8 f+4 a4 | o5 d2. r4
+B @bass l4
+B o2 d o2 a o3 d o2 a | o2 a o3 e o2 a o3 e | o2 g o3 d o2 a o3 e | o2 d o2 a o2 d r
+D l8 o4
+D @kick c c @snare c @kick c @kick c c @snare c c | @kick c c @snare c @kick c @kick c c @snare c c
+D @kick c c @snare c @kick c @kick c c @snare c c | @snare c c c c @kick c r r r

@@ -1,0 +1,13 @@
+# Fly left flat out, high up: the camera settles at 3 px a frame and the
+# three PF2 bands scroll at 1/4, 1/2 and 1 of it (the picture moves right).
+wait-serial "AGK t0"
+press fire 2
+wait 125
+press up 80
+hold left
+wait 60
+expect-scroll 0 124 319 186 136 3/4
+expect-scroll 0 199 319 206 136 3/2
+expect-scroll 0 246 319 255 136 3
+screenshot flying
+release

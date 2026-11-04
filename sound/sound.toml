@@ -1,0 +1,105 @@
+# ROTOR RESCUE sound (by Paul Ross Seibert). Reference: agk help-sound
+# Paula channel 2 is the rotor: main.c drives it directly (a looped chop whose
+# pitch follows the airspeed). Music plays on 0, 1, 3; effects borrow 1 and 3
+# (during a sortie there's no music, so they have both).
+
+[sound]
+sfx_channels = [1, 3]
+
+[sfx.cannon]              # the chopper's gun: a short punchy crack
+wave = "noise"
+freq = [5000, 1200]
+length = 0.09
+decay = 25
+volume = 46
+priority = 1
+
+[sfx.bomb]                # a bomb falling away: a whistle down
+wave = "triangle"
+freq = [1800, 500]
+length = 0.35
+decay = 2
+volume = 34
+priority = 1
+
+[sfx.boom]                # an explosion
+wave = "noise"
+freq = [1500, 200]
+length = 0.4
+decay = 6
+volume = 62
+priority = 3
+
+[sfx.tankfire]            # a tank's gun: a low thud
+wave = "noise"
+freq = [700, 150]
+length = 0.16
+decay = 14
+volume = 54
+priority = 2
+
+[sfx.open]                # barracks burst open: a long rumble
+wave = "noise"
+freq = [900, 120]
+length = 0.55
+decay = 3
+volume = 64
+priority = 4
+
+[sfx.board]               # someone climbs aboard
+wave = "square"
+steps = [[880, 0.04], [1320, 0.06]]
+decay = 8
+volume = 36
+priority = 2
+
+[sfx.saved]               # someone reaches the hangar
+wave = "pulse25"
+steps = [[1047, 0.05], [1319, 0.05], [1568, 0.12]]
+decay = 6
+volume = 40
+priority = 2
+
+[sfx.crash]               # the chopper goes down
+wave = "noise"
+freq = [3000, 100]
+length = 0.8
+decay = 2
+volume = 64
+priority = 5
+
+[sfx.jet]                 # a jet screams past
+wave = "noise"
+freq = [8000, 2500]
+length = 0.5
+attack = 0.15
+decay = 2
+volume = 44
+priority = 2
+
+[sfx.land]                # skids on the ground
+wave = "noise"
+freq = 400
+length = 0.08
+decay = 30
+volume = 40
+priority = 1
+
+[sfx.start]               # fire on the title
+wave = "square"
+steps = [[587, 0.07], [880, 0.07], [1175, 0.2]]
+decay = 5
+volume = 44
+priority = 3
+
+[music.theme]
+source = "theme.mml"
+volume = 50
+
+[music.fanfare]
+source = "fanfare.mml"
+volume = 52
+
+[music.gameover]
+source = "gameover.mml"
+volume = 50

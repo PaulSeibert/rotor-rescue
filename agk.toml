@@ -1,0 +1,19 @@
+name = "first"
+profile = "a500"                                     # default for agk run
+test_profiles = ["a500", "a500-ks31", "a500-aros"]   # agk test runs all of these
+sync = "ticks"                                       # waits count game frames (agkPerfBegin marks them)
+boot = "AGK ready"                                   # serial text that means "first frame is on screen"
+unit_sources = ["src/logic.c"]                       # host-compiled for agk unit (no Amiga headers!)
+
+[cmake]                                              # build options, see CMakeLists.txt
+# ACE_BOB_WRAP_Y = false
+
+[release]                                            # agk release: the zip for Aminet / itch.io (agk help-release)
+title = "Rotor Rescue"
+version = "1.0"
+author = "Paul Ross Seibert"
+short = "Helicopter hostage rescue for the A500" # one line, up to 40 characters
+type = "game/shoot"                                   # Aminet type: game/shoot, game/jump, game/race, game/misc
+description = "Fly a rescue chopper behind enemy lines, blow open the barracks and carry 64 hostages home past tanks, jets and air mines. Three missions, dual-playfield parallax, a 15-colour sprite chopper and a sampled soundtrack. An original game by Paul Ross Seibert. (c) 2026 Desert Palms Software."
+screenshot = "demo/screenshot.agk"                    # the release picture: a rescue in progress
+controls = "Joystick in port 2: fly with the stick, Fire shoots (or bombs when facing the screen), Down+Fire faces the screen, hold the stick against your facing to turn. A second pad button turns too. Keys: arrows, Space, X turn, P pause, M music, Esc quit. Ctrl+L then 1-5 sets the difficulty (3 normal), 0 makes the chopper invincible for testing."

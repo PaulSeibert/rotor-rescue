@@ -1,0 +1,9 @@
+# The mountains band (PF2, colours 9-15). Mission 1; logic.c has the others.
+0  0x000  transparent
+1  0x413  m1
+2  0x524  m2
+3  0x635  m3
+4  0x746  m4
+5  0x857  m5
+6  0xA68  m6
+7  0xC9A  m7

@@ -1,0 +1,10 @@
+# The title screen: logo, the author's credit, the parallax land, the HUD.
+wait-serial "AGK t0"
+wait 60
+screenshot title
+expect-serial "AGK ready"
+expect-serial "state=0"
+expect-no-serial "ERR|STACK SMASHED"
+# "BY PAUL ROSS SEIBERT" (cream letters) and the logo (yellow band)
+expect-color title 81 98 0xFEC
+expect-color title 58 62 0xFC3

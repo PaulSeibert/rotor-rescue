@@ -1,0 +1,11 @@
+# Sit on the ground too long and a tank rolls up and shells the chopper:
+# everyone aboard is lost, one chopper fewer, and a new one at the base.
+start-at boarding
+wait-serial "chopper lost"
+wait 12
+screenshot wreck
+expect-serial "lives=2"
+expect-serial "killed=16"
+wait 160
+expect-serial "state=2"
+expect-serial "x=2880 y=236 face=0 landed=1"
