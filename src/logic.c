@@ -927,6 +927,22 @@ static void cameraPlace(tGame *g) {
 	int16_t want = (int16_t)(cameraWanted(g) - g->cam);
 	int16_t prev = g->camStep;
 	int16_t s = clampw(want, (int16_t)(prev - 1), (int16_t)(prev + 1));
+	// A long way to go (the new chopper at the base after a crash): a pan that
+	// speeds up 1 px a frame but never faster than it can stop from in the
+	// distance left (v + (v-1) + ... + 1 <= d), so it arrives without
+	// overshooting. Flying never gets this far from the camera.
+	int16_t aw = want < 0 ? (int16_t)-want : want;
+	if(aw > CAM_PAN_FROM) g->camPan = 1;
+	if(g->camPan) {
+		int16_t v = prev < 0 ? (int16_t)-prev : prev;
+		if((prev < 0) != (want < 0)) v = 0;            // (a pan never reverses)
+		++v;
+		while(v > 1 && (int16_t)((uint16_t)((uint16_t)v * (uint16_t)(v + 1)) >> 1) > aw) --v;
+		if(v > CAM_PAN_VMAX) v = CAM_PAN_VMAX;
+		if(v > aw) v = aw;
+		s = want < 0 ? (int16_t)-v : v;
+		if(aw <= 1) g->camPan = 0;                     // arrived: follow again
+	}
 	int16_t as = s < 0 ? (int16_t)-s : s;
 	int16_t room = s > 0 ? (int16_t)(WORLD_W - SCREEN_W - g->cam) : (int16_t)g->cam;
 	if(as > 1 && room < (int16_t)((uint16_t)((uint16_t)as * (uint16_t)(as + 1)) >> 1)) {
@@ -941,6 +957,7 @@ void logicCameraSnap(tGame *g) {
 	g->camLeadV = 0;
 	g->cam = cameraWanted(g);
 	g->camStep = 0;
+	g->camPan = 0;
 }
 
 void logicCameraUpdate(tGame *g) {

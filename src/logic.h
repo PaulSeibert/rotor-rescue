@@ -163,6 +163,7 @@ typedef struct {
 	int16_t camLead;     // look-ahead, 1/16 px (the camera is the chopper + this)
 	int16_t camLeadV;    // its speed, 1/16 px per frame
 	int16_t camStep;     // the camera's last step (px): steps change by 1 at most
+	uint8_t camPan;      // a long pan (a respawn): brakes to arrive, no overshoot
 	int16_t unloadTimer;
 	uint16_t spawnTimer;
 	uint8_t titleArmed;  // fire must be released before the title accepts it
@@ -267,6 +268,8 @@ uint8_t logicRotorPhase(const tGame *g);
 #define CAM_LEAD 56          // px ahead of the facing
 #define CAM_LEAD_VMAX 32     // look-ahead speed limit, 1/16 px a frame (2 px)
 #define CAM_LEAD_ACCEL 2     // 1/16 px a frame per frame
+#define CAM_PAN_FROM 32      // further than this from where it should be: a pan
+#define CAM_PAN_VMAX 12      // px a frame
 void logicCameraUpdate(tGame *g);
 void logicCameraSnap(tGame *g);   // to the look-ahead's target at once (mission start)
 

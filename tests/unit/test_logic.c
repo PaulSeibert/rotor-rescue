@@ -407,6 +407,35 @@ static void testCameraIsSmooth(void) {
 		n, worstChange, worstScr);
 }
 
+// After a crash far from the base, the camera pans to the new chopper: speeds
+// up and slows by 1 px a frame and never reverses (it used to overshoot the
+// base and swing back and forth).
+static void testRespawnPan(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	step((tInput){.dy = -1}, 40);
+	step((tInput){.dx = -1}, 300);
+	g.pMines[0] = (tMine){.x = g.chop.x, .y = (int16_t)(g.chop.y - 8), .active = 1};
+	int16_t wCam = g.cam, wStep = 0;
+	int reversals = 0, worstChange = 0, frames = 0;
+	for(int f = 0; f < 400; ++f) {
+		logicUpdate(&g, &NONE);
+		int16_t st = (int16_t)(g.cam - wCam);
+		if(g.state == GS_PLAY) {
+			++frames;
+			if((st > 0 && wStep < 0) || (st < 0 && wStep > 0)) ++reversals;
+			int ch = st > wStep ? st - wStep : wStep - st;
+			if(ch > worstChange) worstChange = ch;
+		}
+		wCam = g.cam; wStep = st;
+	}
+	CHECK(g.state == GS_PLAY && g.chop.x == START_X);
+	CHECK(reversals == 0);
+	CHECK(worstChange <= 1);
+	CHECK(g.chop.x - g.cam == SCREEN_W / 2 - (g.camLead >> 4) || g.cam == WORLD_W - SCREEN_W);
+	printf("respawn pan: %d frames, no reversals, step changes <= %d px\n", frames, worstChange);
+}
+
 static void testScrollMaths(void) {
 	CHECK(logicScrollDelay(0) == 0 && logicScrollByteOffset(0) == -2);
 	CHECK(logicScrollDelay(1) == 15 && logicScrollByteOffset(1) == 0);
@@ -552,6 +581,7 @@ int main(void) {
 	testMineContactDestroysChopper();
 	testCameraFollowsWithLead();
 	testCameraIsSmooth();
+	testRespawnPan();
 	testScrollMaths();
 	testSkyGradient();
 	testDrawListShowsBaseAtStart();
