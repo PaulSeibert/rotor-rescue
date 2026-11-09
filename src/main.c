@@ -68,7 +68,6 @@
 #define HILLS_Y (GAP_Y + 1)                  // 197
 #define GROUND_BAND_Y (HILLS_Y + ART_HILLS_H) // 224 .. 255
 #define SKY_END GAP_Y
-#define HUD_COLOR 0x112
 
 // PF1 frame buffers: 48 px of margin left, 64 right, so objects never need
 // clipping. Screen (x, y) is buffer (x + FB_X0, y).
@@ -165,6 +164,49 @@ static tCopSlots cwBand(tAgkCopWriter *pW, UWORD uwGameY, const tBitMap *pBm) {
 	return sSlots;
 }
 
+// The HUD panel (lines 0..PLAY_TOP-1), all from the copper: a brushed-steel
+// gradient behind it with a lit top edge and a chrome rim along the bottom,
+// letters (colour 4) shading from white to gold down each text row, and the
+// radar sunk into a dark inset (COLOR00 switched mid-line either side of it).
+#define HUD_INK 4
+#define HUD_TEXT1_Y 3                // the text rows (hudInit)
+#define HUD_TEXT2_Y RADAR_Y
+#define HUD_INSET_X0 0x5C            // copper positions (colour clocks) either side of the radar
+#define HUD_INSET_X1 0xC2
+#define HUD_INSET_COLOR 0x011
+static const UWORD s_pHudBg[PLAY_TOP] = {
+	0x88A, 0x558, 0x346, 0x235, 0x235, 0x234, 0x224, 0x224, 0x224, 0x124, 0x123, 0x123,
+	0x123, 0x113, 0x113, 0x113, 0x113, 0x112, 0x112, 0x112, 0x112, 0x112, 0x99B, 0x001,
+};
+static const UWORD s_pHudInkRow[8] = {0xFFF, 0xFFE, 0xFFD, 0xFEB, 0xFD9, 0xFC7, 0xEB6, 0xDA5};
+static UWORD s_pHudInk[PLAY_TOP];    // colour 4 per line (s_pHudInkRow on the text rows)
+
+static void hudPanelInit(void) {
+	UWORD uwInk = s_pHudInkRow[0];
+	for(UBYTE y = 0; y < PLAY_TOP; ++y) {
+		if(y >= HUD_TEXT1_Y && y < HUD_TEXT1_Y + 8) uwInk = s_pHudInkRow[y - HUD_TEXT1_Y];
+		else if(y >= HUD_TEXT2_Y && y < HUD_TEXT2_Y + 8) uwInk = s_pHudInkRow[y - HUD_TEXT2_Y];
+		s_pHudInk[y] = uwInk;
+	}
+}
+
+static void cwHudPanel(tAgkCopWriter *pW) {
+	for(UBYTE y = 1; y < PLAY_TOP; ++y) {
+		UBYTE isInset = y >= RADAR_Y - 1 && y < RADAR_Y + RADAR_H;
+		if(s_pHudBg[y] != s_pHudBg[y - 1] || s_pHudInk[y] != s_pHudInk[y - 1] || isInset) {
+			agkCopWait(pW, y, 0);
+			if(s_pHudBg[y] != s_pHudBg[y - 1]) agkCopMove(pW, &g_pCustom->color[0], s_pHudBg[y]);
+			if(s_pHudInk[y] != s_pHudInk[y - 1]) agkCopMove(pW, &g_pCustom->color[HUD_INK], s_pHudInk[y]);
+		}
+		if(isInset) {
+			agkCopWait(pW, y, HUD_INSET_X0);
+			agkCopMove(pW, &g_pCustom->color[0], HUD_INSET_COLOR);
+			agkCopWait(pW, y, HUD_INSET_X1);
+			agkCopMove(pW, &g_pCustom->color[0], s_pHudBg[y]);
+		}
+	}
+}
+
 static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
 	tAgkCopWriter sW;
 	agkCopInit(&sW, pList, COP_TOP_POS, s_pView->ubPosY);
@@ -183,11 +225,14 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
 	agkCopMove(&sW, &g_pCustom->bpl1mod, HUD_ROW_BYTES - FETCH_BYTES);
 	agkCopMove(&sW, &g_pCustom->bpl2mod, HUD_ROW_BYTES - FETCH_BYTES);
 	for(UBYTE p = 0; p < 3; ++p) agkCopPtrs(&sW, p, (ULONG)s_pHud[ubBfr]->Planes[p]);
-	agkCopMove(&sW, &g_pCustom->color[0], HUD_COLOR);
+	agkCopMove(&sW, &g_pCustom->color[0], s_pHudBg[0]);
+	agkCopMove(&sW, &g_pCustom->color[HUD_INK], s_pHudInk[0]);
 	cwPf2Palette(&sW, g_pMissionCloudPal[ubMission]);   // PF2 shows nothing until the clouds
+	cwHudPanel(&sW);
 
-	// After the HUD: the frame buffer, still 3 planes
+	// After the HUD: the frame buffer, still 3 planes; the ink back to PF1's colour 4
 	agkCopWait(&sW, PLAY_TOP - 1, SWITCH_WAIT_X);
+	agkCopMove(&sW, &g_pCustom->color[HUD_INK], s_pVPort->pPalette[HUD_INK]);
 	agkCopMove(&sW, &g_pCustom->bpl1mod, FB_ROW_BYTES - FETCH_BYTES);
 	agkCopMove(&sW, &g_pCustom->bpl2mod, FB_ROW_BYTES - FETCH_BYTES);
 	for(UBYTE p = 0; p < 3; ++p) agkCopPtrs(&sW, p, (ULONG)pFb->Planes[p] + ulFbRow);
@@ -1060,6 +1105,7 @@ void genericCreate(void) {
 	s_pGround = artGroundCreate();
 	bobsCreate();
 	hudInit();
+	hudPanelInit();
 	radarCreate();
 	msgInit();
 
