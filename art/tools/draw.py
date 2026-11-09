@@ -81,6 +81,8 @@ PF1 = [
 # 32 x 20, skids on row 16. Side view faces right; mirror = true in art.toml
 # makes the left-facing frames.
 
+# Colour registers 17-27 in this order; 28-31 stay free: channel 6 (unattached)
+# shows 29-31 - the sky's wisps and stars, set per mission (main.c skyUpdate).
 CHOP_COLORS = [
     ('K', '0x111'), ('D', '0x445'), ('M', '0x778'), ('L', '0xAAB'), ('W', '0xEEE'),
     ('R', '0xD22'), ('r', '0x811'), ('B', '0x38D'), ('G', '0xBEF'), ('O', '0xF70'),
@@ -717,12 +719,66 @@ def ground():
          list(zip(MTN_LETTERS, LAND_PAL)), [g])
 
 
+CLOUD_PAL = ['0x312', '0x423', '0x534', '0x745', '0xA55', '0xD86', '0xFB8']
+BAYER4 = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
+
+
+def clouds():
+    """Far cloud banks, 640x40 (PF2, camera / 8), low in the sky. Loops. Lit from
+    below (the sun or moon is low): bright rims on the undersides, darker bodies,
+    ragged dithered edges so they melt into the sky gradient behind them.
+    (Every row of the band is a line of 6-plane DMA on the A500: keep it short.)"""
+    w, h = 640, 40
+    rnd = random.Random(1945)
+    g = grid(w, h)
+    # two layers of banks: (centre row, half thickness, terms of the thickness profile)
+    layers = [(11, 6, [(3, 1.0), (7, 0.6), (17, 0.3)]),
+              (28, 8, [(2, 1.0), (5, 0.7), (13, 0.35)])]
+    for cy, half, terms in layers:
+        prof = periodic_height(w, rnd, [(k, a) for k, a in terms])
+        lo, hi = min(prof), max(prof)
+        drift = periodic_height(w, rnd, [(3, 2.5), (8, 1.0)])
+        for x in range(w):
+            t = (prof[x] - lo) / (hi - lo)              # 0..1 thickness here
+            th = half * (t * 1.6 - 0.45)                # gaps where it's thin
+            if th <= 0.6:
+                continue
+            c = cy + drift[x]
+            top, bot = c - th * 0.8, c + th            # flatter tops, deeper bellies
+            for y in range(max(0, int(top) - 1), min(h, int(bot) + 2)):
+                # distance inside the bank: dithered fade at the edges
+                inside = min(y - top, bot - y)
+                if inside < 0:
+                    continue
+                if inside < 1.5 and inside * 10 < BAYER4[y & 3][x & 3]:
+                    continue
+                u = (y - top) / (bot - top)             # 0 top .. 1 underside
+                if u > 0.82:
+                    v = 7 if (u > 0.92 or (x + y) & 1) else 6   # the lit rim
+                elif u > 0.62:
+                    v = 5
+                elif u > 0.35:
+                    v = 4 if (x * 3 + y) % 5 else 3
+                else:
+                    v = 3 if u > 0.15 else 2
+                if inside < 1.0:
+                    v = max(1, v - 2)                   # thin edges darker: depth
+                g[y][x] = str(v)
+    save('clouds', 'Far cloud banks, 640x40 (PF2, camera / 8). Loops. Lit from below.',
+         list(zip(MTN_LETTERS, CLOUD_PAL)), [g])
+
+
 def palettes():
     with open(os.path.join(art, 'mtn_pal.txt'), 'w') as f:
         f.write('# The mountains band (PF2, colours 9-15). Mission 1; logic.c has the others.\n')
         f.write('0  0x000  transparent\n')
         for i, c in enumerate(MTN_PAL):
             f.write(f'{i + 1}  {c}  m{i + 1}\n')
+    with open(os.path.join(art, 'cloud_pal.txt'), 'w') as f:
+        f.write('# The clouds band (PF2, colours 9-15). Mission 1; logic.c has the others.\n')
+        f.write('0  0x000  transparent\n')
+        for i, c in enumerate(CLOUD_PAL):
+            f.write(f'{i + 1}  {c}  c{i + 1}\n')
     with open(os.path.join(art, 'land_pal.txt'), 'w') as f:
         f.write('# The hills and ground bands (PF2, colours 9-15). Mission 1; logic.c has the others.\n')
         f.write('0  0x000  transparent\n')
@@ -743,6 +799,7 @@ if __name__ == '__main__':
     boom()
     flag()
     logo()
+    clouds()
     mountains()
     hills()
     ground()

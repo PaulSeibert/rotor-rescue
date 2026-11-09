@@ -291,6 +291,22 @@ extern const uint16_t g_pMissionMtnPal[MISSION_COUNT][8];
 extern const uint16_t g_pMissionLandPal[MISSION_COUNT][8];
 extern const char *const g_pMissionName[MISSION_COUNT];
 
+// The far sky: a PF2 cloud band (camera / 8, its palette per mission) and, in
+// front of it, wisps (dusk, dawn) or stars (night) on sprite channel 6
+// (colours 29-31), behind PF1, one under the other down its DMA list.
+#define CLOUDS_Y 72          // the cloud band's first game line (art: 40 rows): low, and
+                             // short - from here down it's 6-plane DMA on the A500
+#define SKYDOT_COUNT 6
+#define SKY_LOOP 512         // the dots repeat every 512 px
+#define SKY_HIDDEN 0x7FFF    // off screen: park the sprite past the right edge
+typedef struct { uint8_t y, h, shape; int16_t x; } tSkyItem;
+extern const tSkyItem g_pSkyDots[SKYDOT_COUNT];   // y ascending, gaps >= 2 lines
+extern const uint16_t g_pMissionCloudPal[MISSION_COUNT][8];
+int16_t logicSkyDotX(const tGame *g, uint8_t i);  // screen x of the left edge, or SKY_HIDDEN
+extern const uint16_t g_pMissionSkyDotPal[MISSION_COUNT][3];   // colours 29-31
+uint8_t logicSkyDotsAreStars(uint8_t ubMission);
+uint16_t logicStarTwinkle(const tGame *g);        // colour 31 at night this frame
+
 // Rank text for the end screen
 const char *logicRank(uint16_t uwSaved);
 

@@ -45,9 +45,46 @@ const uint16_t g_pMissionLandPal[MISSION_COUNT][8] = {
 	{0x000, 0x131, 0x242, 0x363, 0x585, 0x9A6, 0xCC8, 0xEEB},
 };
 
+// The far sky (logic.h). Cloud band colours 9-15, dark to light: bodies, then
+// the rims lit from below.
+const uint16_t g_pMissionCloudPal[MISSION_COUNT][8] = {
+	{0x000, 0x312, 0x423, 0x534, 0x745, 0xA55, 0xD86, 0xFB8},   // dusk: sunset-lit
+	{0x000, 0x011, 0x112, 0x123, 0x234, 0x346, 0x68A, 0x9BD},   // night: moonlit edges
+	{0x000, 0x245, 0x356, 0x568, 0x89A, 0xCAA, 0xFCB, 0xFEE},   // dawn: pink and gold
+};
+// Sky dots: y ascending, >= 2 lines apart (a sprite DMA list reads the next
+// item's control words in the line after one ends)
+const tSkyItem g_pSkyDots[SKYDOT_COUNT] = {
+	{27, 3, 0, 90}, {42, 3, 0, 300}, {60, 3, 0, 20}, {79, 3, 0, 200}, {96, 3, 0, 420}, {112, 3, 0, 150},
+};
+// colours 29-31: dusk - sunlit wisps; night - stars; dawn - pale wisps
+const uint16_t g_pMissionSkyDotPal[MISSION_COUNT][3] = {
+	{0xA45, 0xE86, 0xFCA}, {0x335, 0x99B, 0xFFF}, {0xDA9, 0xFDB, 0xFFE},
+};
+
 // ------------------------------------------------------------- helpers ---
 
 static inline int16_t absw(int16_t v) { return v < 0 ? (int16_t)-v : v; }
+
+static int16_t skyX(int16_t wX, int16_t wCam, uint8_t ubShift, uint16_t uwDrift) {
+	// (x - cam >> shift - drift) mod SKY_LOOP, then the left edge's overhang
+	int16_t sx = (int16_t)((uint16_t)(wX - (wCam >> ubShift) - uwDrift) & (SKY_LOOP - 1));
+	if(sx >= SKY_LOOP - 32) sx = (int16_t)(sx - SKY_LOOP);   // coming in from the left
+	return sx >= SCREEN_W ? SKY_HIDDEN : sx;
+}
+
+int16_t logicSkyDotX(const tGame *g, uint8_t i) {
+	return skyX(g_pSkyDots[i].x, g->cam, 4, 0);   // further away: 1/16
+}
+
+uint8_t logicSkyDotsAreStars(uint8_t ubMission) {
+	return ubMission == 1;
+}
+
+uint16_t logicStarTwinkle(const tGame *g) {
+	// the brightest star colour dims for 4 frames in every 32
+	return (g->frame & 31) < 4 ? 0xAAC : 0xFFF;
+}
 static inline int16_t clampw(int16_t v, int16_t lo, int16_t hi) {
 	return v < lo ? lo : v > hi ? hi : v;
 }

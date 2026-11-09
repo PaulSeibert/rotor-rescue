@@ -436,6 +436,35 @@ static void testRespawnPan(void) {
 	printf("respawn pan: %d frames, no reversals, step changes <= %d px\n", frames, worstChange);
 }
 
+// The far sky: the cloud band sits in the open sky above the mountains; the
+// sprite dots fit the sky lines with a line between them (DMA lists), their x
+// stays in range and moves at 1/16 of the camera.
+static void testSkyLayer(void) {
+	CHECK(CLOUDS_Y >= PLAY_TOP + 8);
+	for(int i = 0; i < SKYDOT_COUNT; ++i) {
+		CHECK(g_pSkyDots[i].y >= PLAY_TOP && g_pSkyDots[i].y + g_pSkyDots[i].h < 120);
+		if(i) CHECK(g_pSkyDots[i].y >= g_pSkyDots[i - 1].y + g_pSkyDots[i - 1].h + 2);
+	}
+	newGame();
+	int shown = 0;
+	for(int c = 0; c < WORLD_W - SCREEN_W; c += 7) {
+		g.cam = (int16_t)c;
+		for(int i = 0; i < SKYDOT_COUNT; ++i) {
+			int16_t x = logicSkyDotX(&g, (uint8_t)i);
+			CHECK(x == SKY_HIDDEN || (x >= -32 && x < SCREEN_W));
+			shown += x != SKY_HIDDEN;
+		}
+	}
+	CHECK(shown > 0);
+	g.cam = 800;
+	int16_t x0 = logicSkyDotX(&g, 2);
+	g.cam = 816;
+	int16_t x1 = logicSkyDotX(&g, 2);
+	CHECK(x0 == SKY_HIDDEN || x1 == SKY_HIDDEN || x0 - x1 == 1);   // 16 px of camera = 1 px
+	CHECK(logicSkyDotsAreStars(1) && !logicSkyDotsAreStars(0));
+	printf("sky: %d dot placements on screen over the world\n", shown);
+}
+
 static void testScrollMaths(void) {
 	CHECK(logicScrollDelay(0) == 0 && logicScrollByteOffset(0) == -2);
 	CHECK(logicScrollDelay(1) == 15 && logicScrollByteOffset(1) == 0);
@@ -582,6 +611,7 @@ int main(void) {
 	testCameraFollowsWithLead();
 	testCameraIsSmooth();
 	testRespawnPan();
+	testSkyLayer();
 	testScrollMaths();
 	testSkyGradient();
 	testDrawListShowsBaseAtStart();

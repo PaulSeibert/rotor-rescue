@@ -62,6 +62,13 @@ kind = "bob"
 source = "logo.txt"
 kind = "bob"
 
+[clouds]                  # PF2 band, camera / 8 (the far sky)
+source = "clouds.txt"
+kind = "bitmap"
+depth = 3
+palette = "cloud_pal.txt"
+wrap_x = 320
+
 [mountains]               # PF2 band, camera / 4
 source = "mountains.txt"
 kind = "bitmap"

@@ -1,0 +1,9 @@
+# The clouds band (PF2, colours 9-15). Mission 1; logic.c has the others.
+0  0x000  transparent
+1  0x312  c1
+2  0x423  c2
+3  0x534  c3
+4  0x745  c4
+5  0xA55  c5
+6  0xD86  c6
+7  0xFB8  c7

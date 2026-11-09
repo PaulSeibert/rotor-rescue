@@ -40,12 +40,17 @@
 #include "sound.h"      // generated from sound/ by agk (agk help-sound)
 #include "logic.h"
 #include "splash.h"
+#include "sky_gfx.h"    // tools/mkclouds.py
 
 // ------------------------------------------------------ display constants ---
 
 #define SYNC_FRAME 10         // "AGK t0": scenarios start here on every profile
 #define BPLCON0_DPF6 0x6600   // 6 planes | DBLPF | COLOR
-#define BPLCON2_RR 0x0024     // PF1 in front of PF2, sprites in front of both
+// PF1 in front of PF2; priority code 2 for both: sprite pairs 0-1 (the chopper,
+// channels 0-3) in front of both playfields, pairs 2-3 (the far sky layer,
+// channels 4-6) behind them - they only show through the sky. (Lines 24-119
+// run as a single 3-plane playfield, where PF2's code applies: so both.)
+#define BPLCON2_RR 0x0012
 #define DDFSTRT_SCROLL 0x30   // one fetch word early for fine scroll (costs sprite 7)
 #define DDFSTOP_LORES 0xD0
 #define FETCH_BYTES 42        // 21 words a line: 320 px + the scroll word
@@ -54,7 +59,8 @@
 #define COP_TOP_POS 16
 #define COP_RAW_COUNT 360
 
-// The PF2 bands, in game lines
+// The PF2 bands, in game lines (the clouds: CLOUDS_Y in logic.h)
+#define CLOUDS_END (CLOUDS_Y + ART_CLOUDS_H)  // 112: blank PF2 rows to the mountains
 #define MTN_Y 120
 #define GAP_Y (MTN_Y + ART_MOUNTAINS_H)      // 196: one blank line, the land palette loads
 #define HILLS_Y (GAP_Y + 1)                  // 197
@@ -92,7 +98,8 @@ typedef struct {
 	UWORD uwCon1;          // index of the MOVE BPLCON1
 	UWORD pPtr[3];         // per plane: index of its pointer's high-word MOVE
 } tCopSlots;
-static tCopSlots s_sMtnSlots[2], s_sHillSlots[2], s_sGndSlots[2];   // per list: the sky's length varies
+static tCopSlots s_sCloudSlots[2], s_sMtnSlots[2], s_sHillSlots[2], s_sGndSlots[2];   // per list: the sky's length varies
+static tBitMap *s_pCloudsBm;        // the far clouds band (PF2, camera / 8)
 
 static tGame s_sGame;
 static ULONG s_ulFrameVbl;
@@ -125,10 +132,12 @@ static inline UBYTE backBuffer(void) {
 }
 
 // --------------------------------------------------------- copper list ---
-// Lines 0-119 show nothing in PF2 (HUD, open sky), so they run as a plain
+// Lines 0-39 show nothing in PF2 (HUD, open sky), so they run as a plain
 // 3-plane screen (BPL1-3 = PF1's bitmap, same colours 0-7): half the
-// bitplane DMA, more bus for the CPU. At the mountains the copper switches to
-// the 6-plane dual playfield (BPL1/3/5 = PF1, BPL2/4/6 = PF2).
+// bitplane DMA, more bus for the CPU. At the cloud band the copper switches to
+// the 6-plane dual playfield (BPL1/3/5 = PF1, BPL2/4/6 = PF2): clouds (camera
+// / 8, their own palette), blank rows while the mountain palette loads, then
+// the mountains, hills and ground bands.
 
 #define BPLCON0_3 0x3200      // 3 planes | COLOR
 
@@ -160,8 +169,8 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
 	ULONG pBlank[3] = {(ULONG)s_pBlankRow, (ULONG)s_pBlankRow, (ULONG)s_pBlankRow};
 	const tBitMap *pFb = s_pFb[ubBfr];
 	ULONG ulFbRow = (ULONG)(PLAY_TOP * FB_ROW_BYTES + FB_FETCH_OFFS);
-	ULONG ulFbMtnRow = (ULONG)(MTN_Y * FB_ROW_BYTES + FB_FETCH_OFFS);
-	tCopSlots *pMtn = &s_sMtnSlots[ubBfr];
+	ULONG ulFbCloudRow = (ULONG)(CLOUDS_Y * FB_ROW_BYTES + FB_FETCH_OFFS);
+	tCopSlots *pCld = &s_sCloudSlots[ubBfr];
 
 	// Top of the frame (vertical blank): the HUD, 3 planes
 	agkCopMove(&sW, &g_pCustom->bplcon0, BPLCON0_3);
@@ -173,7 +182,7 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
 	agkCopMove(&sW, &g_pCustom->bpl2mod, HUD_ROW_BYTES - FETCH_BYTES);
 	for(UBYTE p = 0; p < 3; ++p) agkCopPtrs(&sW, p, (ULONG)s_pHud[ubBfr]->Planes[p]);
 	agkCopMove(&sW, &g_pCustom->color[0], HUD_COLOR);
-	cwPf2Palette(&sW, g_pMissionMtnPal[ubMission]);   // PF2 shows nothing until the mountains
+	cwPf2Palette(&sW, g_pMissionCloudPal[ubMission]);   // PF2 shows nothing until the clouds
 
 	// After the HUD: the frame buffer, still 3 planes
 	agkCopWait(&sW, PLAY_TOP - 1, SWITCH_WAIT_X);
@@ -190,27 +199,40 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
 			agkCopMove(&sW, &g_pCustom->color[0], uwColor);
 			uwPrev = uwColor;
 		}
-		if(y == MTN_Y - 3) {
-			// BPL4-6 aren't fetched yet: load them early (mountains planes 2-3,
-			// PF1's third plane at the mountains' first line)
+		if(y == CLOUDS_Y - 3) {
+			// BPL4-6 aren't fetched yet: load them early (cloud planes 2-3,
+			// PF1's third plane at the clouds' first line)
 			agkCopWait(&sW, y, SWITCH_WAIT_X);
-			pMtn->pPtr[1] = sW.uwPos;
-			agkCopPtrs(&sW, 3, (ULONG)s_pMountains->Planes[1]);
-			pMtn->pPtr[2] = sW.uwPos;
-			agkCopPtrs(&sW, 5, (ULONG)s_pMountains->Planes[2]);
-			agkCopPtrs(&sW, 4, (ULONG)pFb->Planes[2] + ulFbMtnRow);
+			pCld->pPtr[1] = sW.uwPos;
+			agkCopPtrs(&sW, 3, (ULONG)s_pCloudsBm->Planes[1]);
+			pCld->pPtr[2] = sW.uwPos;
+			agkCopPtrs(&sW, 5, (ULONG)s_pCloudsBm->Planes[2]);
+			agkCopPtrs(&sW, 4, (ULONG)pFb->Planes[2] + ulFbCloudRow);
 		}
-		if(y == MTN_Y - 1) {
-			// 6 planes, dual playfield: BPL2 -> the mountains, BPL3 -> PF1's
+		if(y == CLOUDS_Y - 1) {
+			// 6 planes, dual playfield: BPL2 -> the clouds, BPL3 -> PF1's
 			// second plane (it was its third)
 			agkCopWait(&sW, y, SWITCH_WAIT_X);
 			agkCopMove(&sW, &g_pCustom->bplcon0, BPLCON0_DPF6);
-			pMtn->pPtr[0] = sW.uwPos;
-			agkCopPtrs(&sW, 1, (ULONG)s_pMountains->Planes[0]);
-			agkCopPtrs(&sW, 2, (ULONG)pFb->Planes[1] + ulFbMtnRow);
-			pMtn->uwCon1 = sW.uwPos;
+			pCld->pPtr[0] = sW.uwPos;
+			agkCopPtrs(&sW, 1, (ULONG)s_pCloudsBm->Planes[0]);
+			agkCopPtrs(&sW, 2, (ULONG)pFb->Planes[1] + ulFbCloudRow);
+			pCld->uwCon1 = sW.uwPos;
 			agkCopMove(&sW, &g_pCustom->bplcon1, 0);
-			agkCopMove(&sW, &g_pCustom->bpl2mod, s_pMountains->BytesPerRow - FETCH_BYTES);
+			agkCopMove(&sW, &g_pCustom->bpl2mod, s_pCloudsBm->BytesPerRow - FETCH_BYTES);
+		}
+		if(y == CLOUDS_END - 1) {
+			// clouds -> blank PF2 rows: the mountain palette loads unseen
+			agkCopWait(&sW, y, SWITCH_WAIT_X);
+			cwPlanePtrs(&sW, 1, pBlank);
+			agkCopMove(&sW, &g_pCustom->bpl2mod, (UWORD)-FETCH_BYTES);
+		}
+		if(y == CLOUDS_END + 1) {
+			agkCopWait(&sW, y, SWITCH_WAIT_X);
+			cwPf2Palette(&sW, g_pMissionMtnPal[ubMission]);
+		}
+		if(y == MTN_Y - 1) {
+			s_sMtnSlots[ubBfr] = cwBand(&sW, MTN_Y, s_pMountains);
 		}
 	}
 	// Mountains -> hills: a blank line in between, for the land palette
@@ -248,6 +270,7 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 		copperWriteList(pList, ubBfr, s_sGame.mission);
 	}
 	WORD wCam = s_sGame.cam;
+	bandSet(pList, &s_sCloudSlots[ubBfr], s_pCloudsBm, logicBandOffset(wCam, 3, ART_CLOUDS_LOOP_W));
 	s_uwMtnX = logicBandOffset(wCam, 2, ART_MOUNTAINS_LOOP_W);
 	s_uwHillX = logicBandOffset(wCam, 1, ART_HILLS_LOOP_W);
 	s_uwGndX = logicBandOffset(wCam, 0, ART_GROUND_LOOP_W);
@@ -265,7 +288,8 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 #define MSG_LEN 40
 static tAgkText s_pMsg[2][MSG_LINES];
 static const UBYTE s_pMsgY[MSG_LINES] = {96, 110, 132, 146, 168};
-#define MSG_TYPE_PER_FRAME 3         // new letters a picture: text is slow, and it types itself
+#define MSG_TYPE_PER_FRAME 2         // new letters a picture: text is slow, and it types itself
+                                     // (3 made the title's worst frame 91% with the cloud band)
 static char s_pMsgStage[2][MSG_LINES][MSG_LEN + 1];   // what each line is showing / about to show
 static ULONG s_pMsgCover[2][MSG_LINES][2];  // columns (bits) this buffer's BOBs covered last time
 static ULONG s_pMsgFix[2][MSG_LINES][2];    // columns an erase crossed: redraw their letters
@@ -689,6 +713,79 @@ __attribute__((noinline)) static void chopperUpdate(UBYTE ubBfr) {
 	}
 }
 
+// ---------------------------------------------------------------- far sky ---
+// In front of the cloud band (PF2) and behind PF1: wisps (dusk, dawn) or stars
+// (night) on sprite channel 6, colours 29-31 per mission (logic.h). The DMA
+// list holds all of them one under the other; per copper buffer a copy, whose
+// control words the CPU rewrites each frame (positions only).
+
+#define SKY_CH_DOT 6
+#define SKY_PARKED_H 0x1F0                  // past the right edge: not shown
+#define DOT_WORDS (SKYDOT_COUNT * 2 + 2 * 3 * SKYDOT_COUNT + 2)
+static UWORD *s_pDotList[2][2];              // [buffer][wisps, stars]
+static UWORD s_pDotHead[SKYDOT_COUNT];       // word offsets of each item's control words
+
+static void sprCtl(UWORD *pHead, UWORD uwH, UWORD uwV0, UWORD uwV1) {
+	pHead[0] = (UWORD)((uwV0 << 8) | ((uwH >> 1) & 0xFF));
+	pHead[1] = (UWORD)((uwV1 << 8) | (((uwV0 >> 8) & 1) << 2) | (((uwV1 >> 8) & 1) << 1) | (uwH & 1));
+}
+
+static void skyListFill(UWORD *pList, const UWORD *pShape) {
+	UWORD w = 0;
+	for(UBYTE i = 0; i < SKYDOT_COUNT; ++i) {
+		s_pDotHead[i] = w;
+		pList[w++] = 0;
+		pList[w++] = 0;
+		for(UWORD k = 0; k < 2u * g_pSkyDots[i].h; ++k) pList[w++] = pShape[k];
+	}
+	pList[w++] = 0;   // end of the list
+	pList[w++] = 0;
+}
+
+static void skyCreate(void) {
+	for(UBYTE b = 0; b < 2; ++b) {
+		for(UBYTE k = 0; k < 2; ++k) {
+			s_pDotList[b][k] = memAllocChip(DOT_WORDS * sizeof(UWORD));
+			skyListFill(s_pDotList[b][k], k ? s_pStars : s_pWisp);
+		}
+	}
+}
+
+static void skyDestroy(void) {
+	for(UBYTE b = 0; b < 2; ++b)
+		for(UBYTE k = 0; k < 2; ++k) memFree(s_pDotList[b][k], DOT_WORDS * sizeof(UWORD));
+}
+
+static void skyPointer(tCopCmd *pList, UBYTE ubCh, const void *pData) {
+	ULONG ulPtr = (ULONG)pData;
+	copSetMoveVal(&pList[COP_SPRITES_POS + 2 * ubCh].sMove, ulPtr >> 16);
+	copSetMoveVal(&pList[COP_SPRITES_POS + 2 * ubCh + 1].sMove, ulPtr & 0xFFFF);
+}
+
+__attribute__((noinline)) static void skyUpdate(UBYTE ubBfr) {
+	static WORD s_pShownKey[2] = {-1, -1};       // what each buffer's list holds (cam / 16, mission)
+	const tGame *g = &s_sGame;
+	UWORD uwX0 = (UWORD)(s_pView->ubPosX - 1), uwY0 = s_pView->ubPosY;
+	UBYTE isStars = logicSkyDotsAreStars(g->mission);
+	UWORD *pDots = s_pDotList[ubBfr][isStars];
+	const UWORD *pPal = g_pMissionSkyDotPal[g->mission];
+	g_pCustom->color[31] = isStars ? logicStarTwinkle(g) : pPal[2];   // (twinkles)
+	WORD wKey = (WORD)(((g->cam >> 4) << 2) | g->mission);
+	if(wKey == s_pShownKey[ubBfr]) return;      // the dots move 1 px per 16 px of camera
+	s_pShownKey[ubBfr] = wKey;
+	for(UBYTE i = 0; i < SKYDOT_COUNT; ++i) {
+		WORD wX = logicSkyDotX(g, i);
+		UWORD uwV0 = (UWORD)(uwY0 + g_pSkyDots[i].y);
+		sprCtl(pDots + s_pDotHead[i], wX == SKY_HIDDEN ? SKY_PARKED_H : (UWORD)(uwX0 + wX), uwV0,
+			(UWORD)(uwV0 + g_pSkyDots[i].h));
+	}
+	tCopCmd *pList = s_pView->pCopList->pBackBfr->pList;
+	skyPointer(pList, SKY_CH_DOT, pDots);
+	// colours 29-30 (31 above): nothing else writes them (the chopper leaves 28-31 free)
+	g_pCustom->color[29] = pPal[0];
+	g_pCustom->color[30] = pPal[1];
+}
+
 // ------------------------------------------------------------------ rotor ---
 // Paula channel 2: a looped chop (two blade passes of filtered noise) made
 // at startup; the period follows the airspeed, the volume the state.
@@ -809,6 +906,7 @@ void genericCreate(void) {
 	for(UBYTE b = 0; b < 2; ++b) s_pFb[b] = bitmapCreate(FB_W, FB_H, FB_BPP, BMF_CLEAR | BMF_INTERLEAVED);
 	for(UBYTE b = 0; b < 2; ++b) s_pHud[b] = bitmapCreate(HUD_W, PLAY_TOP, FB_BPP, BMF_CLEAR | BMF_INTERLEAVED);
 	s_pBlankRow = memAllocChipClear(FETCH_BYTES);
+	s_pCloudsBm = artCloudsCreate();
 	s_pMountains = artMountainsCreate();
 	s_pHills = artHillsCreate();
 	s_pGround = artGroundCreate();
@@ -827,6 +925,7 @@ void genericCreate(void) {
 	artPaletteApply(s_pVPort->pPalette);       // PF1 and PF2 colours
 	artChopperApplyColors(s_pVPort->pPalette); // colours 17-31
 	chopperCreate();
+	skyCreate();
 
 	for(UBYTE m = 0; m < MISSION_COUNT; ++m)
 		for(UWORD y = 0; y < SKY_END - PLAY_TOP; ++y) s_pSky[m][y] = logicSkyColor(m, (UBYTE)y);
@@ -938,6 +1037,7 @@ void genericProcess(void) {
 	copperUpdate(ubBfr);
 	agkBlitqPoll();
 	chopperUpdate(ubBfr);
+	skyUpdate(ubBfr);
 	rotorUpdate();
 	reportState(ubStateBefore);
 
@@ -969,6 +1069,7 @@ void genericDestroy(void) {
 	soundDestroy();
 	systemSetDmaBit(DMAB_SPRITE, 0);
 	spriteManagerDestroy();
+	skyDestroy();
 	for(UBYTE b = 0; b < 2; ++b)
 		for(UBYTE f = 0; f < ART_CHOPPER_FRAMES; ++f)
 			for(UBYTE p = 0; p < ART_CHOPPER_PARTS; ++p) bitmapDestroy(s_pChopFrames[b][f][p]);
@@ -979,6 +1080,7 @@ void genericDestroy(void) {
 	bitmapDestroy(s_pGround);
 	bitmapDestroy(s_pHills);
 	bitmapDestroy(s_pMountains);
+	bitmapDestroy(s_pCloudsBm);
 	memFree(s_pBlankRow, FETCH_BYTES);
 	for(UBYTE b = 0; b < 2; ++b) {
 		bitmapDestroy(s_pHud[b]);
