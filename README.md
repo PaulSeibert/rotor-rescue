@@ -109,6 +109,13 @@ red open), people, tanks, jets, mines, the base and you (yellow).
   shield's sunset stripes and the purple horizon keep their gradients: about
   320 different colours in one picture. It fades in and out by rewriting the
   colour values in its own copper lists. Fire skips it.
+- **The ROTOR RESCUE title logo.** A 192×129 picture in 16 colours over the
+  sky's copper gradient, loaded from the floppy. For its lines the title's own
+  copper list switches the display to a single 4-plane playfield that fetches
+  just the logo's 12 words, and reloads 8 of its colours on every line, so
+  ROTOR's blue and RESCUE's gold keep their gradients: about 800 colour
+  changes down the picture. Below it the copper switches back to the dual
+  playfield for the credits and the land.
 
 - **Dual playfield.** Playfield 2 holds three looping parallax bands, each
   with its own fine scroll and palette set by the copper: far mountains at
@@ -147,7 +154,10 @@ All the art is made by scripts and all the music samples by
 `sound/tools/make_samples.py`, so every asset can be regenerated from
 source. `art/tools/draw.py` draws the game's graphics, and
 `art/tools/make_dps_logo.py` converts the Desert Palms Software logo
-(`art/src/desert_palms_logo_source.png`) into `disk/dpslogo.bin`.
+(`art/src/desert_palms_logo_source.png`) into `disk/dpslogo.bin`, and
+`art/tools/make_title_logo.py` the title logo
+(`art/src/rotor_rescue_title_source.png`) into `disk/titlelogo.bin`
+(preview: `art/title_logo_amiga.png`).
 
 ## Credits
 

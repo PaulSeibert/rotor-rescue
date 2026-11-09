@@ -17,6 +17,9 @@
 //   Sprites 4-5: the weather (dust, rain, spray), in front of everything.
 //   Sprite 6: the far sky's wisps or stars, behind the playfields.
 //   At boot: the Desert Palms Software logo (splash.c), its own copper lists.
+//   The title: a second copper list per buffer (the game's list jumps to it):
+//        the ROTOR RESCUE logo as a 4-plane, 16-colour picture over the sky
+//        with 8 of its colours reloaded line by line, the land bands below.
 //   Paula channel 2: the rotor, a looped chop whose pitch follows the
 //        airspeed (driven here); music on 0, 1, 3; effects on 1 and 3.
 
@@ -36,6 +39,7 @@
 #include <agk/blitq.h>
 #include <agk/copw.h>
 #include <agk/debug.h>
+#include <agk/pack.h>
 #include <agk/perf.h>
 #include <agk/text.h>
 #include "art.h"        // generated from art/ by agk (agk help-art)
@@ -43,6 +47,7 @@
 #include "logic.h"
 #include "splash.h"
 #include "sky_gfx.h"    // tools/mkclouds.py
+#include "title_logo.h" // art/tools/make_title_logo.py
 
 // ------------------------------------------------------ display constants ---
 
@@ -60,6 +65,7 @@
 #define COP_SPRITES_POS 0
 #define COP_TOP_POS 16
 #define COP_RAW_COUNT 360
+#define COP_JUMP_POS COP_TOP_POS  // MOVE COP2LC (2), MOVE COPJMP2: on, or to the title list
 
 // The PF2 bands, in game lines (the clouds: CLOUDS_Y in logic.h)
 #define CLOUDS_END (CLOUDS_Y + ART_CLOUDS_H)  // 112: blank PF2 rows to the mountains
@@ -68,6 +74,24 @@
 #define HILLS_Y (GAP_Y + 1)                  // 197
 #define GROUND_BAND_Y (HILLS_Y + ART_HILLS_H) // 224 .. 255
 #define SKY_END GAP_Y
+
+// The title's own layout (its copper list): the logo, then its lines of text,
+// the mountains lower down (the clouds don't show), the hills and ground as in
+// play. Lines 24-25 load the logo's first colours, 26 switches to its planes.
+#define TITLE_LOGO_Y 27
+#define TITLE_LOGO_END (TITLE_LOGO_Y + TITLE_LOGO_H)  // back to the frame buffer
+#define TITLE_LOGO_X ((SCREEN_W - TITLE_LOGO_W) / 2)
+#define TITLE_LOGO_ROW_BYTES (TITLE_LOGO_W / 8)
+#define TITLE_LOGO_DDFSTRT (0x38 + TITLE_LOGO_X / 2)  // fetch just the logo's words
+#define TITLE_LOGO_DDFSTOP (TITLE_LOGO_DDFSTRT + (TITLE_LOGO_W / 16 - 1) * 8)
+#define TITLE_MTN_Y (TITLE_LOGO_END + 6)              // its first rows are empty sky
+#define TITLE_TEXT_Y (TITLE_LOGO_END + 3)             // PF1's colours are back by then
+_Static_assert(TITLE_LOGO_W % 16 == 0 && TITLE_LOGO_PLANES == 4, "the logo: 4 planes, whole words");
+_Static_assert(TITLE_LOGO_Y - 1 > PLAY_TOP + 1, "lines 24-25 load the logo's colours, the next switches to it");
+// (the switches after the logo take its last line and the next 3)
+_Static_assert(TITLE_MTN_Y - 1 > TITLE_LOGO_END + 3 && TITLE_MTN_Y < GAP_Y - 24, "the title's mountains");
+// HUD, top, every sky line's WAIT + COLOR00, the logo's colour changes, switches, bands
+#define TITLE_COP_COUNT (256 + 2 * (SKY_END - PLAY_TOP) + TITLE_LOGO_CHANGES + 64)
 
 // PF1 frame buffers: 48 px of margin left, 64 right, so objects never need
 // clipping. Screen (x, y) is buffer (x + FB_X0, y).
@@ -91,7 +115,7 @@ static tBitMap *s_pFb[2], *s_pHud[2];
 static tBitMap *s_pMountains, *s_pHills, *s_pGround;
 static UBYTE *s_pBlankRow;          // FETCH_BYTES of zeros: PF2 where there's no band
 static tCopBfr *s_pCopBfrA;         // copper buffer 0
-static UWORD s_uwCopUsed;
+static UWORD s_uwCopUsed, s_uwTitleCopUsed;
 static UBYTE s_pListMission[2];     // which mission's colours each copper list has
 static UWORD s_pSky[MISSION_COUNT][SKY_END - PLAY_TOP];   // COLOR00 per line (from logic.c, at startup)
 
@@ -99,8 +123,20 @@ typedef struct {
 	UWORD uwCon1;          // index of the MOVE BPLCON1
 	UWORD pPtr[3];         // per plane: index of its pointer's high-word MOVE
 } tCopSlots;
-static tCopSlots s_sCloudSlots[2], s_sMtnSlots[2], s_sHillSlots[2], s_sGndSlots[2];   // per list: the sky's length varies
+// per list ([title][buffer]): the sky's length varies
+static tCopSlots s_sCloudSlots[2], s_sMtnSlots[2][2], s_sHillSlots[2][2], s_sGndSlots[2][2];
 static tBitMap *s_pCloudsBm;        // the far clouds band (PF2, camera / 8)
+static UBYTE *s_pTitleLogo;         // chip RAM: the logo (from the floppy)
+static UBYTE s_isTitlePending, s_isTitleLogo;   // to load; loaded
+static const UWORD *s_pTitleFixed;  // in it: colours 1..TITLE_LOGO_FIXED
+static const UWORD (*s_pTitleRows)[TITLE_LOGO_ROW_REGS];   // colours per line
+static tCopCmd *s_pTitleList[2];    // chip RAM: the title's copper list per buffer
+static UBYTE s_pListTitle[2];       // whether game list b jumps to title list b
+static UBYTE s_pTitleListMission[2];
+// The title lists' mission colours (the same places in both): COLOR00 on every
+// sky line, the mountains' and the land's PF2 palettes
+static UWORD s_pTitleSkySlot[SKY_END - PLAY_TOP];
+static UWORD s_uwTitleMtnPal, s_uwTitleLandPal;
 
 static tGame s_sGame;
 static ULONG s_ulFrameVbl;
@@ -207,15 +243,104 @@ static void cwHudPanel(tAgkCopWriter *pW) {
 	}
 }
 
-static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
+// The jump at the top of game list pList: to title list ubBfr, or on to the
+// MOVE after it
+static void copperJump(tCopCmd *pList, UBYTE ubBfr, UBYTE isTitle) {
+	ULONG ulTo = isTitle ? (ULONG)s_pTitleList[ubBfr] : (ULONG)&pList[COP_JUMP_POS + 3];
+	copSetMoveVal(&pList[COP_JUMP_POS].sMove, ulTo >> 16);
+	copSetMoveVal(&pList[COP_JUMP_POS + 1].sMove, ulTo & 0xFFFF);
+}
+
+// The title's logo lines: the switch to its planes at the end of line y (and
+// its first colours before that), the colours that change on line y, the way
+// back to the frame buffer after it. The logo has its own fetch (just its 12
+// words, no early word: PF1's delay is 0 here), 4 planes, single playfield.
+static void cwTitleLogo(tAgkCopWriter *pW, UWORD y, const tBitMap *pFb) {
+	if(!s_isTitleLogo) return;
+	if(y == PLAY_TOP) {
+		// (nothing in PF1 here on the title: its colours can change)
+		agkCopWait(pW, y, SWITCH_WAIT_X);
+		for(UBYTE i = 0; i < TITLE_LOGO_FIXED; ++i) agkCopMove(pW, &g_pCustom->color[1 + i], s_pTitleFixed[i]);
+		agkCopMove(pW, &g_pCustom->color[TITLE_LOGO_FIRST_ROW_REG], s_pTitleRows[0][0]);
+	}
+	else if(y == PLAY_TOP + 1) {
+		agkCopWait(pW, y, SWITCH_WAIT_X);
+		for(UBYTE r = 1; r < TITLE_LOGO_ROW_REGS; ++r)
+			agkCopMove(pW, &g_pCustom->color[TITLE_LOGO_FIRST_ROW_REG + r], s_pTitleRows[0][r]);
+	}
+	else if(y == TITLE_LOGO_Y - 1) {
+		agkCopWait(pW, y, SWITCH_WAIT_X);
+		agkCopMove(pW, &g_pCustom->ddfstrt, TITLE_LOGO_DDFSTRT);
+		agkCopMove(pW, &g_pCustom->ddfstop, TITLE_LOGO_DDFSTOP);
+		agkCopMove(pW, &g_pCustom->bplcon0, (TITLE_LOGO_PLANES << 12) | 0x0200);
+		agkCopMove(pW, &g_pCustom->bpl1mod, TITLE_LOGO_ROW_BYTES * (TITLE_LOGO_PLANES - 1));
+		agkCopMove(pW, &g_pCustom->bpl2mod, TITLE_LOGO_ROW_BYTES * (TITLE_LOGO_PLANES - 1));
+		for(UBYTE p = 0; p < TITLE_LOGO_PLANES; ++p) agkCopPtrs(pW, p, (ULONG)(s_pTitleLogo + TITLE_LOGO_PLANES_OFFS + p * TITLE_LOGO_ROW_BYTES));
+	}
+	else if(y > TITLE_LOGO_Y && y < TITLE_LOGO_END) {
+		// at the line's start (the logo starts 64 px in): the colours that change
+		const UWORD *pRow = s_pTitleRows[y - TITLE_LOGO_Y], *pPrev = pRow - TITLE_LOGO_ROW_REGS;
+		for(UBYTE r = 0; r < TITLE_LOGO_ROW_REGS; ++r) {
+			if(pRow[r] != pPrev[r]) agkCopMove(pW, &g_pCustom->color[TITLE_LOGO_FIRST_ROW_REG + r], pRow[r]);
+		}
+	}
+	if(y == TITLE_LOGO_END - 1) {
+		// back to the frame buffer, 3 planes
+		ULONG ulRow = (ULONG)(TITLE_LOGO_END * FB_ROW_BYTES + FB_FETCH_OFFS);
+		agkCopWait(pW, y, SWITCH_WAIT_X);
+		agkCopMove(pW, &g_pCustom->ddfstrt, DDFSTRT_SCROLL);
+		agkCopMove(pW, &g_pCustom->ddfstop, DDFSTOP_LORES);
+		agkCopMove(pW, &g_pCustom->bplcon0, BPLCON0_3);
+		agkCopMove(pW, &g_pCustom->bpl1mod, FB_ROW_BYTES - FETCH_BYTES);
+		agkCopMove(pW, &g_pCustom->bpl2mod, FB_ROW_BYTES - FETCH_BYTES);
+		for(UBYTE p = 0; p < 3; ++p) agkCopPtrs(pW, p, (ULONG)pFb->Planes[p] + ulRow);
+	}
+	else if(y == TITLE_LOGO_END) {
+		// PF1's colours back (the text starts below)
+		agkCopWait(pW, y, SWITCH_WAIT_X);
+		for(UBYTE i = 1; i < 8; ++i) agkCopMove(pW, &g_pCustom->color[i], s_pVPort->pPalette[i]);
+	}
+}
+
+static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE isTitle);
+static void musicFor(UBYTE ubState);
+
+// The title logo from the floppy (10 KB packed; ACE switches the OS on for the
+// file), the title's copper lists, then the music (the OS stops it while it
+// loads). At boot the game's first frames are the splash, black at first: the
+// load waits for them, to keep the boot (the time to the first picture) short.
+static void titleLoad(void) {
+	s_isTitlePending = 0;
+	s_isTitleLogo = s_pTitleLogo &&
+		agkLoadFile("titlelogo.bin.pk", s_pTitleLogo, TITLE_LOGO_BYTES) == TITLE_LOGO_BYTES;
+	// (a hard-disk copy without the file: a title without the logo)
+	if(!s_isTitleLogo) agkPrint("AGK title logo missing\n");
+	for(UBYTE b = 0; b < 2; ++b) {
+		copperWriteList(s_pTitleList[b], b, s_sGame.mission, 1);
+		s_pTitleListMission[b] = s_sGame.mission;
+	}
+	musicFor(s_sGame.state);
+	agkPerfSkip();
+}
+
+static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE isTitle) {
 	tAgkCopWriter sW;
-	agkCopInit(&sW, pList, COP_TOP_POS, s_pView->ubPosY);
+	// the game list starts after the sprite pointers, the title list jumped to
+	// from there
+	agkCopInit(&sW, pList, isTitle ? 0 : COP_TOP_POS, s_pView->ubPosY);
 	ULONG pBlank[3] = {(ULONG)s_pBlankRow, (ULONG)s_pBlankRow, (ULONG)s_pBlankRow};
 	const tBitMap *pFb = s_pFb[ubBfr];
 	ULONG ulFbRow = (ULONG)(PLAY_TOP * FB_ROW_BYTES + FB_FETCH_OFFS);
 	ULONG ulFbCloudRow = (ULONG)(CLOUDS_Y * FB_ROW_BYTES + FB_FETCH_OFFS);
+	ULONG ulFbTitleRow = (ULONG)((TITLE_LOGO_END + 3) * FB_ROW_BYTES + FB_FETCH_OFFS);
 	tCopSlots *pCld = &s_sCloudSlots[ubBfr];
 
+	if(!isTitle) {
+		// (copperJump() sets where to)
+		agkCopMove(&sW, (volatile UWORD *)&g_pCustom->cop2lc, 0);
+		agkCopMove(&sW, (volatile UWORD *)&g_pCustom->cop2lc + 1, 0);
+		agkCopMove(&sW, &g_pCustom->copjmp2, 0);
+	}
 	// Top of the frame (vertical blank): the HUD, 3 planes
 	agkCopMove(&sW, &g_pCustom->bplcon0, BPLCON0_3);
 	agkCopMove(&sW, &g_pCustom->bplcon2, BPLCON2_RR);
@@ -227,7 +352,7 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
 	for(UBYTE p = 0; p < 3; ++p) agkCopPtrs(&sW, p, (ULONG)s_pHud[ubBfr]->Planes[p]);
 	agkCopMove(&sW, &g_pCustom->color[0], s_pHudBg[0]);
 	agkCopMove(&sW, &g_pCustom->color[HUD_INK], s_pHudInk[0]);
-	cwPf2Palette(&sW, g_pMissionCloudPal[ubMission]);   // PF2 shows nothing until the clouds
+	if(!isTitle) cwPf2Palette(&sW, g_pMissionCloudPal[ubMission]);   // PF2 shows nothing until the clouds
 	cwHudPanel(&sW);
 
 	// After the HUD: the frame buffer, still 3 planes; the ink back to PF1's colour 4
@@ -237,49 +362,84 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
 	agkCopMove(&sW, &g_pCustom->bpl2mod, FB_ROW_BYTES - FETCH_BYTES);
 	for(UBYTE p = 0; p < 3; ++p) agkCopPtrs(&sW, p, (ULONG)pFb->Planes[p] + ulFbRow);
 
-	// The sky, line by line where the colour changes; the switch to dual playfield
-	UWORD uwPrev = 0xFFFF;
-	for(UWORD y = PLAY_TOP; y < SKY_END; ++y) {
-		UWORD uwColor = s_pSky[ubMission][y - PLAY_TOP];
-		if(uwColor != uwPrev) {
+	if(isTitle) {
+		// The title: COLOR00 on every sky line (a new mission only rewrites
+		// those values), the logo, the switch to dual playfield with PF2 blank,
+		// the mountains lower down
+		for(UWORD y = PLAY_TOP; y < SKY_END; ++y) {
 			agkCopWait(&sW, y, 0);
-			agkCopMove(&sW, &g_pCustom->color[0], uwColor);
-			uwPrev = uwColor;
+			s_pTitleSkySlot[y - PLAY_TOP] = sW.uwPos;
+			agkCopMove(&sW, &g_pCustom->color[0], s_pSky[ubMission][y - PLAY_TOP]);
+			cwTitleLogo(&sW, y, pFb);
+			if(y == TITLE_LOGO_END + 1) {
+				// BPL4-6 aren't fetched yet: load them early (PF2 blank, PF1's third plane)
+				agkCopWait(&sW, y, SWITCH_WAIT_X);
+				agkCopPtrs(&sW, 3, (ULONG)s_pBlankRow);
+				agkCopPtrs(&sW, 5, (ULONG)s_pBlankRow);
+				agkCopPtrs(&sW, 4, (ULONG)pFb->Planes[2] + ulFbTitleRow);
+			}
+			if(y == TITLE_LOGO_END + 2) {
+				agkCopWait(&sW, y, SWITCH_WAIT_X);
+				agkCopMove(&sW, &g_pCustom->bplcon0, BPLCON0_DPF6);
+				agkCopPtrs(&sW, 1, (ULONG)s_pBlankRow);
+				agkCopPtrs(&sW, 2, (ULONG)pFb->Planes[1] + ulFbTitleRow);
+				agkCopMove(&sW, &g_pCustom->bpl2mod, (UWORD)-FETCH_BYTES);
+			}
+			if(y == TITLE_LOGO_END + 3) {
+				agkCopWait(&sW, y, SWITCH_WAIT_X);
+				s_uwTitleMtnPal = sW.uwPos;
+				cwPf2Palette(&sW, g_pMissionMtnPal[ubMission]);
+			}
+			if(y == TITLE_MTN_Y - 1) {
+				s_sMtnSlots[1][ubBfr] = cwBand(&sW, TITLE_MTN_Y, s_pMountains);
+			}
 		}
-		if(y == CLOUDS_Y - 3) {
-			// BPL4-6 aren't fetched yet: load them early (cloud planes 2-3,
-			// PF1's third plane at the clouds' first line)
-			agkCopWait(&sW, y, SWITCH_WAIT_X);
-			pCld->pPtr[1] = sW.uwPos;
-			agkCopPtrs(&sW, 3, (ULONG)s_pCloudsBm->Planes[1]);
-			pCld->pPtr[2] = sW.uwPos;
-			agkCopPtrs(&sW, 5, (ULONG)s_pCloudsBm->Planes[2]);
-			agkCopPtrs(&sW, 4, (ULONG)pFb->Planes[2] + ulFbCloudRow);
-		}
-		if(y == CLOUDS_Y - 1) {
-			// 6 planes, dual playfield: BPL2 -> the clouds, BPL3 -> PF1's
-			// second plane (it was its third)
-			agkCopWait(&sW, y, SWITCH_WAIT_X);
-			agkCopMove(&sW, &g_pCustom->bplcon0, BPLCON0_DPF6);
-			pCld->pPtr[0] = sW.uwPos;
-			agkCopPtrs(&sW, 1, (ULONG)s_pCloudsBm->Planes[0]);
-			agkCopPtrs(&sW, 2, (ULONG)pFb->Planes[1] + ulFbCloudRow);
-			pCld->uwCon1 = sW.uwPos;
-			agkCopMove(&sW, &g_pCustom->bplcon1, 0);
-			agkCopMove(&sW, &g_pCustom->bpl2mod, s_pCloudsBm->BytesPerRow - FETCH_BYTES);
-		}
-		if(y == CLOUDS_END - 1) {
-			// clouds -> blank PF2 rows: the mountain palette loads unseen
-			agkCopWait(&sW, y, SWITCH_WAIT_X);
-			cwPlanePtrs(&sW, 1, pBlank);
-			agkCopMove(&sW, &g_pCustom->bpl2mod, (UWORD)-FETCH_BYTES);
-		}
-		if(y == CLOUDS_END + 1) {
-			agkCopWait(&sW, y, SWITCH_WAIT_X);
-			cwPf2Palette(&sW, g_pMissionMtnPal[ubMission]);
-		}
-		if(y == MTN_Y - 1) {
-			s_sMtnSlots[ubBfr] = cwBand(&sW, MTN_Y, s_pMountains);
+	}
+	else {
+		// The sky, line by line where the colour changes; the switch to dual playfield
+		UWORD uwPrev = 0xFFFF;
+		for(UWORD y = PLAY_TOP; y < SKY_END; ++y) {
+			UWORD uwColor = s_pSky[ubMission][y - PLAY_TOP];
+			if(uwColor != uwPrev) {
+				agkCopWait(&sW, y, 0);
+				agkCopMove(&sW, &g_pCustom->color[0], uwColor);
+				uwPrev = uwColor;
+			}
+			if(y == CLOUDS_Y - 3) {
+				// BPL4-6 aren't fetched yet: load them early (cloud planes 2-3,
+				// PF1's third plane at the clouds' first line)
+				agkCopWait(&sW, y, SWITCH_WAIT_X);
+				pCld->pPtr[1] = sW.uwPos;
+				agkCopPtrs(&sW, 3, (ULONG)s_pCloudsBm->Planes[1]);
+				pCld->pPtr[2] = sW.uwPos;
+				agkCopPtrs(&sW, 5, (ULONG)s_pCloudsBm->Planes[2]);
+				agkCopPtrs(&sW, 4, (ULONG)pFb->Planes[2] + ulFbCloudRow);
+			}
+			if(y == CLOUDS_Y - 1) {
+				// 6 planes, dual playfield: BPL2 -> the clouds, BPL3 -> PF1's
+				// second plane (it was its third)
+				agkCopWait(&sW, y, SWITCH_WAIT_X);
+				agkCopMove(&sW, &g_pCustom->bplcon0, BPLCON0_DPF6);
+				pCld->pPtr[0] = sW.uwPos;
+				agkCopPtrs(&sW, 1, (ULONG)s_pCloudsBm->Planes[0]);
+				agkCopPtrs(&sW, 2, (ULONG)pFb->Planes[1] + ulFbCloudRow);
+				pCld->uwCon1 = sW.uwPos;
+				agkCopMove(&sW, &g_pCustom->bplcon1, 0);
+				agkCopMove(&sW, &g_pCustom->bpl2mod, s_pCloudsBm->BytesPerRow - FETCH_BYTES);
+			}
+			if(y == CLOUDS_END - 1) {
+				// clouds -> blank PF2 rows: the mountain palette loads unseen
+				agkCopWait(&sW, y, SWITCH_WAIT_X);
+				cwPlanePtrs(&sW, 1, pBlank);
+				agkCopMove(&sW, &g_pCustom->bpl2mod, (UWORD)-FETCH_BYTES);
+			}
+			if(y == CLOUDS_END + 1) {
+				agkCopWait(&sW, y, SWITCH_WAIT_X);
+				cwPf2Palette(&sW, g_pMissionMtnPal[ubMission]);
+			}
+			if(y == MTN_Y - 1) {
+				s_sMtnSlots[0][ubBfr] = cwBand(&sW, MTN_Y, s_pMountains);
+			}
 		}
 	}
 	// Mountains -> hills: a blank line in between, for the land palette
@@ -287,12 +447,32 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
 	cwPlanePtrs(&sW, 1, pBlank);
 	agkCopMove(&sW, &g_pCustom->bpl2mod, (UWORD)-FETCH_BYTES);
 	agkCopWait(&sW, GAP_Y, 0);
+	if(isTitle) s_uwTitleLandPal = sW.uwPos;
 	cwPf2Palette(&sW, g_pMissionLandPal[ubMission]);
-	s_sHillSlots[ubBfr] = cwBand(&sW, HILLS_Y, s_pHills);
-	s_sGndSlots[ubBfr] = cwBand(&sW, GROUND_BAND_Y, s_pGround);
+	s_sHillSlots[isTitle][ubBfr] = cwBand(&sW, HILLS_Y, s_pHills);
+	s_sGndSlots[isTitle][ubBfr] = cwBand(&sW, GROUND_BAND_Y, s_pGround);
 
-	s_uwCopUsed = sW.uwPos;
-	agkCopFill(&sW, COP_RAW_COUNT);
+	if(isTitle) {
+		s_uwTitleCopUsed = sW.uwPos;
+		agkCopFill(&sW, TITLE_COP_COUNT);
+	}
+	else {
+		s_uwCopUsed = sW.uwPos;
+		agkCopFill(&sW, COP_RAW_COUNT);
+		copperJump(pList, ubBfr, s_pListTitle[ubBfr]);
+	}
+}
+
+// A title list's mission colours: the sky and the PF2 palettes (no rewrite)
+static void titleListMission(UBYTE ubBfr, UBYTE ubMission) {
+	tCopCmd *pList = s_pTitleList[ubBfr];
+	const UWORD *pSky = s_pSky[ubMission];
+	for(UWORD i = 0; i < SKY_END - PLAY_TOP; ++i) copSetMoveVal(&pList[s_pTitleSkySlot[i]].sMove, pSky[i]);
+	for(UBYTE i = 0; i < 7; ++i) {
+		copSetMoveVal(&pList[s_uwTitleMtnPal + i].sMove, g_pMissionMtnPal[ubMission][i + 1]);
+		copSetMoveVal(&pList[s_uwTitleLandPal + i].sMove, g_pMissionLandPal[ubMission][i + 1]);
+	}
+	s_pTitleListMission[ubBfr] = ubMission;
 }
 
 static void bandSet(tCopCmd *pList, const tCopSlots *pSlots, const tBitMap *pBm, UWORD uwX) {
@@ -308,25 +488,36 @@ static void bandSet(tCopCmd *pList, const tCopSlots *pSlots, const tBitMap *pBm,
 
 static UWORD s_uwMtnX, s_uwHillX, s_uwGndX;
 
-// The back list: this mission's colours (rewritten once when it changes),
-// then each band's scroll for the camera.
+// The back list: the jump to the title list or not; this mission's colours
+// (the game list rewritten once when it changes, the title list's patched),
+// then each band's scroll for the camera, in whichever list shows.
 __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
-	static WORD pListCam[2] = {-1, -1};   // the camera each list's scroll is for
+	static WORD pListCam[2][2] = {{-1, -1}, {-1, -1}};   // [title][buffer]: the camera each list's scroll is for
 	tCopCmd *pList = s_pView->pCopList->pBackBfr->pList;
 	WORD wCam = s_sGame.cam;
-	if(s_pListMission[ubBfr] != s_sGame.mission) {
-		s_pListMission[ubBfr] = s_sGame.mission;
-		copperWriteList(pList, ubBfr, s_sGame.mission);
+	UBYTE isTitle = s_sGame.state == GS_TITLE;
+	if(isTitle != s_pListTitle[ubBfr]) {
+		s_pListTitle[ubBfr] = isTitle;
+		copperJump(pList, ubBfr, isTitle);
 	}
-	else if(wCam == pListCam[ubBfr]) return;   // a still camera: nothing to scroll (chip RAM writes are slow)
-	pListCam[ubBfr] = wCam;
-	bandSet(pList, &s_sCloudSlots[ubBfr], s_pCloudsBm, logicBandOffset(wCam, 3, ART_CLOUDS_LOOP_W));
+	if(isTitle) {
+		pList = s_pTitleList[ubBfr];
+		if(s_pTitleListMission[ubBfr] != s_sGame.mission) titleListMission(ubBfr, s_sGame.mission);
+	}
+	else if(s_pListMission[ubBfr] != s_sGame.mission) {
+		s_pListMission[ubBfr] = s_sGame.mission;
+		copperWriteList(pList, ubBfr, s_sGame.mission, 0);
+		pListCam[0][ubBfr] = -1;
+	}
+	if(wCam == pListCam[isTitle][ubBfr]) return;   // a still camera: nothing to scroll (chip RAM writes are slow)
+	pListCam[isTitle][ubBfr] = wCam;
+	if(!isTitle) bandSet(pList, &s_sCloudSlots[ubBfr], s_pCloudsBm, logicBandOffset(wCam, 3, ART_CLOUDS_LOOP_W));
 	s_uwMtnX = logicBandOffset(wCam, 2, ART_MOUNTAINS_LOOP_W);
 	s_uwHillX = logicBandOffset(wCam, 1, ART_HILLS_LOOP_W);
 	s_uwGndX = logicBandOffset(wCam, 0, ART_GROUND_LOOP_W);
-	bandSet(pList, &s_sMtnSlots[ubBfr], s_pMountains, s_uwMtnX);
-	bandSet(pList, &s_sHillSlots[ubBfr], s_pHills, s_uwHillX);
-	bandSet(pList, &s_sGndSlots[ubBfr], s_pGround, s_uwGndX);
+	bandSet(pList, &s_sMtnSlots[isTitle][ubBfr], s_pMountains, s_uwMtnX);
+	bandSet(pList, &s_sHillSlots[isTitle][ubBfr], s_pHills, s_uwHillX);
+	bandSet(pList, &s_sGndSlots[isTitle][ubBfr], s_pGround, s_uwGndX);
 }
 
 // ----------------------------------------------------------- blit queue ---
@@ -334,10 +525,16 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 // objects back to front. The CPU feeds the blits to the blitter while it
 // runs the game.
 
-#define MSG_LINES 5
+#define MSG_LINES 9
 #define MSG_LEN 40
 static tAgkText s_pMsg[2][MSG_LINES];
-static const UBYTE s_pMsgY[MSG_LINES] = {96, 110, 132, 146, 168};
+// lines 0-3 for the mission, game over...; 4-8 the title's, under its logo
+#define MSG_TITLE 4
+static const UBYTE s_pMsgY[MSG_LINES] = {
+	96, 110, 132, 146,
+	TITLE_TEXT_Y, TITLE_TEXT_Y + 10, TITLE_TEXT_Y + 22, TITLE_TEXT_Y + 32, TITLE_TEXT_Y + 45,
+};
+_Static_assert(TITLE_TEXT_Y > 146 + 9, "the title's lines are below the others");
 #define MSG_TYPE_PER_FRAME 2         // new letters a picture: text is slow, and it types itself
                                      // (3 made the title's worst frame 91% with the cloud band)
 static char s_pMsgStage[2][MSG_LINES][MSG_LEN + 1];   // what each line is showing / about to show
@@ -377,7 +574,6 @@ static void bobsCreate(void) {
 	bobAdd(BOB_SHELL, artShellCreate(), artShellCreateMask(), ART_SHELL_W, ART_SHELL_H, ART_SHELL_FRAMES);
 	bobAdd(BOB_BOOM, artBoomCreate(), artBoomCreateMask(), ART_BOOM_W, ART_BOOM_H, ART_BOOM_FRAMES);
 	bobAdd(BOB_FLAG, artFlagCreate(), artFlagCreateMask(), ART_FLAG_W, ART_FLAG_H, ART_FLAG_FRAMES);
-	bobAdd(BOB_LOGO, artLogoCreate(), artLogoCreateMask(), ART_LOGO_W, ART_LOGO_H, ART_LOGO_FRAMES);
 	bobAdd(BOB_SHADOW, artShadowCreate(), artShadowCreateMask(), ART_SHADOW_W, ART_SHADOW_H, ART_SHADOW_FRAMES);
 	UBYTE t = 0;
 	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
@@ -386,7 +582,7 @@ static void bobsCreate(void) {
 			// Shots and shells are small and solid: a plain copy (half the bus)
 			// Buildings are drawn first, onto an empty buffer: a plain copy too
 			UBYTE isCopy = b == BOB_SHOT || b == BOB_SHELL || b == BOB_HANGAR ||
-				b == BOB_FENCE || b == BOB_BARRACKS || b == BOB_FLAG || b == BOB_LOGO;
+				b == BOB_FENCE || b == BOB_BARRACKS || b == BOB_FLAG;
 			agkBlitBob(s_pTpl[t], s_pBobBm[b], isCopy ? 0 : s_pBobMask[b], g_pBobW[b], g_pBobH[b], f, FB_PLANE_BYTES);
 		}
 	}
@@ -409,13 +605,20 @@ __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 	tAgkBlitArea *pErase = s_pErase[ubBfr];
 	UBYTE ubDrawn = 0;
 	const tDraw *pD = s_pDraw;
+	// the lines this state writes in (only their letters need guarding)
+	UBYTE isTitle = s_sGame.state == GS_TITLE;
+	UBYTE ubMsgFirst = isTitle ? MSG_TITLE : 0, ubMsgEnd = isTitle ? MSG_LINES : MSG_TITLE;
 	// what last time's BOBs covered gets erased now: those letters need redrawing
+	// (not in the other layout's lines: msgLayoutClear() is about to clear them)
 	if(s_pMsgAnyCover[ubBfr]) {
 		s_pMsgAnyCover[ubBfr] = 0;
 		for(UBYTE l = 0; l < MSG_LINES; ++l) {
-			s_pMsgFix[ubBfr][l][0] |= s_pMsgCover[ubBfr][l][0];
-			s_pMsgFix[ubBfr][l][1] |= s_pMsgCover[ubBfr][l][1];
-			s_pMsgAnyFix[ubBfr] |= (s_pMsgCover[ubBfr][l][0] | s_pMsgCover[ubBfr][l][1]) != 0;
+			if(l >= ubMsgFirst && l < ubMsgEnd) {
+				s_pMsgFix[ubBfr][l][0] |= s_pMsgCover[ubBfr][l][0];
+				s_pMsgFix[ubBfr][l][1] |= s_pMsgCover[ubBfr][l][1];
+				s_pMsgAnyFix[ubBfr] |= (s_pMsgCover[ubBfr][l][0] | s_pMsgCover[ubBfr][l][1]) != 0;
+			}
+			else s_pMsgFix[ubBfr][l][0] = s_pMsgFix[ubBfr][l][1] = 0;
 			s_pMsgCover[ubBfr][l][0] = s_pMsgCover[ubBfr][l][1] = 0;
 		}
 	}
@@ -428,13 +631,13 @@ __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 		agkBlitArea(pErase++, pB);
 		agkBlitqPush();
 		++ubDrawn;
-		if(y < s_pMsgY[MSG_LINES - 1] + 8 && y + g_pBobH[b] > s_pMsgY[0]) {
+		if(y < s_pMsgY[ubMsgEnd - 1] + 8 && y + g_pBobH[b] > s_pMsgY[ubMsgFirst]) {
 			// (the erase covers whole words: from the word's start, + 16 px)
 			WORD c0 = (WORD)(((x - FB_X0) & ~15) >> 3), c1 = (WORD)((x - FB_X0 + g_pBobW[b] + 15) >> 3);
 			if(c0 < 0) c0 = 0;
 			if(c1 > MSG_LEN - 1) c1 = MSG_LEN - 1;
 			s_pMsgAnyCover[ubBfr] = 1;
-			for(UBYTE l = 0; l < MSG_LINES; ++l) {
+			for(UBYTE l = ubMsgFirst; l < ubMsgEnd; ++l) {
 				if(y < s_pMsgY[l] + 8 && y + g_pBobH[b] > s_pMsgY[l]) {
 					for(WORD c = c0; c <= c1; ++c) s_pMsgCover[ubBfr][l][c >> 5] |= 1UL << (c & 31);
 				}
@@ -648,6 +851,12 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 // frame buffer by the CPU after the blitter's done. They're redrawn every
 // picture they show: a BOB's erase may cross them.
 
+// Per buffer, a bit per line: letters may be showing there. When the screen
+// changes, the blitter clears the lines of the layout not in use, a line a
+// picture, rather than typing spaces for seconds.
+static UWORD s_pMsgLit[2];
+#define MSG_LAYOUT_BITS(isTitle) ((isTitle) ? (((1 << MSG_LINES) - 1) & ~((1 << MSG_TITLE) - 1)) : ((1 << MSG_TITLE) - 1))
+
 static void msgInit(void) {
 	for(UBYTE b = 0; b < 2; ++b) {
 		for(UBYTE l = 0; l < MSG_LINES; ++l) {
@@ -656,6 +865,35 @@ static void msgInit(void) {
 			s_pMsgStage[b][l][MSG_LEN] = 0;
 		}
 	}
+}
+
+// Queued before the picture's objects: a line of the layout not in use now
+// cleared, if anything shows there (the screen changed). One line a picture
+// (the switch itself is a heavy picture), just the words its letters are in
+// (one character = one byte of each plane).
+__attribute__((noinline)) static void msgLayoutClear(UBYTE ubBfr) {
+	// (after the HUD's done typing: both at once made the heaviest picture)
+	UWORD uwLit = (UWORD)(s_pMsgLit[ubBfr] & MSG_LAYOUT_BITS(s_sGame.state != GS_TITLE));
+	if(!uwLit || s_pHudPending[ubBfr]) return;
+	UBYTE l = 0;
+	while(!(uwLit & 1)) { uwLit >>= 1; ++l; }
+	s_pMsgLit[ubBfr] &= (UWORD)~(1 << l);
+	char *pStage = s_pMsgStage[ubBfr][l];
+	UBYTE c0 = 0, c1 = MSG_LEN;
+	while(c0 < MSG_LEN && pStage[c0] == ' ') ++c0;
+	if(c0 == MSG_LEN) return;   // spaces typed over it already
+	while(pStage[c1 - 1] == ' ') --c1;
+	UBYTE b0 = (UBYTE)(c0 & ~1), b1 = (UBYTE)((c1 + 1) & ~1);
+	tAgkBlitArea sArea;
+	sArea.pD = s_pFb[ubBfr]->Planes[0] + s_pFbRowOffs[s_pMsgY[l]] + FB_X0 / 8 + b0;
+	sArea.uwSize = (UWORD)(((8 * FB_BPP) << 6) | ((b1 - b0) >> 1));
+	sArea.wMod = (WORD)(FB_PLANE_BYTES - (b1 - b0));
+	agkBlitClear(agkBlitqSlot(), &sArea);
+	agkBlitqPush();
+	char *pShown = s_pMsg[ubBfr][l].szShown;
+	for(UBYTE c = c0; c < c1; ++c) pStage[c] = pShown[c] = ' ';
+	s_pMsgFix[ubBfr][l][0] = s_pMsgFix[ubBfr][l][1] = 0;
+	s_pMsgCover[ubBfr][l][0] = s_pMsgCover[ubBfr][l][1] = 0;
 }
 
 static void msgCentre(char *szOut, const char *szText) {
@@ -669,15 +907,15 @@ static void msgCentre(char *szOut, const char *szText) {
 
 __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	const tGame *g = &s_sGame;
-	const char *pText[MSG_LINES] = {"", "", "", "", ""};
+	const char *pText[MSG_LINES] = {"", "", "", "", "", "", "", "", ""};
 	char szA[24], szB[28];
 	switch(g->state) {
 		case GS_TITLE:
-			pText[0] = "BY PAUL ROSS SEIBERT";
-			pText[1] = "@ 2026 DESERT PALMS SOFTWARE";
-			pText[2] = "FLY IN. BLOW THE BARRACKS OPEN.";
-			pText[3] = "LAND. BRING THEM HOME.";
-			pText[4] = (g->frame & 32) ? "PRESS FIRE" : "";
+			pText[MSG_TITLE] = "BY PAUL ROSS SEIBERT";
+			pText[MSG_TITLE + 1] = "@ 2026 DESERT PALMS SOFTWARE";
+			pText[MSG_TITLE + 2] = "FLY IN. BLOW THE BARRACKS OPEN.";
+			pText[MSG_TITLE + 3] = "LAND. BRING THEM HOME.";
+			pText[MSG_TITLE + 4] = (g->frame & 32) ? "PRESS FIRE" : "";
 			break;
 		case GS_INTRO: {
 			const char *szM = "MISSION 1";
@@ -754,7 +992,10 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 			}
 			pFix[0] = pFix[1] = 0;
 		}
-		if(isChange) agkTextSet(&s_pMsg[ubBfr][l], pStage);
+		if(isChange) {
+			agkTextSet(&s_pMsg[ubBfr][l], pStage);
+			s_pMsgLit[ubBfr] |= (UWORD)(1 << l);
+		}
 	}
 	// all typed: settled until the key changes
 	s_pMsgKey[ubBfr] = ubBudget ? uwKey : 0xFFFF;
@@ -1099,6 +1340,11 @@ void genericCreate(void) {
 	for(UBYTE b = 0; b < 2; ++b) s_pFb[b] = bitmapCreate(FB_W, FB_H, FB_BPP, BMF_CLEAR | BMF_INTERLEAVED);
 	for(UBYTE b = 0; b < 2; ++b) s_pHud[b] = bitmapCreate(HUD_W, PLAY_TOP, FB_BPP, BMF_CLEAR | BMF_INTERLEAVED);
 	s_pBlankRow = memAllocChipClear(FETCH_BYTES);
+	// the title logo's memory and the title's copper lists (filled by titleLoad())
+	s_pTitleLogo = memAllocChip(TITLE_LOGO_BYTES);
+	s_pTitleFixed = (const UWORD *)s_pTitleLogo;
+	s_pTitleRows = (const UWORD (*)[TITLE_LOGO_ROW_REGS])(s_pTitleLogo + TITLE_LOGO_ROWS_OFFS);
+	for(UBYTE b = 0; b < 2; ++b) s_pTitleList[b] = memAllocChip(TITLE_COP_COUNT * sizeof(tCopCmd));
 	s_pCloudsBm = artCloudsCreate();
 	s_pMountains = artMountainsCreate();
 	s_pHills = artHillsCreate();
@@ -1126,13 +1372,18 @@ void genericCreate(void) {
 		for(UWORD y = 0; y < SKY_END - PLAY_TOP; ++y) s_pSky[m][y] = logicSkyColor(m, (UBYTE)y);
 	tCopList *pCopList = s_pView->pCopList;
 	s_pCopBfrA = pCopList->pBackBfr;
-	copperWriteList(pCopList->pBackBfr->pList, 0, 0);
-	copperWriteList(pCopList->pFrontBfr->pList, 1, 0);
+	// the game lists jump to the title lists (it starts at the title)
+	for(UBYTE b = 0; b < 2; ++b) s_pListTitle[b] = s_sGame.state == GS_TITLE;
+	copperWriteList(pCopList->pBackBfr->pList, 0, 0, 0);
+	copperWriteList(pCopList->pFrontBfr->pList, 1, 0, 0);
 	s_pListMission[0] = s_pListMission[1] = 0;
 
 	soundCreate();
 	rotorCreate();
-	musicFor(s_sGame.state);
+	// With the splash: the title logo once it's on screen (genericProcess), then
+	// the music. Without it, now.
+	s_isTitlePending = 1;
+	if(!s_isSplash) titleLoad();
 
 	viewLoad(s_pView);
 	systemUnuse();
@@ -1209,8 +1460,10 @@ void genericProcess(void) {
 			s_isReady = 1;
 			agkReady();
 		}
+		else if(s_isTitlePending) titleLoad();   // the splash is still black
 		return;
 	}
+	if(s_isTitlePending) titleLoad();   // (not loaded during the splash: now)
 	if(s_ubAfterSplash < 3 && ++s_ubAfterSplash == 2) {
 		// the game's copper list is showing now: its colours back, the logo freed
 		for(UBYTE i = 1; i < 32; ++i) g_pCustom->color[i] = s_pVPort->pPalette[i];
@@ -1228,6 +1481,7 @@ void genericProcess(void) {
 		logicUpdate(&s_sGame, &sIn);
 		playSounds(ubStateBefore);
 	}
+	msgLayoutClear(ubBfr);
 	agkBlitqPoll();
 	objectsQueue(ubBfr);
 	agkBlitqPoll();
@@ -1248,6 +1502,8 @@ void genericProcess(void) {
 	if(s_sGame.frame == 2) {
 		agkState("copper_used", s_uwCopUsed);
 		agkState("copper_max", COP_RAW_COUNT);
+		agkState("title_copper_used", s_uwTitleCopUsed);
+		agkState("title_copper_max", TITLE_COP_COUNT);
 		agkEnd();
 		if(!s_isReady) {
 			s_isReady = 1;
@@ -1279,6 +1535,8 @@ void genericDestroy(void) {
 	bitmapDestroy(s_pHills);
 	bitmapDestroy(s_pMountains);
 	bitmapDestroy(s_pCloudsBm);
+	for(UBYTE b = 0; b < 2; ++b) memFree(s_pTitleList[b], TITLE_COP_COUNT * sizeof(tCopCmd));
+	if(s_pTitleLogo) memFree(s_pTitleLogo, TITLE_LOGO_BYTES);
 	memFree(s_pBlankRow, FETCH_BYTES);
 	for(UBYTE b = 0; b < 2; ++b) {
 		bitmapDestroy(s_pHud[b]);

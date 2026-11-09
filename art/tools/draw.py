@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """ROTOR RESCUE's art (by Paul Ross Seibert), drawn as text art into art/*.txt:
 the rescue chopper (an attached 15-colour hardware sprite), every BOB on
-playfield 1, the title logo and the three parallax bands of playfield 2.
+playfield 1 and the three parallax bands of playfield 2 (the title logo is
+art/tools/make_title_logo.py).
 Deterministic: the same script always draws the same pixels.
 
     python3 art/tools/draw.py
 """
-import importlib.util
 import math
 import os
 import random
@@ -737,41 +737,6 @@ def flag():
     save('flag', 'Home base flag, 16x24, waving.', PF1, frames)
 
 
-def logo():
-    spec = importlib.util.spec_from_file_location('font8', '/home/amiga/amiga-game-kit/tools/font8.py')
-    src = open('/home/amiga/amiga-game-kit/tools/font8.py').read()
-    glyphs = {}
-    exec(src.split('here =')[0], {'os': os}, glyphs)
-    G = glyphs['GLYPHS']
-    text = 'ROTOR RESCUE'
-    w, h = 208, 26
-    g = grid(w, h)
-    sx, sy = 3, 3      # scale
-    adv = 17                # 5 columns x 3 + a 2 px gap
-    x0 = (w - len(text) * adv + 2) // 2 - 1
-    for i, ch in enumerate(text):
-        rows = G[ch]
-        for gy, row in enumerate(rows):
-            for gx, c in enumerate(row):
-                if c != '#':
-                    continue
-                for yy in range(sy):
-                    for xx in range(sx):
-                        X = x0 + i * adv + gx * sx + xx
-                        Y = 2 + gy * sy + yy
-                        band = Y - 2
-                        col = 'W' if band < 4 else 'Y' if band < 11 else 'R' if band < 17 else 'R'
-                        g[Y][X] = col
-    # a drop shadow then an outline
-    shadow = [r[:] for r in g]
-    for y in range(h):
-        for x in range(w):
-            if g[y][x] != '.' and y + 2 < h and x + 2 < w and shadow[y + 2][x + 2] == '.':
-                shadow[y + 2][x + 2] = 'K'
-    g = outline(shadow)
-    save('logo', 'Title logo, 208x26: ROTOR RESCUE.', PF1, [g])
-
-
 # ---------------------------------------------------------------- PF2 bands
 # Indices 1-7 dark to light. art/mtn_pal.txt and art/land_pal.txt give mission
 # 1's colours; the copper loads each mission's own (logic.c tables).
@@ -958,7 +923,6 @@ if __name__ == '__main__':
     boom()
     shadow()
     flag()
-    logo()
     clouds()
     mountains()
     hills()

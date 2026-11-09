@@ -62,10 +62,6 @@ kind = "bob"
 source = "flag.txt"
 kind = "bob"
 
-[logo]
-source = "logo.txt"
-kind = "bob"
-
 [clouds]                  # PF2 band, camera / 8 (the far sky)
 source = "clouds.txt"
 kind = "bitmap"

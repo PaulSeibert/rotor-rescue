@@ -1,10 +1,16 @@
-# The title screen: logo, the author's credit, the parallax land, the HUD.
+# The title screen: the logo over the sky, the author's credit, the land, the HUD.
 wait-serial "AGK t0"
 wait 60
 screenshot title
 expect-serial "AGK ready"
 expect-serial "state=0"
-expect-no-serial "ERR|STACK SMASHED"
-# "BY PAUL ROSS SEIBERT" (cream letters) and the logo (yellow band)
-expect-color title 81 98 0xFEC
-expect-color title 58 62 0xFC3
+expect-no-serial "ERR|STACK SMASHED|title logo missing"
+# the logo (its own 4-plane copper section): ROTOR's blue (a fixed colour),
+# RESCUE's gold and its orange lower down (colours the copper reloads per
+# line), the sky's gradient beside it
+expect-color title 106 75 0x3EF
+expect-color title 106 111 0xFD0
+expect-color title 130 127 0xF30
+expect-color title 70 111 0x845
+# "BY PAUL ROSS SEIBERT" under it (cream letters: PF1's colours are back)
+expect-color title 81 159 0xFEC

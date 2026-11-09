@@ -19,7 +19,8 @@ wait-serial "splash done"
 wait-serial "AGK t0"
 wait 60
 screenshot title
-# "(c) 2026 DESERT PALMS SOFTWARE" under the author: the copyright sign's C
-expect-color title 51 112 0xFEC
-expect-color title 50 110 0xFEC
+# "(c) 2026 DESERT PALMS SOFTWARE" under the logo and the author: the
+# copyright sign's C
+expect-color title 51 171 0xFEC
+expect-color title 50 169 0xFEC
 expect-no-serial "AGK ERR"
