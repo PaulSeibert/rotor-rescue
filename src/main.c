@@ -918,8 +918,9 @@ void genericProcess(void) {
 	if(s_ubAfterSplash < 3 && ++s_ubAfterSplash == 2) {
 		// the game's copper list is showing now: its colours back, the logo freed
 		for(UBYTE i = 1; i < 32; ++i) g_pCustom->color[i] = s_pVPort->pPalette[i];
-		splashDestroy();   // 47 KB of chip RAM back (ACE's memFree asks the OS: a few frames, once)
-		agkPerfSkip();
+		// The splash's 47 KB stay allocated until the game quits (genericDestroy):
+		// ACE's memFree switches the OS back on for each free, which froze the
+		// title for ~6 frames right as it appeared. Chip RAM has room for it.
 	}
 	UBYTE ubBfr = backBuffer();
 	// the HUD's text first, while the blitter's idle: chip RAM writes are slow beside it
