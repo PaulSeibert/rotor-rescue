@@ -688,7 +688,61 @@ static void testHarderTanksFireSooner(void) {
 	CHECK(pFrames[1] > pFrames[3] && pFrames[3] > pFrames[5]);
 }
 
+// Head-on: the sidestep is quick both ways (Choplifter's jink), side flight stays heavy
+static void testHeadOnStrafeIsSnappy(void) {
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.dy = 1, .fire = 1}, 1);
+	step(NONE, TURN_STEP_FRAMES + 1);
+	CHECK(g.chop.face == FACE_FRONT);
+	g.chop.y = 120; g.chop.vy = 0;
+	step((tInput){.dx = 1}, 8);
+	CHECK(g.chop.vx == HO_VX_MAX && g.chop.face == FACE_FRONT);   // full speed in 8 frames, still facing front
+	step((tInput){.dx = -1}, 10);
+	CHECK(g.chop.vx == -HO_VX_MAX && g.chop.face == FACE_FRONT);  // turned round in 10
+	step(NONE, 8);
+	CHECK(g.chop.vx == 0);                                         // stopped in 8
+	// facing a side, the same push is the heavy cruise
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.dx = -1}, 8);
+	CHECK(g.chop.vx == -8 * VX_ACCEL);
+}
+
+// Jets: they start well off screen (heard and on the radar first) and don't
+// fire until they've been on screen a while
+static void testJetsGiveWarning(void) {
+	newGame();
+	flyAt(2400, 120);
+	g.trip = 10;                                   // jets on at any difficulty
+	for(int i = 0; i < JET_MAX; ++i) g.pJets[i].cool = 1;
+	g.chop.vx = -20;                               // flying left: the jet comes from the left, ahead
+	step(NONE, 2);                                 // (the cool-down's last frame, then it comes)
+	g.chop.vx = 0;
+	int k = -1;
+	for(int i = 0; i < JET_MAX; ++i) if(g.pJets[i].active) k = i;
+	CHECK(k >= 0);
+	if(k < 0) return;
+	tJet *j = &g.pJets[k];
+	CHECK(j->x < g.cam - 100 || j->x > g.cam + SCREEN_W + 100);   // well off screen
+	CHECK(g.events & EV_JET);                                     // its sound
+	// no missile while it's off screen, nor in its first frames on screen
+	int firstShotSeen = -1;
+	for(int f = 0; f < 200 && firstShotSeen < 0; ++f) {
+		g.chop.x = 2400; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.chop.y = (int16_t)(j->y + 8);            // in its line of fire
+		step(NONE, 1);
+		for(int s = 0; s < ESHOT_MAX; ++s)
+			if(g.pEShots[s].active && g.pEShots[s].kind == ESHOT_MISSILE) firstShotSeen = j->seen;
+		if(!g.chop.alive) break;
+	}
+	CHECK(firstShotSeen < 0 || firstShotSeen >= 18);
+	printf("jets: first missile after %d frames on screen\n", firstShotSeen);
+}
+
 int main(void) {
+	testHeadOnStrafeIsSnappy();
+	testJetsGiveWarning();
 	testTitleNeedsFire();
 	testStartsLandedAtBase();
 	testTakeOffAndClimb();

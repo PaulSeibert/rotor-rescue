@@ -64,6 +64,7 @@ two-button pad) makes turning quicker.
 | Fire, facing left or right | Cannon: hits jets, mines, tanks and barracks (and people, so careful) |
 | Down + Fire in the air | Turn to face the screen |
 | Fire, facing the screen | Drop a bomb: tanks and barracks |
+| Left / right, facing the screen | A quick sidestep: jink between bombs and shells |
 | Fire 2 (second button) | Turn: left → front → right → front … |
 | Keyboard | Arrows, Space = fire, X = turn, P = pause, M = music on/off, Esc = quit |
 | Ctrl+L, then 0-5 | Difficulty (see below), on the title screen or during play |
@@ -92,7 +93,9 @@ the right of the score bar and stays until you change it.
   reaches the hangar counts as **SAVED**.
 - Tanks shell a chopper that's low or on the ground, so don't sit still for
   long.
-- Jets join in after your first trip home, and air mines after the second.
+- Jets join in after your first trip home, and air mines after the second. You hear a jet
+  and see it on the radar before it's on screen, mostly coming from ahead, and it holds
+  its fire for a moment after it appears.
 - One hit and the chopper goes down with everyone aboard.
 - A mission ends when all 64 are saved or lost. The game ends when the last
   chopper is gone, and you get a rank for everyone you saved.

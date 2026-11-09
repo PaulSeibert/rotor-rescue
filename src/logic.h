@@ -126,6 +126,7 @@ typedef struct {
 	int8_t dir;
 	uint8_t active, cool, hp;
 	uint8_t pass;        // passes made
+	uint8_t seen;        // frames on screen this pass: no shot before JET_AIM frames
 } tJet;
 
 typedef struct {
@@ -213,6 +214,16 @@ typedef struct {
 #define VX_MAX 48            // 3 px/frame
 #define VX_ACCEL 2
 #define VX_DRAG 1
+// Head-on (facing the screen to bomb): a quick sidestep, Choplifter's jink -
+// full speed in ~5 frames, a reversal in ~9, a stop in ~8 (side flight takes
+// 24 / 48 / 48: a heavy machine cruising)
+#define HO_VX_MAX 40         // 2.5 px/frame
+#define HO_ACCEL 8
+#define HO_REVERSE 12        // pushing against the drift
+#define HO_DRAG 5
+// Jets: heard and seen on the radar before they're on screen, and a beat to react
+#define JET_MISSILE_SPEED 80 // 5 px/frame (was 6)
+#define JET_AHEAD_MIN 56     // no shot from closer than this ahead
 #define VY_UP_MAX 28
 #define VY_DOWN_MAX 32
 #define VY_ACCEL 3

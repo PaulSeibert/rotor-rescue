@@ -268,6 +268,10 @@ static const uint8_t s_pJetsFrom[DIFFICULTY_MAX + 1] = {1, 3, 2, 1, 1, 0};      
 static const uint8_t s_pMinesFrom[DIFFICULTY_MAX + 1] = {2, 4, 3, 2, 1, 1};      // ... and mines
 static const int16_t s_pSpawnExtra[DIFFICULTY_MAX + 1] = {0, 120, 60, 0, -40, -70};
 static const int16_t s_pJetRest[DIFFICULTY_MAX + 1] = {0, 80, 40, 0, -30, -50};  // frames between jet passes
+// how far off screen a jet starts (its sound and radar dot are the warning) and
+// how long it's on screen before its first shot
+static const uint8_t s_pJetLead[DIFFICULTY_MAX + 1] = {255, 255, 220, 180, 150, 130};
+static const uint8_t s_pJetAim[DIFFICULTY_MAX + 1] = {40, 40, 30, 24, 20, 18};
 
 void logicSetDifficulty(tGame *g, uint8_t ubLevel) {
 	if(ubLevel <= DIFFICULTY_MAX) g->difficulty = ubLevel;
@@ -566,7 +570,19 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 		}
 	}
 	else {
-		if(pIn->dx > 0) c->vx = (int16_t)(c->vx + VX_ACCEL);
+		if(c->face == FACE_FRONT && !isTurning) {
+			// head-on: a sidestep - quick to go, quicker to turn round, quick to stop
+			if(pIn->dx) {
+				int16_t wWant = (int16_t)(pIn->dx * HO_VX_MAX);
+				uint8_t isAgainst = (c->vx > 0 && pIn->dx < 0) || (c->vx < 0 && pIn->dx > 0);
+				int16_t wStep = isAgainst ? HO_REVERSE : HO_ACCEL;
+				if(c->vx < wWant) c->vx = (int16_t)(c->vx + wStep > wWant ? wWant : c->vx + wStep);
+				else if(c->vx > wWant) c->vx = (int16_t)(c->vx - wStep < wWant ? wWant : c->vx - wStep);
+			}
+			else if(c->vx > 0) c->vx = (int16_t)(c->vx > HO_DRAG ? c->vx - HO_DRAG : 0);
+			else if(c->vx < 0) c->vx = (int16_t)(c->vx < -HO_DRAG ? c->vx + HO_DRAG : 0);
+		}
+		else if(pIn->dx > 0) c->vx = (int16_t)(c->vx + VX_ACCEL);
 		else if(pIn->dx < 0) c->vx = (int16_t)(c->vx - VX_ACCEL);
 		else if(c->vx > 0) c->vx = (int16_t)(c->vx - VX_DRAG);
 		else if(c->vx < 0) c->vx = (int16_t)(c->vx + VX_DRAG);
@@ -845,10 +861,16 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 		if(!j->active) {
 			if(!logicJetsOn(g) || !c->alive || c->x > BORDER_X + 120) continue;
 			if(j->cool) { --j->cool; continue; }
-			// in from the side the chopper flies away from
+			// mostly from ahead (where the chopper is heading: you see it coming),
+			// 1 in 4 from behind; well off screen, so its sound and its radar dot
+			// come first
 			j->active = 1;
-			j->dir = (logicRandom(g) & 1) ? 1 : -1;
-			j->x = (int16_t)(j->dir > 0 ? g->cam - 40 : g->cam + SCREEN_W + 40);
+			uint16_t r = logicRandom(g);
+			int8_t ahead = c->vx > 0 ? -1 : c->vx < 0 ? 1 : (c->face == FACE_RIGHT ? -1 : 1);
+			j->dir = (r & 3) ? ahead : (int8_t)-ahead;
+			int16_t wLead = s_pJetLead[g->difficulty];
+			j->x = (int16_t)(j->dir > 0 ? g->cam - wLead : g->cam + SCREEN_W + wLead);
+			j->seen = 0;
 			j->y = clampw((int16_t)(c->y - 20), PLAY_TOP + 16, 180);
 			j->hp = 1;
 			j->pass = 0;
@@ -862,17 +884,20 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 		if((g->frame & 1) && j->y < wTargetY) ++j->y;
 		if((g->frame & 1) && j->y > wTargetY) --j->y;
 		if(j->cool) --j->cool;
+		if(j->x > g->cam - 16 && j->x < g->cam + SCREEN_W + 16) {
+			if(j->seen < 255) ++j->seen;
+		}
 		int16_t dx = (int16_t)(c->x - j->x);
-		if(c->alive && !j->cool) {
+		if(c->alive && !j->cool && j->seen >= s_pJetAim[g->difficulty]) {
 			int16_t ahead = j->dir > 0 ? dx : (int16_t)-dx;
-			if(!c->landed && ahead > 40 && ahead < 200 && absw((int16_t)(c->y - 8 - j->y)) < 14) {
+			if(!c->landed && ahead > JET_AHEAD_MIN && ahead < 200 && absw((int16_t)(c->y - 8 - j->y)) < 14) {
 				tShot *s = eshotNew(g);
 				if(s) {
 					s->active = 1;
 					s->kind = ESHOT_MISSILE;
 					s->x = (int16_t)(j->x + j->dir * 16);
 					s->y = (int16_t)(j->y + 2);
-					s->vx = (int16_t)(j->dir * 96);
+					s->vx = (int16_t)(j->dir * JET_MISSILE_SPEED);
 					s->vy = 0;
 					s->fx = s->fy = 0;
 					s->life = 60;
@@ -901,7 +926,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 			chopperDestroy(g);
 			continue;
 		}
-		if((j->dir > 0 && j->x > g->cam + SCREEN_W + 64) || (j->dir < 0 && j->x < g->cam - 64)) {
+		if((j->dir > 0 && j->x > g->cam + SCREEN_W + 64 && j->seen) || (j->dir < 0 && j->x < g->cam - 64 && j->seen)) {
 			j->active = 0;
 			int16_t wRest = (int16_t)(160 - g->mission * 30 + s_pJetRest[g->difficulty]);
 			j->cool = (uint8_t)((wRest < 40 ? 40 : wRest) + (logicRandom(g) & 63));
