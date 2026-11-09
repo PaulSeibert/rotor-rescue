@@ -526,6 +526,78 @@ static void testChopperShadow(void) {
 	}
 }
 
+// Where particle p of channel c is this frame: 1 if it's on a slot
+static int wxFind(int c, int p, int16_t *pX, int16_t *pY) {
+	tWeatherFrame w;
+	if(!logicWeather(&g, &w)) return 0;
+	for(int k = 0; k < WX_SLOTS; ++k) {
+		if(((k - w.wraps) & (WX_PARTICLES - 1)) == p) {
+			*pY = (int16_t)(WX_TOP + c * (WX_PITCH / 2) + k * WX_PITCH + w.off);
+			*pX = (int16_t)(g_pWxX[c][p] + w.shift);
+			if(*pX >= SCREEN_W) *pX = (int16_t)(*pX - SCREEN_W);
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static void testWeather(void) {
+	tWeatherFrame w;
+	logicInit(&g);
+	CHECK(!logicWeather(&g, &w));                    // not on the title
+	CHECK(logicWeatherKind(0) == WX_DUST && logicWeatherKind(1) == WX_RAIN && logicWeatherKind(2) == WX_SPRAY);
+	CHECK(WX_TOP >= PLAY_TOP);
+	CHECK(WX_PITCH / 2 + (WX_SLOTS - 1) * WX_PITCH + WX_PITCH - 1 + WX_TOP + WX_H <= 300 - 44);  // in the frame
+	CHECK(WX_H < WX_PITCH);                          // a line between items (sprite DMA lists)
+	for(int c = 0; c < 2; ++c)
+		for(int p = 0; p < WX_PARTICLES; ++p) CHECK(g_pWxX[c][p] >= 0 && g_pWxX[c][p] < SCREEN_W);
+	for(uint8_t m = 0; m < MISSION_COUNT; ++m) {
+		newGame();
+		logicStartMission(&g, m);
+		step(NONE, INTRO_FRAMES + 1);
+		CHECK(g.state == GS_PLAY);
+		// a particle keeps its own path: its fall and drift per frame
+		static const int16_t pFallQ[3] = {1, 16, -1}, pDriftQ[3] = {2, -4, 3};
+		int checked = 0;
+		for(int t = 0; t < 64; ++t) {
+			int16_t x0, y0, x1, y1;
+			uint16_t uwFall0 = g.wxFall, uwDrift0 = g.wxDrift;
+			int had = wxFind(1, 5, &x0, &y0);
+			CHECK(logicWeather(&g, &w) && w.off < WX_PITCH && w.shift >= 0 && w.shift < SCREEN_W);
+			step(NONE, 1);
+			if(had && wxFind(1, 5, &x1, &y1)) {
+				// (wxFall starts mid-range at a mission: no 16-bit wrap in a test)
+				CHECK(y1 - y0 == ((int)(uint16_t)(uwFall0 + pFallQ[m]) >> 2) - ((int)uwFall0 >> 2));
+				int16_t dx = (int16_t)(((uwDrift0 + pDriftQ[m] + 4 * SCREEN_W) % (4 * SCREEN_W)) >> 2) - (int16_t)(uwDrift0 >> 2);
+				int16_t ddx = (int16_t)(x1 - x0);
+				CHECK(ddx == dx || ddx == dx + SCREEN_W || ddx == dx - SCREEN_W);
+				++checked;
+			}
+		}
+		CHECK(checked > 40);
+	}
+	// rain falls 4 px a frame
+	newGame();
+	logicStartMission(&g, 1);
+	step(NONE, INTRO_FRAMES + 1);
+	int16_t x0, y0, x1, y1;
+	int ok = 0;
+	for(int t = 0; t < 8 && !ok; ++t) {
+		if(wxFind(0, 3, &x0, &y0)) {
+			step(NONE, 1);
+			if(wxFind(0, 3, &x1, &y1)) ok = (y1 - y0 == 4);
+		}
+		else step(NONE, 1);
+	}
+	CHECK(ok);
+	// the camera carries them like the ground
+	g.cam = 1000;
+	CHECK(wxFind(0, 3, &x0, &y0));
+	g.cam = 1003;
+	CHECK(wxFind(0, 3, &x1, &y1));
+	CHECK(x1 - x0 == -3 || x1 - x0 == SCREEN_W - 3);
+}
+
 static void testRank(void) {
 	CHECK(logicRank(0)[0] == 'R');
 	CHECK(logicRank(192)[0] == 'L');
@@ -652,6 +724,7 @@ int main(void) {
 	testSkyGradient();
 	testDrawListShowsBaseAtStart();
 	testChopperShadow();
+	testWeather();
 	testRank();
 	testDeterministic();
 	testDifficultyDefaultsToNormalAndPersists();

@@ -172,6 +172,8 @@ typedef struct {
 	uint16_t spawnTimer;
 	uint8_t titleArmed;  // fire must be released before the title accepts it
 	uint8_t difficulty;  // 0 (invincible) .. DIFFICULTY_MAX; kept from game to game
+	uint16_t wxFall;     // the weather's slide, 1/4 px (wraps)
+	int16_t wxDrift;     // its wind, 1/4 px, 0..4 * SCREEN_W - 1
 	tChopper chop;
 	tHostage pHostages[HOSTAGE_COUNT];
 	// The hostages out in the open (free, running, walking home, a body still
@@ -310,6 +312,30 @@ int16_t logicSkyDotX(const tGame *g, uint8_t i);  // screen x of the left edge, 
 extern const uint16_t g_pMissionSkyDotPal[MISSION_COUNT][3];   // colours 29-31
 uint8_t logicSkyDotsAreStars(uint8_t ubMission);
 uint16_t logicStarTwinkle(const tGame *g);        // colour 31 at night this frame
+
+// Weather, close to the camera (it scrolls 1:1 with the ground) on sprite
+// channels 4-5, in front of everything: dust motes at dusk, rain at night, sea
+// spray at dawn. Colours 25-27 (the chopper's pale blue, orange and yellow:
+// a pair's colours are shared). Each channel's DMA list holds WX_SLOTS items
+// one under the other, WX_PITCH lines apart (channel 1 half a pitch lower);
+// the whole stack slides by off lines (falls, or rises), and every 16 lines
+// (a wrap) each particle moves on to the next slot, so slot k shows particle
+// (k - wraps) & (WX_PARTICLES - 1), at x = g_pWxX[channel][particle] + shift
+// (less SCREEN_W past the right edge). Played only in GS_PLAY and GS_LOST.
+enum { WX_DUST, WX_RAIN, WX_SPRAY };
+#define WX_PARTICLES 16
+#define WX_SLOTS 13
+#define WX_PITCH 16
+#define WX_H 15              // item height: a line free before the next one
+#define WX_TOP PLAY_TOP
+typedef struct {
+	uint8_t off;         // 0..WX_PITCH-1: the stack's slide
+	uint8_t wraps;       // (mod 256)
+	int16_t shift;       // 0..SCREEN_W-1: wind and camera
+} tWeatherFrame;
+extern const int16_t g_pWxX[2][WX_PARTICLES];
+uint8_t logicWeatherKind(uint8_t ubMission);
+uint8_t logicWeather(const tGame *g, tWeatherFrame *pW);   // 0: none now
 
 // Rank text for the end screen
 const char *logicRank(uint16_t uwSaved);

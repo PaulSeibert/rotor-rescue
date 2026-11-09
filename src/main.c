@@ -14,6 +14,8 @@
 //        mountains (camera / 4), near hills (camera / 2), the ground (1:1).
 //   COLOR00: a sky gradient per mission, line by line from the copper.
 //   Sprites 0-3: the chopper, 32 px wide, 15 colours (attached pairs).
+//   Sprites 4-5: the weather (dust, rain, spray), in front of everything.
+//   Sprite 6: the far sky's wisps or stars, behind the playfields.
 //   At boot: the Desert Palms Software logo (splash.c), its own copper lists.
 //   Paula channel 2: the rotor, a looped chop whose pitch follows the
 //        airspeed (driven here); music on 0, 1, 3; effects on 1 and 3.
@@ -46,11 +48,11 @@
 
 #define SYNC_FRAME 10         // "AGK t0": scenarios start here on every profile
 #define BPLCON0_DPF6 0x6600   // 6 planes | DBLPF | COLOR
-// PF1 in front of PF2; priority code 2 for both: sprite pairs 0-1 (the chopper,
-// channels 0-3) in front of both playfields, pairs 2-3 (the far sky layer,
-// channels 4-6) behind them - they only show through the sky. (Lines 24-119
-// run as a single 3-plane playfield, where PF2's code applies: so both.)
-#define BPLCON2_RR 0x0012
+// PF1 in front of PF2; priority code 3 for both: channels 0-5 (the chopper,
+// the weather) in front of both playfields, channels 6-7 (the far sky layer)
+// behind them - they only show through the sky. (Lines 24-119 run as a single
+// 3-plane playfield, where PF2's code applies: so both.)
+#define BPLCON2_RR 0x001B
 #define DDFSTRT_SCROLL 0x30   // one fetch word early for fine scroll (costs sprite 7)
 #define DDFSTOP_LORES 0xD0
 #define FETCH_BYTES 42        // 21 words a line: 320 px + the scroll word
@@ -264,12 +266,15 @@ static UWORD s_uwMtnX, s_uwHillX, s_uwGndX;
 // The back list: this mission's colours (rewritten once when it changes),
 // then each band's scroll for the camera.
 __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
+	static WORD pListCam[2] = {-1, -1};   // the camera each list's scroll is for
 	tCopCmd *pList = s_pView->pCopList->pBackBfr->pList;
+	WORD wCam = s_sGame.cam;
 	if(s_pListMission[ubBfr] != s_sGame.mission) {
 		s_pListMission[ubBfr] = s_sGame.mission;
 		copperWriteList(pList, ubBfr, s_sGame.mission);
 	}
-	WORD wCam = s_sGame.cam;
+	else if(wCam == pListCam[ubBfr]) return;   // a still camera: nothing to scroll (chip RAM writes are slow)
+	pListCam[ubBfr] = wCam;
 	bandSet(pList, &s_sCloudSlots[ubBfr], s_pCloudsBm, logicBandOffset(wCam, 3, ART_CLOUDS_LOOP_W));
 	s_uwMtnX = logicBandOffset(wCam, 2, ART_MOUNTAINS_LOOP_W);
 	s_uwHillX = logicBandOffset(wCam, 1, ART_HILLS_LOOP_W);
@@ -294,6 +299,7 @@ static char s_pMsgStage[2][MSG_LINES][MSG_LEN + 1];   // what each line is showi
 static ULONG s_pMsgCover[2][MSG_LINES][2];  // columns (bits) this buffer's BOBs covered last time
 static ULONG s_pMsgFix[2][MSG_LINES][2];    // columns an erase crossed: redraw their letters
 static UBYTE s_pMsgAnyFix[2];
+static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
 #define TPL_MAX 48
@@ -359,11 +365,14 @@ __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 	UBYTE ubDrawn = 0;
 	const tDraw *pD = s_pDraw;
 	// what last time's BOBs covered gets erased now: those letters need redrawing
-	for(UBYTE l = 0; l < MSG_LINES; ++l) {
-		s_pMsgFix[ubBfr][l][0] |= s_pMsgCover[ubBfr][l][0];
-		s_pMsgFix[ubBfr][l][1] |= s_pMsgCover[ubBfr][l][1];
-		s_pMsgAnyFix[ubBfr] |= (s_pMsgCover[ubBfr][l][0] | s_pMsgCover[ubBfr][l][1]) != 0;
-		s_pMsgCover[ubBfr][l][0] = s_pMsgCover[ubBfr][l][1] = 0;
+	if(s_pMsgAnyCover[ubBfr]) {
+		s_pMsgAnyCover[ubBfr] = 0;
+		for(UBYTE l = 0; l < MSG_LINES; ++l) {
+			s_pMsgFix[ubBfr][l][0] |= s_pMsgCover[ubBfr][l][0];
+			s_pMsgFix[ubBfr][l][1] |= s_pMsgCover[ubBfr][l][1];
+			s_pMsgAnyFix[ubBfr] |= (s_pMsgCover[ubBfr][l][0] | s_pMsgCover[ubBfr][l][1]) != 0;
+			s_pMsgCover[ubBfr][l][0] = s_pMsgCover[ubBfr][l][1] = 0;
+		}
 	}
 	for(UBYTE i = n; i--; ++pD) {
 		UBYTE b = pD->bob;
@@ -379,6 +388,7 @@ __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 			WORD c0 = (WORD)(((x - FB_X0) & ~15) >> 3), c1 = (WORD)((x - FB_X0 + g_pBobW[b] + 15) >> 3);
 			if(c0 < 0) c0 = 0;
 			if(c1 > MSG_LEN - 1) c1 = MSG_LEN - 1;
+			s_pMsgAnyCover[ubBfr] = 1;
 			for(UBYTE l = 0; l < MSG_LINES; ++l) {
 				if(y < s_pMsgY[l] + 8 && y + g_pBobH[b] > s_pMsgY[l]) {
 					for(WORD c = c0; c <= c1; ++c) s_pMsgCover[ubBfr][l][c >> 5] |= 1UL << (c & 31);
@@ -813,6 +823,113 @@ __attribute__((noinline)) static void skyUpdate(UBYTE ubBfr) {
 	g_pCustom->color[30] = pPal[1];
 }
 
+// ---------------------------------------------------------------- weather ---
+// Sprite channels 4-5 (logic.h): per kind and channel a DMA list of WX_SLOTS
+// items, the shapes drawn at startup, shared by both copper lists. First thing
+// in a picture, still in the vertical blank (no bitplane DMA: the CPU at full
+// speed, and the sprite DMA hasn't read the list yet), one channel's control
+// words are rewritten: channel 0 on even frames, 1 on odd ones, so each moves
+// at 25 Hz, half of them every frame - and it costs half. The vertical parts
+// come from a table per slide (s_pWxV): an item is an add, a compare, two ORs.
+
+#define WX_CH0 4
+#define WX_ITEM_WORDS (2 + 2 * WX_H)
+#define WX_WORDS (WX_SLOTS * WX_ITEM_WORDS + 2)
+static UWORD *s_pWxList[3][2];                 // [kind][channel]
+static UWORD s_pWxV[2][WX_PITCH][WX_SLOTS][2]; // [channel][slide][slot]: control words, no x
+static UWORD s_pWxH[2][WX_PARTICLES];          // particle x + the display's left edge
+
+// Per kind and channel, the pixels of an item: {x, y, colour 1-3 (25-27)},
+// x 0..15, y 0..WX_H-1. Two particles an item, a different pair per channel.
+typedef struct { UBYTE x, y, c; } tWxDot;
+#define WX_DOTS 8
+static const tWxDot s_pWxDots[3][2][WX_DOTS] = {
+	{   // dust: single motes, orange and yellow, catching the sun
+		{{4, 2, 3}, {12, 9, 2}, {0, 0, 0}},
+		{{9, 5, 2}, {2, 12, 3}, {0, 0, 0}},
+	},
+	{   // rain: pale blue streaks, slanting like the fall (4 down, 1 left)
+		{{4, 1, 1}, {4, 2, 1}, {3, 3, 1}, {3, 4, 1}, {12, 8, 1}, {12, 9, 1}, {11, 10, 1}, {11, 11, 1}},
+		{{8, 4, 1}, {8, 5, 1}, {7, 6, 1}, {7, 7, 1}, {2, 11, 1}, {2, 12, 1}, {1, 13, 1}, {1, 14, 1}},
+	},
+	{   // spray: pale droplets, a glint of the dawn in some
+		{{5, 3, 1}, {6, 3, 1}, {12, 10, 3}, {0, 0, 0}},
+		{{9, 6, 1}, {2, 12, 1}, {3, 12, 3}, {0, 0, 0}},
+	},
+};
+
+static void weatherFill(UWORD *pList, const tWxDot *pDots) {
+	UWORD pShape[2 * WX_H];
+	for(UBYTE i = 0; i < 2 * WX_H; ++i) pShape[i] = 0;
+	for(UBYTE d = 0; d < WX_DOTS; ++d) {
+		const tWxDot *p = &pDots[d];
+		if(!p->c) continue;
+		UWORD uwBit = (UWORD)(0x8000 >> p->x);
+		if(p->c & 1) pShape[2 * p->y] |= uwBit;       // DATA: bit 0 of the colour
+		if(p->c & 2) pShape[2 * p->y + 1] |= uwBit;   // DATB: bit 1
+	}
+	UWORD w = 0;
+	for(UBYTE k = 0; k < WX_SLOTS; ++k) {
+		pList[w++] = 0;
+		pList[w++] = 0;
+		for(UBYTE i = 0; i < 2 * WX_H; ++i) pList[w++] = pShape[i];
+	}
+	pList[w++] = 0;   // end of the list
+	pList[w] = 0;
+}
+
+static void weatherCreate(void) {
+	for(UBYTE k = 0; k < 3; ++k) {
+		for(UBYTE c = 0; c < 2; ++c) {
+			s_pWxList[k][c] = memAllocChipClear(WX_WORDS * sizeof(UWORD));
+			weatherFill(s_pWxList[k][c], s_pWxDots[k][c]);
+		}
+	}
+	UWORD uwX0 = (UWORD)(s_pView->ubPosX - 1);
+	for(UBYTE c = 0; c < 2; ++c) {
+		for(UBYTE p = 0; p < WX_PARTICLES; ++p) s_pWxH[c][p] = (UWORD)(uwX0 + g_pWxX[c][p]);
+		for(UBYTE o = 0; o < WX_PITCH; ++o) {
+			for(UBYTE k = 0; k < WX_SLOTS; ++k) {
+				UWORD uwV0 = (UWORD)(s_pView->ubPosY + WX_TOP + c * (WX_PITCH / 2) + o + k * WX_PITCH);
+				sprCtl(s_pWxV[c][o][k], 0, uwV0, (UWORD)(uwV0 + WX_H));
+			}
+		}
+	}
+}
+
+static void weatherDestroy(void) {
+	for(UBYTE k = 0; k < 3; ++k)
+		for(UBYTE c = 0; c < 2; ++c) memFree(s_pWxList[k][c], WX_WORDS * sizeof(UWORD));
+}
+
+// Call first in the picture (the vertical blank): see above
+__attribute__((noinline)) static void weatherUpdate(void) {
+	const tGame *g = &s_sGame;
+	tCopCmd *pList = s_pView->pCopList->pBackBfr->pList;
+	tWeatherFrame sW;
+	if(!logicWeather(g, &sW)) {
+		skyPointer(pList, WX_CH0, s_pBlankRow);       // two zero words: nothing
+		skyPointer(pList, WX_CH0 + 1, s_pBlankRow);
+		return;
+	}
+	UWORD *const *pLists = s_pWxList[logicWeatherKind(g->mission)];
+	UBYTE c = (UBYTE)(g->frame & 1);
+	UWORD *p = pLists[c];
+	const UWORD *pH = s_pWxH[c];
+	const UWORD *pV = s_pWxV[c][sW.off][0];
+	const UWORD uwWrapH = (UWORD)(s_pView->ubPosX - 1 + SCREEN_W);
+	UWORD uwShift = (UWORD)sW.shift;
+	UBYTE ubP = (UBYTE)(-sW.wraps);
+	for(UBYTE k = WX_SLOTS; k--; ++ubP, pV += 2, p += WX_ITEM_WORDS) {
+		UWORD uwH = (UWORD)(pH[ubP & (WX_PARTICLES - 1)] + uwShift);
+		if(uwH >= uwWrapH) uwH = (UWORD)(uwH - SCREEN_W);
+		p[0] = (UWORD)(pV[0] | (uwH >> 1));
+		p[1] = (UWORD)(pV[1] | (uwH & 1));
+	}
+	skyPointer(pList, WX_CH0, pLists[0]);
+	skyPointer(pList, WX_CH0 + 1, pLists[1]);
+}
+
 // ------------------------------------------------------------------ rotor ---
 // Paula channel 2: a looped chop (two blade passes of filtered noise) made
 // at startup; the period follows the airspeed, the volume the state.
@@ -908,13 +1025,17 @@ __attribute__((noinline)) static void playSounds(UBYTE ubStateBefore) {
 
 static void readInput(tInput *pIn) {
 	// Joystick in port 2 (ACE JOY1), a second button if the pad has one, and
-	// the keyboard (arrows, Space = fire, X = turn).
-	pIn->dx = (joyCheck(JOY1 + JOY_LEFT) || keyCheck(KEY_LEFT)) ? -1 :
-		(joyCheck(JOY1 + JOY_RIGHT) || keyCheck(KEY_RIGHT)) ? 1 : 0;
-	pIn->dy = (joyCheck(JOY1 + JOY_UP) || keyCheck(KEY_UP)) ? -1 :
-		(joyCheck(JOY1 + JOY_DOWN) || keyCheck(KEY_DOWN)) ? 1 : 0;
-	pIn->fire = joyCheck(JOY1 + JOY_FIRE) || keyCheck(KEY_SPACE);
-	pIn->fire2 = joyCheck(JOY1 + JOY_FIRE2) || keyCheck(KEY_X);
+	// the keyboard (arrows, Space = fire, X = turn). The stick is read straight
+	// from the hardware, as ACE's joyProcess() does, but port 2 only (that one
+	// filled a 24-entry table for four ports every frame: ~1.5% of a frame).
+	UWORD uwDat = g_pCustom->joy1dat;
+	UWORD uwUpDown = (UWORD)(uwDat ^ (uwDat >> 1));
+	UBYTE isLeft = (uwDat >> 9) & 1, isRight = (uwDat >> 1) & 1;
+	UBYTE isUp = (uwUpDown >> 8) & 1, isDown = uwUpDown & 1;
+	pIn->dx = (isLeft || keyCheck(KEY_LEFT)) ? -1 : (isRight || keyCheck(KEY_RIGHT)) ? 1 : 0;
+	pIn->dy = (isUp || keyCheck(KEY_UP)) ? -1 : (isDown || keyCheck(KEY_DOWN)) ? 1 : 0;
+	pIn->fire = !(g_pCia[CIA_A]->pra & 0x80) || keyCheck(KEY_SPACE);
+	pIn->fire2 = !(g_pCustom->potinp & (1 << 14)) || keyCheck(KEY_X);
 }
 
 void genericCreate(void) {
@@ -953,6 +1074,7 @@ void genericCreate(void) {
 	artChopperApplyColors(s_pVPort->pPalette); // colours 17-31
 	chopperCreate();
 	skyCreate();
+	weatherCreate();
 
 	for(UBYTE m = 0; m < MISSION_COUNT; ++m)
 		for(UWORD y = 0; y < SKY_END - PLAY_TOP; ++y) s_pSky[m][y] = logicSkyColor(m, (UBYTE)y);
@@ -1016,8 +1138,10 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 void genericProcess(void) {
 	agkPerfBegin();
 	s_ulFrameVbl = timerGet();
-	keyProcess();
-	joyProcess();
+	// the weather first, in the vertical blank (last frame's positions: a frame
+	// behind the ground, unseen in rain and dust)
+	if(!s_isSplash) weatherUpdate();
+	keyProcess();     // (the joystick: readInput(), from the hardware)
 	if(keyCheck(KEY_ESCAPE)) {
 		gameExit();
 		return;
@@ -1097,6 +1221,7 @@ void genericDestroy(void) {
 	systemSetDmaBit(DMAB_SPRITE, 0);
 	spriteManagerDestroy();
 	skyDestroy();
+	weatherDestroy();
 	for(UBYTE b = 0; b < 2; ++b)
 		for(UBYTE f = 0; f < ART_CHOPPER_FRAMES; ++f)
 			for(UBYTE p = 0; p < ART_CHOPPER_PARTS; ++p) bitmapDestroy(s_pChopFrames[b][f][p]);

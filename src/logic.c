@@ -62,6 +62,42 @@ const uint16_t g_pMissionSkyDotPal[MISSION_COUNT][3] = {
 	{0xA45, 0xE86, 0xFCA}, {0x335, 0x99B, 0xFFF}, {0xDA9, 0xFDB, 0xFFE},
 };
 
+// Weather (logic.h): per mission its slide and wind per frame, 1/4 px.
+// Dusk: motes sinking slowly on the breeze; night: rain, 4 px a frame, slanting
+// left; dawn: spray rising off the sea, carried right.
+static const int8_t s_pWxFallQ[MISSION_COUNT] = {1, 16, -1};
+static const int8_t s_pWxDriftQ[MISSION_COUNT] = {2, -4, 3};
+const int16_t g_pWxX[2][WX_PARTICLES] = {
+	{17, 213, 96, 284, 141, 52, 250, 177, 8, 120, 299, 70, 232, 158, 35, 196},
+	{262, 81, 189, 3, 135, 307, 44, 222, 108, 270, 160, 25, 205, 92, 245, 60},
+};
+
+uint8_t logicWeatherKind(uint8_t ubMission) {
+	return ubMission;    // WX_DUST, WX_RAIN, WX_SPRAY: one a mission
+}
+
+static void weatherUpdate(tGame *g) {
+	g->wxFall = (uint16_t)(g->wxFall + s_pWxFallQ[g->mission]);
+	int16_t d = (int16_t)(g->wxDrift + s_pWxDriftQ[g->mission]);
+	if(d >= 4 * SCREEN_W) d = (int16_t)(d - 4 * SCREEN_W);
+	else if(d < 0) d = (int16_t)(d + 4 * SCREEN_W);
+	g->wxDrift = d;
+}
+
+uint8_t logicWeather(const tGame *g, tWeatherFrame *pW) {
+	if(g->state != GS_PLAY && g->state != GS_LOST) return 0;
+	uint16_t uwPos = (uint16_t)(g->wxFall >> 2);
+	pW->off = (uint8_t)(uwPos & (WX_PITCH - 1));
+	pW->wraps = (uint8_t)(uwPos >> 4);
+	int16_t c = g->cam;
+	while(c >= SCREEN_W) c = (int16_t)(c - SCREEN_W);
+	while(c < 0) c = (int16_t)(c + SCREEN_W);
+	int16_t s = (int16_t)((g->wxDrift >> 2) - c);
+	if(s < 0) s = (int16_t)(s + SCREEN_W);
+	pW->shift = s;
+	return 1;
+}
+
 // ------------------------------------------------------------- helpers ---
 
 static inline int16_t absw(int16_t v) { return v < 0 ? (int16_t)-v : v; }
@@ -185,6 +221,8 @@ void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->saved = 0;
 	g->killed = 0;
 	g->spawnTimer = (uint16_t)(700 - ubMission * 150);   // a quiet start
+	g->wxFall = 0x8000;
+	g->wxDrift = 0;
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
 		g->pBarracks[b].x = s_pBarracksX[b];
 		g->pBarracks[b].hp = 2;
@@ -1047,6 +1085,7 @@ static uint8_t missionDone(const tGame *g) {
 
 void logicUpdate(tGame *g, const tInput *pIn) {
 	++g->frame;
+	weatherUpdate(g);
 	g->events = 0;
 	g->evBarracks = 0;
 	if(g->stateTimer) --g->stateTimer;
