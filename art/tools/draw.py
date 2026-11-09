@@ -557,6 +557,36 @@ def boom():
     save('boom', 'Explosion, 32x32, 5 frames.', PF1, frames)
 
 
+def shadow():
+    """The chopper's shadow on the track, 32x4: 4 sizes by altitude (on the
+    ground .. high up), each in 2 dither phases so the pattern stays put on the
+    screen whatever x it's drawn at (logic.c picks frame = size * 2 + (x & 1)).
+    Colour 1 (the outline black) dithered over the ground: a soft, see-through
+    shadow - a solid core low down, thinner and sparser the higher it flies."""
+    # per size: (half width of the core rows, half width of the rim rows, core density)
+    sizes = [(13, 9, 3), (11, 7, 2), (8, 5, 2), (5, 3, 1)]
+    frames = []
+    for half, rim, dens in sizes:
+        for phase in (0, 1):
+            g = grid(32, 4)
+            for y in range(4):
+                hw = rim if y in (0, 3) else half
+                for x in range(16 - hw, 16 + hw):
+                    edge = min(x - (16 - hw), 16 + hw - 1 - x)   # 0 at the ends
+                    d = dens if y in (1, 2) else min(dens, 2)
+                    if edge < 2:
+                        d = min(d, 3 if edge else 2)              # ragged, fading ends
+                    # 4 = solid, 3 = a solid row over a checker row, 2 = checker,
+                    # 1 = a dotted line (only odd/even x patterns: 2 phases cover them)
+                    chk = (x + y + phase) % 2 == 0
+                    on = d >= 4 or (d == 3 and (y == 1 or chk)) or (d == 2 and chk) or \
+                        (d == 1 and y == 2 and chk)
+                    if on:
+                        g[y][x] = 'K'
+            frames.append(g)
+    save('shadow', "The chopper's shadow, 32x4: 4 sizes (low .. high) x 2 dither phases.", PF1, frames)
+
+
 def flag():
     frames = []
     for f in range(2):
@@ -797,6 +827,7 @@ if __name__ == '__main__':
     mine()
     small()
     boom()
+    shadow()
     flag()
     logo()
     clouds()

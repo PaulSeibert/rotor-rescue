@@ -50,8 +50,12 @@
 enum {
 	BOB_HANGAR, BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_HOSTAGE, BOB_JET,
 	BOB_MINE, BOB_SHOT, BOB_BOMB, BOB_SHELL, BOB_BOOM, BOB_FLAG, BOB_LOGO,
-	BOB_TYPES
+	BOB_SHADOW, BOB_TYPES
 };
+// The chopper's shadow on the track: frame = size * 2 + dither phase (x & 1),
+// size 0 (on the ground) .. SHADOW_SIZES - 1 (high up)
+#define SHADOW_Y (GROUND_Y + 1)
+#define SHADOW_SIZES 4
 extern const uint8_t g_pBobW[BOB_TYPES], g_pBobH[BOB_TYPES], g_pBobFrames[BOB_TYPES];
 
 // Frames inside a BOB

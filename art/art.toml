@@ -54,6 +54,10 @@ kind = "bob"
 source = "boom.txt"
 kind = "bob"
 
+[shadow]                  # the chopper's shadow on the track (dithered colour 1)
+source = "shadow.txt"
+kind = "bob"
+
 [flag]
 source = "flag.txt"
 kind = "bob"

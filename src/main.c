@@ -82,7 +82,7 @@
 #define HUD_PLANE_BYTES (HUD_W / 8)
 #define HUD_ROW_BYTES (HUD_PLANE_BYTES * FB_BPP)
 #define RADAR_Y 14
-#define RADAR_H 7
+#define RADAR_H 8
 
 static tView *s_pView;
 static tVPort *s_pVPort;
@@ -327,6 +327,7 @@ static void bobsCreate(void) {
 	bobAdd(BOB_BOOM, artBoomCreate(), artBoomCreateMask(), ART_BOOM_W, ART_BOOM_H, ART_BOOM_FRAMES);
 	bobAdd(BOB_FLAG, artFlagCreate(), artFlagCreateMask(), ART_FLAG_W, ART_FLAG_H, ART_FLAG_FRAMES);
 	bobAdd(BOB_LOGO, artLogoCreate(), artLogoCreateMask(), ART_LOGO_W, ART_LOGO_H, ART_LOGO_FRAMES);
+	bobAdd(BOB_SHADOW, artShadowCreate(), artShadowCreateMask(), ART_SHADOW_W, ART_SHADOW_H, ART_SHADOW_FRAMES);
 	UBYTE t = 0;
 	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
 		s_pTplFirst[b] = t;
@@ -446,21 +447,29 @@ __attribute__((noinline)) static void hudUpdate(UBYTE ubBfr) {
 	const tGame *g = &s_sGame;
 	UBYTE isTitle = g->state == GS_TITLE;
 	ULONG ulScore = isTitle ? g->hiScore : g->score;
-	if(g->saved != pSaved[ubBfr] || g->aboard != pAboard[ubBfr] || g->killed != pKilled[ubBfr] ||
-		ulScore != pScore[ubBfr] || isTitle != pTitle[ubBfr] || s_pHudPending[ubBfr]) {
-		pSaved[ubBfr] = g->saved; pAboard[ubBfr] = g->aboard; pKilled[ubBfr] = g->killed;
-		pScore[ubBfr] = ulScore; pTitle[ubBfr] = isTitle;
-		//               0123456789012345678901234567890123456789
-		char szLine[] = "SAVED 00 ABOARD 00 LOST 00 SCORE 000000 ";
-		agkTextNumber(&szLine[6], g->saved, 2);
-		agkTextNumber(&szLine[16], g->aboard, 2);
-		agkTextNumber(&szLine[24], g->killed, 2);
-		agkTextNumber(&szLine[33], ulScore, 6);
-		if(isTitle) {
-			for(UBYTE i = 0; i < 33; ++i) szLine[i] = ' ';
-			szLine[27] = 'H';
-			szLine[28] = 'I';
-		}
+	// the line to show, per buffer: only the fields that changed are formatted
+	// again (a 6-digit score is 12 DIVUs)
+	static char pLine[2][HUD_LEN + 1];
+	char *szLine = pLine[ubBfr];
+	if(isTitle != pTitle[ubBfr]) {
+		pTitle[ubBfr] = isTitle;
+		// SAVED 00 ABOARD 00 LOST 00 SCORE 000000   or   (27 blanks) HI 000000
+		const char *szT = isTitle ? "HI" : "SAVED 00 ABOARD 00 LOST 00 SCORE";
+		UBYTE ubAt = isTitle ? 27 : 0;
+		for(UBYTE i = 0; i < HUD_LEN; ++i) szLine[i] = ' ';
+		for(UBYTE i = 0; szT[i]; ++i) szLine[ubAt + i] = szT[i];
+		szLine[HUD_LEN] = 0;
+		pSaved[ubBfr] = pAboard[ubBfr] = pKilled[ubBfr] = 0xFF;
+		pScore[ubBfr] = ~0UL;
+		s_pHudPending[ubBfr] = 1;
+	}
+	if(!isTitle) {
+		if(g->saved != pSaved[ubBfr]) { pSaved[ubBfr] = g->saved; agkTextNumber(&szLine[6], g->saved, 2); s_pHudPending[ubBfr] = 1; }
+		if(g->aboard != pAboard[ubBfr]) { pAboard[ubBfr] = g->aboard; agkTextNumber(&szLine[16], g->aboard, 2); s_pHudPending[ubBfr] = 1; }
+		if(g->killed != pKilled[ubBfr]) { pKilled[ubBfr] = g->killed; agkTextNumber(&szLine[24], g->killed, 2); s_pHudPending[ubBfr] = 1; }
+	}
+	if(ulScore != pScore[ubBfr]) { pScore[ubBfr] = ulScore; agkTextNumber(&szLine[33], ulScore, 6); s_pHudPending[ubBfr] = 1; }
+	if(s_pHudPending[ubBfr]) {
 		s_pHudPending[ubBfr] = !textType(&s_pHudText[ubBfr], s_pHudStage[ubBfr], szLine, HUD_TYPE_PER_FRAME);
 	}
 	if(g->lives != pLives[ubBfr]) {
@@ -477,10 +486,13 @@ __attribute__((noinline)) static void hudUpdate(UBYTE ubBfr) {
 	}
 }
 
-// The radar: RADAR_W x RADAR_H px at HUD (RADAR_X0, RADAR_Y), cleared and
-// redrawn each picture. Pens: base and closed barracks 7, open barracks and
-// tanks 5, people 4, jets and mines 3, the chopper 6. A cleared strip only
-// needs the pen's set planes ORed in.
+// The radar: RADAR_W x RADAR_H px at HUD (RADAR_X0, RADAR_Y). Rows 0-4 move
+// (the view, jets and mines, people, tanks, the chopper at any of them): cleared
+// and redrawn each picture. Rows 5-6, the buildings, are redrawn only when a
+// barracks opens; row 7 is the ground line, drawn once. Pens: base and closed
+// barracks 7, open barracks and tanks 5, people 4, jets and mines 3, the
+// chopper 6. A cleared strip only needs the pen's set planes ORed in.
+#define RADAR_DYN_H 5
 #define RADAR_P1 HUD_PLANE_BYTES
 #define RADAR_P2 (2 * HUD_PLANE_BYTES)
 #define RADAR_BYTE0 ((RADAR_X0 + 16) >> 3)
@@ -494,15 +506,16 @@ static inline void radarDot(UBYTE *pRow, UBYTE ubX, UBYTE ubPen) {
 	if(ubPen & 4) p[RADAR_P2] |= ubBit;
 }
 
-// The strip's rows 0..RADAR_H-2 are cleared by the blitter (radarClear(),
+// The strip's rows 0..RADAR_DYN_H-1 are cleared by the blitter (radarClear(),
 // queued first in the picture); row RADAR_H-1 is the ground line, drawn once.
 static tAgkBlitArea s_pRadarArea[2];
+static UBYTE s_pRadarBuildings[2] = {0xFF, 0xFF};   // which barracks were open when drawn
 
 static void radarCreate(void) {
 	for(UBYTE b = 0; b < 2; ++b) {
 		UBYTE *pTop = s_pHud[b]->Planes[0] + RADAR_Y * HUD_ROW_BYTES + RADAR_BYTE0;
 		s_pRadarArea[b].pD = pTop;
-		s_pRadarArea[b].uwSize = (UWORD)((((RADAR_H - 1) * FB_BPP) << 6) | (RADAR_W / 16));
+		s_pRadarArea[b].uwSize = (UWORD)(((RADAR_DYN_H * FB_BPP) << 6) | (RADAR_W / 16));
 		s_pRadarArea[b].wMod = (WORD)(HUD_PLANE_BYTES - RADAR_W / 8);
 		UBYTE *pGround = pTop + (RADAR_H - 1) * HUD_ROW_BYTES + RADAR_P1;   // pen 2
 		for(UBYTE i = 0; i < RADAR_W / 8; ++i) pGround[i] = 0xFF;
@@ -520,22 +533,33 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 	UBYTE *pRow[RADAR_H];
 	UBYTE *pTop = s_pRadarArea[ubBfr].pD;
 	for(UBYTE y = 0; y < RADAR_H; ++y, pTop += HUD_ROW_BYTES) pRow[y] = pTop;
+	// the buildings (rows 5-6): only when a barracks has opened since
+	UBYTE ubOpen = 0;
+	for(UBYTE b = 0; b < BARRACKS_COUNT; ++b) ubOpen |= (UBYTE)((g->pBarracks[b].hp == 0) << b);
+	if(ubOpen != s_pRadarBuildings[ubBfr]) {
+		s_pRadarBuildings[ubBfr] = ubOpen;
+		for(UBYTE y = 5; y < 7; ++y) {
+			UBYTE *p = pRow[y];
+			for(UBYTE i = 0; i < FB_BPP * RADAR_P1; i += RADAR_P1)
+				for(UBYTE k = 0; k < RADAR_W / 8 + 1; ++k) p[i + k] = 0;
+		}
+		UBYTE ubBase = logicRadarX(HANGAR_X);
+		radarDot(pRow[6], ubBase, 7);
+		radarDot(pRow[6], (UBYTE)(ubBase + 1), 7);
+		radarDot(pRow[5], logicRadarX(BORDER_X), 3);
+		radarDot(pRow[6], logicRadarX(BORDER_X), 3);
+		for(UBYTE b = 0; b < BARRACKS_COUNT; ++b) {
+			UBYTE x = logicRadarX(g->pBarracks[b].x);
+			UBYTE pen = (ubOpen >> b) & 1 ? 5 : 7;
+			radarDot(pRow[5], x, pen);
+			radarDot(pRow[5], (UBYTE)(x + 1), pen);
+			radarDot(pRow[6], x, pen);
+			radarDot(pRow[6], (UBYTE)(x + 1), pen);
+		}
+	}
 	UBYTE ubCam = logicRadarX(g->cam);
 	radarDot(pRow[0], ubCam, 3);
 	radarDot(pRow[0], (UBYTE)(ubCam + SCREEN_W / 16), 3);
-	UBYTE ubBase = logicRadarX(HANGAR_X);
-	radarDot(pRow[5], ubBase, 7);
-	radarDot(pRow[5], (UBYTE)(ubBase + 1), 7);
-	radarDot(pRow[4], logicRadarX(BORDER_X), 3);
-	radarDot(pRow[5], logicRadarX(BORDER_X), 3);
-	for(UBYTE b = 0; b < BARRACKS_COUNT; ++b) {
-		UBYTE x = logicRadarX(g->pBarracks[b].x);
-		UBYTE pen = g->pBarracks[b].hp ? 7 : 5;
-		radarDot(pRow[4], x, pen);
-		radarDot(pRow[4], (UBYTE)(x + 1), pen);
-		radarDot(pRow[5], x, pen);
-		radarDot(pRow[5], (UBYTE)(x + 1), pen);
-	}
 	UBYTE *pPeople = pRow[3] + RADAR_P2;   // pen 4: plane 3 only
 	for(UBYTE k = 0; k < g->outCount; ++k) {
 		const tHostage *h = &g->pHostages[g->pOut[k]];
@@ -545,7 +569,7 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 		}
 	}
 	for(UBYTE i = 0; i < TANK_MAX; ++i) {
-		if(g->pTanks[i].active) radarDot(pRow[5], logicRadarX(g->pTanks[i].x), 5);
+		if(g->pTanks[i].active) radarDot(pRow[4], logicRadarX(g->pTanks[i].x), 5);
 	}
 	for(UBYTE i = 0; i < JET_MAX; ++i) {
 		WORD x = g->pJets[i].x;
@@ -558,7 +582,7 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 	if(g->state != GS_TITLE) {
 		UBYTE x = logicRadarX(g->chop.x);
 		UBYTE y = (UBYTE)((g->chop.y - CEIL_Y) >> 5);   // 0..6
-		if(y > RADAR_H - 2) y = RADAR_H - 2;
+		if(y > RADAR_DYN_H - 1) y = RADAR_DYN_H - 1;
 		radarDot(pRow[y], x, 6);
 		radarDot(pRow[y], (UBYTE)(x + 1), 6);
 	}
@@ -652,13 +676,16 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	for(UBYTE l = 0; l < MSG_LINES; ++l) {
 		char *pStage = s_pMsgStage[ubBfr][l];
 		ULONG *pFix = s_pMsgFix[ubBfr][l];
-		msgCentre(szLine, pText[l]);
 		UBYTE isChange = 0;
-		for(UBYTE c = 0; c < MSG_LEN; ++c) {
-			if(pStage[c] != szLine[c] && ubBudget) {
-				pStage[c] = szLine[c];
-				--ubBudget;
-				isChange = 1;
+		if(ubBudget) {
+			// (no letters left to type this picture: the later lines wait, unread)
+			msgCentre(szLine, pText[l]);
+			for(UBYTE c = 0; c < MSG_LEN && ubBudget; ++c) {
+				if(pStage[c] != szLine[c]) {
+					pStage[c] = szLine[c];
+					--ubBudget;
+					isChange = 1;
+				}
 			}
 		}
 		if(pFix[0] | pFix[1]) {

@@ -490,6 +490,42 @@ static void testDrawListShowsBaseAtStart(void) {
 	CHECK(n < DRAW_MAX);
 }
 
+static const tDraw *findBob(const tDraw *d, uint8_t n, uint8_t ubBob) {
+	for(int i = 0; i < n; ++i) if(d[i].bob == ubBob) return &d[i];
+	return 0;
+}
+
+static void testChopperShadow(void) {
+	tDraw d[DRAW_MAX];
+	logicInit(&g);
+	CHECK(!findBob(d, logicDraw(&g, d), BOB_SHADOW));      // the title: no chopper
+	newGame();
+	uint8_t n = logicDraw(&g, d);
+	const tDraw *s = findBob(d, n, BOB_SHADOW);
+	CHECK(s != 0);
+	if(!s) return;
+	CHECK(s->y == SHADOW_Y);
+	CHECK(s->frame >> 1 == 0);                              // landed: the biggest, darkest
+	CHECK(s->x + 16 == g.chop.x - g.cam);                   // right under it
+	CHECK((s->frame & 1) == (s->x & 1));                    // the dither phase follows x
+	CHECK(s > findBob(d, n, BOB_HANGAR));                   // on the ground, under people
+	// High up: the smallest, shifted away from the sun
+	flyAt(1500, CEIL_Y);
+	n = logicDraw(&g, d);
+	s = findBob(d, n, BOB_SHADOW);
+	CHECK(s && s->frame >> 1 == SHADOW_SIZES - 1);
+	CHECK(s && s->x + 16 == g.chop.x - g.cam + ((GROUND_Y - CEIL_Y) >> 4));
+	CHECK(s && (s->frame & 1) == (s->x & 1));
+	// Getting smaller as it climbs, never bigger
+	uint8_t ubPrev = 0;
+	for(int16_t y = GROUND_Y; y >= CEIL_Y; y = (int16_t)(y - 4)) {
+		flyAt(1500, y);
+		s = findBob(d, logicDraw(&g, d), BOB_SHADOW);
+		CHECK(s && s->frame >> 1 >= ubPrev);
+		if(s) ubPrev = (uint8_t)(s->frame >> 1);
+	}
+}
+
 static void testRank(void) {
 	CHECK(logicRank(0)[0] == 'R');
 	CHECK(logicRank(192)[0] == 'L');
@@ -615,6 +651,7 @@ int main(void) {
 	testScrollMaths();
 	testSkyGradient();
 	testDrawListShowsBaseAtStart();
+	testChopperShadow();
 	testRank();
 	testDeterministic();
 	testDifficultyDefaultsToNormalAndPersists();

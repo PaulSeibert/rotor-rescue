@@ -7,19 +7,19 @@ const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_HANGAR] = 64, [BOB_FENCE] = 16, [BOB_BARRACKS] = 48, [BOB_TANK] = 32,
 	[BOB_HOSTAGE] = 16, [BOB_JET] = 32, [BOB_MINE] = 16, [BOB_SHOT] = 16,
 	[BOB_BOMB] = 16, [BOB_SHELL] = 16, [BOB_BOOM] = 32, [BOB_FLAG] = 16,
-	[BOB_LOGO] = 208,
+	[BOB_LOGO] = 208, [BOB_SHADOW] = 32,
 };
 const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_HANGAR] = 40, [BOB_FENCE] = 32, [BOB_BARRACKS] = 28, [BOB_TANK] = 14,
 	[BOB_HOSTAGE] = 12, [BOB_JET] = 12, [BOB_MINE] = 12, [BOB_SHOT] = 3,
 	[BOB_BOMB] = 6, [BOB_SHELL] = 4, [BOB_BOOM] = 32, [BOB_FLAG] = 24,
-	[BOB_LOGO] = 26,
+	[BOB_LOGO] = 26, [BOB_SHADOW] = 4,
 };
 const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_HANGAR] = 1, [BOB_FENCE] = 1, [BOB_BARRACKS] = 4, [BOB_TANK] = 6,
 	[BOB_HOSTAGE] = 8, [BOB_JET] = 2, [BOB_MINE] = 2, [BOB_SHOT] = 1,
 	[BOB_BOMB] = 1, [BOB_SHELL] = 1, [BOB_BOOM] = 5, [BOB_FLAG] = 2,
-	[BOB_LOGO] = 1,
+	[BOB_LOGO] = 1, [BOB_SHADOW] = SHADOW_SIZES * 2,
 };
 
 // Barracks positions (centres), far to near
@@ -1173,6 +1173,15 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		uint8_t f = pB->hp == 2 ? BARRACKS_OK : pB->hp == 1 ? BARRACKS_HIT :
 			(uint8_t)(BARRACKS_OPEN0 + ((g->frame >> 3) & 1));
 		n = drawAdd(pOut, n, (int16_t)(pB->x - 24 - cam), FEET_Y - 28, BOB_BARRACKS, f);
+	}
+	// the chopper's shadow, on the track under it (and under the people)
+	if(logicChopperVisible(g)) {
+		static const uint8_t pSize[13] = {0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3};   // by altitude / 16
+		int16_t wAlt = (int16_t)(GROUND_Y - g->chop.y);
+		if(wAlt < 0) wAlt = 0;
+		if(wAlt > 12 * 16) wAlt = 12 * 16;
+		int16_t sx = (int16_t)(g->chop.x - cam - 16 + (wAlt >> 4));   // the low sun pushes it right
+		n = drawAdd(pOut, n, sx, SHADOW_Y, BOB_SHADOW, (uint8_t)((pSize[wAlt >> 4] << 1) | (sx & 1)));
 	}
 	if(g->state == GS_TITLE) {
 		n = drawAdd(pOut, n, (SCREEN_W - 208) / 2, 56, BOB_LOGO, 0);
