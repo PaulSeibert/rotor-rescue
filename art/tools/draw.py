@@ -240,40 +240,78 @@ def chopper():
 
 # ---------------------------------------------------------------- BOBs
 
+def chk(x, y, phase=0):
+    """A checkerboard: the 50% dither between two colours."""
+    return (x + y + phase) & 1 == 0
+
+
 def hangar():
+    """Corrugated walls lit from the left (the low sun), a curved roof shading
+    from a bright crown to dark eaves, the shadow of the eave on the wall, the
+    open door with its frame and a lamp, and the red cross on a white board."""
     w, h = 64, 40
     g = grid(w, h)
-    # walls and a curved roof
-    for y in range(10, 40):
+    # walls: corrugated stone, every 4th column a dark groove, the far right in shade
+    for y in range(13, 40):
         for x in range(2, 62):
-            g[y][x] = 'S'
+            c = 'S'
+            if x % 4 == 3 or (x >= 56 and x % 2 == 1):
+                c = 'O'                                 # grooves, closer at the shaded end
+            g[y][x] = c
+    # the eave's shadow on the wall, fading
+    for x in range(2, 62):
+        g[13][x] = 'K'
+        g[14][x] = 'K' if chk(x, 14) else g[14][x]
+    # the roof: a half-round, bright crown to dark eaves
     for x in range(0, 64):
         dx = (x - 32) / 32.0
         top = int(round(10 - 9 * math.sqrt(max(0, 1 - dx * dx))))
-        for y in range(max(0, top), 12):
-            g[y][x] = 'B'
+        for y in range(max(0, top), 13):
+            d = y - top                                 # depth under the roof line
+            side = x / 63.0                             # 0 lit (left) .. 1 shade (right)
+            if d <= 1 and side < 0.75:
+                c = 'W' if d == 0 or chk(x, y) else 'B'  # the sunlit crown
+            elif y >= 11:
+                c = 'K' if chk(x, y) else 'B'           # dark eaves
+            elif side > 0.7 and chk(x, y):
+                c = 'K'                                 # the far side in shade
+            else:
+                c = 'B'
+            g[y][x] = c
         if 0 <= top < h:
             g[top][x] = 'K'
     for x in range(0, 64):
         g[12][x] = 'K'
-    # ribs on the roof
+    # ribs over the roof, catching the light on the lit side
     for x in range(6, 60, 8):
-        for y in range(3, 12):
-            if g[y][x] == 'B':
-                g[y][x] = 'W'
-    # big open door, people run in here
+        for y in range(2, 12):
+            if g[y][x] in 'BK' and g[y - 1][x] != '.':
+                g[y][x] = 'W' if x < 40 else ('S' if chk(x, y) else 'B')
+    # big open door, people run in here: a frame, a dark inside with a floor
     for y in range(18, 40):
         for x in range(8, 30):
             g[y][x] = 'K'
-    for y in range(18, 40):
+    for y in range(34, 39):
+        for x in range(9, 29):
+            if chk(x, y) and y > 35:
+                g[y][x] = 'O'                           # light on the floor inside
+    for y in range(17, 40):
         g[y][7] = 'W'
-        g[y][30] = 'W'
+        g[y][30] = 'S'
     for x in range(7, 31):
         g[17][x] = 'W'
-    # a red cross sign
+    g[16][18] = 'Y'                                     # the lamp over the door
+    g[16][19] = 'Y'
+    g[15][18] = 'K'
+    g[15][19] = 'K'
+    # a red cross on a white board, with a dark edge
     for y in range(20, 32):
         for x in range(42, 54):
             g[y][x] = 'W'
+    for y in range(20, 32):
+        g[y][53] = 'S'
+    for x in range(42, 54):
+        g[31][x] = 'S'
     for y in range(22, 30):
         for x in range(46, 50):
             g[y][x] = 'R'
@@ -320,73 +358,128 @@ def barracks():
         for y in range(roof_top, 12):
             inset = 12 - y
             for x in range(inset, w - inset):
-                g[y][x] = 'O'
+                # olive roof: a lit ridge, shading to the eaves, the right end darker
+                if y <= roof_top + 1:
+                    c = 'S' if chk(x, y) else 'O'
+                elif y >= 10:
+                    c = 'K' if chk(x, y) else 'O'
+                elif x > 36 and chk(x, y):
+                    c = 'K'
+                else:
+                    c = 'O'
+                g[y][x] = c
             g[y][inset] = 'K'
             g[y][w - inset - 1] = 'K'
         for x in range(8, 40):
             g[roof_top][x] = 'K'
         for y in range(12, 28):
             for x in range(2, 46):
-                g[y][x] = 'S'
+                # plank walls: a dark seam every 4 rows, shade under the eave
+                c = 'S'
+                if y % 4 == 1 and chk(x, y):
+                    c = 'O'
+                if y == 13 or (y == 14 and chk(x, y)):
+                    c = 'K'
+                g[y][x] = c
             g[y][1] = 'K'
             g[y][46] = 'K'
         for x in range(0, 48):
             g[12][x] = 'K'
             g[27][x] = 'K'
-        # door and barred windows
+        # door (a frame, a dark inside) and barred windows with sills
         for y in range(16, 27):
             for x in range(20, 28):
                 g[y][x] = 'K'
+        for y in range(16, 27):
+            g[y][19] = 'W'
+            g[y][28] = 'O'
+        for x in range(19, 29):
+            g[15][x] = 'W'
         for wx in (6, 34):
             for y in range(15, 21):
                 for x in range(wx, wx + 8):
-                    g[y][x] = 'Y' if f < 2 else 'K'
+                    lit = 'Y' if y < 18 or chk(x, y) else 'R'   # lamplight, warmer low down
+                    g[y][x] = lit if f < 2 else 'K'
             for x in range(wx, wx + 8, 2):
                 for y in range(15, 21):
                     g[y][x] = 'K'
+            for x in range(wx - 1, wx + 9):
+                g[21][x] = 'W'
+                g[14][x] = 'K'
+        # sandbags along the front
+        for bx in list(range(2, 18, 4)) + list(range(30, 46, 4)):
+            for x in range(bx, min(bx + 4, 46)):
+                g[24][x] = 'W' if bx < x < bx + 3 else 'S'
+                g[25][x] = 'W' if x < bx + 3 else 'K'
+                g[26][x] = 'S' if x < bx + 3 else 'K'
         if f == 1:
-            # shot up: holes and smoke stains
-            for _ in range(14):
-                x, y = rnd.randrange(3, 45), rnd.randrange(6, 26)
+            # shot up: holes ringed with scorch
+            for _ in range(10):
+                x, y = rnd.randrange(4, 44), rnd.randrange(6, 24)
                 if g[y][x] in 'SO':
                     g[y][x] = 'K'
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        if g[y + dy][x + dx] in 'SOW' and rnd.random() < 0.6:
+                            g[y + dy][x + dx] = 'K' if chk(x + dx, y + dy) else 'O'
         if f >= 2:
-            # burst open: roof blown, flames
+            # burst open: roof blown, flames from the wreck, smoke over them
             for y in range(0, 13):
                 for x in range(0, 48):
                     g[y][x] = '.'
             for x in range(2, 46):
                 g[12][x] = 'K'
+            ph = (f - 2) * 2.1
             for x in range(2, 46):
-                hgt = rnd.randrange(2, 10)
+                hgt = 5 + 3.5 * math.sin(x * 0.55 + ph) + 2.0 * math.sin(x * 1.3 - ph * 1.7)
+                hgt = int(max(1, min(11, hgt + rnd.uniform(-1, 1))))
                 for y in range(12 - hgt, 12):
-                    g[y][x] = rnd.choice('RRY' if (x + f) % 3 else 'RYW')
+                    d = 12 - y                          # height above the wall top
+                    t = d / float(hgt)
+                    c = 'W' if t < 0.25 else 'Y' if t < 0.55 else 'R'
+                    if t > 0.8 and chk(x, y, f):
+                        c = 'K'                         # sooty tips
+                    g[y][x] = c
+                # smoke drifting above the tallest tongues
+                top = 12 - hgt
+                for y in range(max(0, top - 3), top):
+                    if chk(x, y, f) and rnd.random() < 0.55:
+                        g[y][x] = 'K'
             for y in range(13, 27):
                 for x in range(16, 32):
                     g[y][x] = 'K'
+            for y in range(20, 27):
+                for x in range(17, 31):
+                    if chk(x, y, f) and rnd.random() < 0.5:
+                        g[y][x] = 'R'                   # embers glowing inside
         frames.append(g)
     save('barracks', 'Hostage barracks, 48x28: intact, shot up, burning open (2 flicker frames).', PF1, frames)
 
 
 def tank():
+    # lit from above-left: a pale top edge on the turret and hull, olive
+    # bodies shading to dark low down, a red star, wheels with bright hubs
     base = from_rows([
         "................................",
         "..............KKKKK.............",
-        ".............KOOOOOK............",
-        "............KOOSSOOOKKKKKKKKKK..",
-        "............KOOOOOOOSSSSSSSSSK..",
+        ".............KSSSOOK............",
+        "............KSOOROOOKKKKKKKKKK..",
+        "............KOOOOOOKSSSSSSSSWK..",
         "........KKKKKKKKKKKKKKKKKKK.....",
-        ".......KOOOOOOOOOOOOOOOOOOOK....",
-        "......KOOSSSSSSSSSSSSSSSSSOOK...",
+        ".......KSSSSSSSSSSSSSOOOOOOK....",
+        "......KOOOOOOOOOOOOOOOOOOOOOK...",
         ".....KKKKKKKKKKKKKKKKKKKKKKKKK..",
         ".....KSKSKSKSKSKSKSKSKSKSKSKK...",
-        "......KSSKSSKSSKSSKSSKSSKSSK....",
+        "......KSWKSWKSWKSWKSWKSWKSWK....",
         ".......KKKKKKKKKKKKKKKKKKKK.....",
         "................................",
         "................................",
     ])
+    for x in range(7, 28):                              # the hull's lower half in shade
+        if base[7][x] == 'O' and chk(x, 7):
+            base[7][x] = 'K' if x > 20 else 'O'
     alt = [r[:] for r in base]
     alt[9] = list(".....KKSKSKSKSKSKSKSKSKSKSKSK...")
+    alt[10] = list("......KWSKWSKWSKWSKWSKWSKWSK....")   # the wheels turn
     fire = [r[:] for r in base]
     for x in range(30, 32):
         fire[3][x] = 'Y'
@@ -483,6 +576,8 @@ def hostage():
         "..RRRRRRRR......",
     ]
     fr = [from_rows(x) for x in (stand, run0, run1, wave0, wave1, dead)]
+    for f in (1, 2):                                    # running: hair at the back of the head
+        fr[f][0][7] = 'K'
     fr.append(mirror(fr[1]))
     fr.append(mirror(fr[2]))
     save('hostage', 'A hostage, 16x12: stand, run right x2, wave x2, down, run left x2.', PF1, fr)
@@ -494,15 +589,18 @@ def jet():
         "...KK...........................",
         "...KSK..........................",
         "...KSSK.............KKKKK.......",
-        "....KSSKKKKKKKKKKKKKSBBBBKK.....",
-        "YY..KSSSSSSSSSSSSSSSSSSSSSSKK...",
-        "YYYKOOOOOOOOOOOOOOOOOOOOOOOOOKK.",
-        "YY..KSSSSSSSRRSSSSSSSSSSSSSKK...",
+        "....KSSKKKKKKKKKKKKKSBWBBKK.....",
+        "RY..KSWWWWSSSSSSSSSSSSSSSSSKK...",
+        "RYWKOOOOOOOOOOOOOOOOOOOOOOOOSKK.",
+        "RY..KSSSSSSSRRSSSSSSSSSSSSSKK...",
         ".....KKKKKKKSSSSKKKKKKKKKKK.....",
         "...........KSSSK................",
         "...........KKKK.................",
         "................................",
     ])
+    for x in range(14, 27):                             # the belly in shade
+        if right[7][x] == 'S' and chk(x, 7):
+            right[7][x] = 'O'
     save('jet', 'Enemy jet, 32x12: left, right.', PF1, [mirror(right), right])
 
 
@@ -535,26 +633,57 @@ def small():
 
 
 def boom():
+    """A flash, a billowing fireball (hot core, ragged red rim), then smoke that
+    rises and thins: shapes from smooth noise, colour bands dithered into each
+    other so the 7-colour palette reads as a gradient."""
+    rnd = random.Random(40)
+    # a few lobes around the centre: the billows (angle, strength)
+    lobes = [(rnd.uniform(0, 2 * math.pi), rnd.uniform(0.05, 0.11)) for _ in range(6)]
+
+    def edge(ang, f):
+        e = 1.0
+        for i, (a, s) in enumerate(lobes):
+            e += s * math.cos(ang * (i + 3) - a + f * 0.7)
+        return e
+
     frames = []
     for f in range(5):
-        rnd = random.Random(40 + f)
         g = grid(32, 32)
-        r = 4 + f * 3
+        ember = random.Random(77 + f)
+        r = (4.5, 8.0, 11.0, 12.0, 12.5)[f]
+        cy = 15.5 - (0, 0, 0.5, 2.0, 3.5)[f]           # smoke rises
         for y in range(32):
             for x in range(32):
-                dx, dy = x - 15.5, y - 15.5
-                d = math.sqrt(dx * dx + dy * dy) + rnd.uniform(-1.6, 1.6)
-                if d < r:
-                    t = d / r
-                    if f >= 3:
-                        c = 'K' if t > 0.75 else ('S' if rnd.random() < 0.6 else '.')
-                        if f == 4 and rnd.random() < 0.45:
-                            c = '.'
-                    else:
-                        c = 'W' if t < 0.35 else 'Y' if t < 0.65 else 'R'
-                    g[y][x] = c
+                dx, dy = x - 15.5, (y - cy) * 1.1
+                d = math.sqrt(dx * dx + dy * dy)
+                ang = math.atan2(dy, dx)
+                rr = min(r * edge(ang, f), 14.5)
+                if d >= rr:
+                    continue
+                t = d / rr                              # 0 centre .. 1 rim
+                k = BAYER4[y & 3][x & 3] / 16.0
+                if f == 0:
+                    c = 'W' if t < 0.55 + k * 0.3 else 'Y'
+                elif f == 1:
+                    c = 'W' if t < 0.3 + k * 0.2 else 'Y' if t < 0.6 + k * 0.2 else 'R'
+                elif f == 2:
+                    c = 'Y' if t < 0.25 + k * 0.2 else 'R' if t < 0.6 + k * 0.25 else \
+                        ('K' if k < 0.5 else 'R')
+                elif f == 3:
+                    # smoke, embers still glowing in it
+                    c = 'S' if t < 0.45 + k * 0.3 else 'K'
+                    if t < 0.4 and ember.random() < 0.12:
+                        c = 'R' if ember.random() < 0.7 else 'Y'
+                    if t > 0.85 and k < 0.4:
+                        c = '.'
+                else:
+                    # thinning smoke: dithered away from the rim inwards
+                    if k * 0.9 < t - 0.25:
+                        continue
+                    c = 'S' if k > 0.5 else 'K'
+                g[y][x] = c
         frames.append(g)
-    save('boom', 'Explosion, 32x32, 5 frames.', PF1, frames)
+    save('boom', 'Explosion, 32x32, 5 frames: flash, fireball x2, smoke x2.', PF1, frames)
 
 
 def shadow():
