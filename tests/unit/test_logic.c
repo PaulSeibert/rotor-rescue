@@ -375,6 +375,38 @@ static void testCameraFollowsWithLead(void) {
 	CHECK(g.cam == 1500 - SCREEN_W / 2 - 56);   // facing left: more room ahead
 }
 
+// Smooth scrolling: through take-off, flying both ways, letting go and turning
+// (including the world's right edge by the base), the camera's step changes by
+// at most 1 px a frame and the chopper never jumps on screen: it is locked to
+// the camera and only drifts with the gliding look-ahead (<= 2 px a frame).
+static void testCameraIsSmooth(void) {
+	newGame();
+	logicSetDifficulty(&g, DIFFICULTY_INVINCIBLE);
+	g.spawnTimer = 60000;
+	CHECK(g.state == GS_PLAY);
+	tInput pIn[] = {{0, -1, 0, 0}, {-1, 0, 0, 0}, {0, 0, 0, 0}, {1, 0, 0, 0}, {0, 0, 0, 0}, {-1, 0, 0, 0}};
+	int pFrames[] = {40, 120, 70, 200, 60, 40};
+	int16_t wCam = g.cam, wScr = (int16_t)(g.chop.x - g.cam), wStep = 0;
+	int worstChange = 0, worstScr = 0, n = 0;
+	for(int s = 0; s < 6; ++s) {
+		for(int f = 0; f < pFrames[s]; ++f, ++n) {
+			logicUpdate(&g, &pIn[s]);
+			int16_t st = (int16_t)(g.cam - wCam), sc = (int16_t)(g.chop.x - g.cam - wScr);
+			int ch = st > wStep ? st - wStep : wStep - st;
+			if(ch > worstChange) worstChange = ch;
+			// at the world's edge the camera stops and the chopper flies on: real motion
+			uint8_t isFree = g.cam > 0 && g.cam < WORLD_W - SCREEN_W;
+			if(isFree && (sc < 0 ? -sc : sc) > worstScr) worstScr = sc < 0 ? -sc : sc;
+			wCam = g.cam; wScr = (int16_t)(g.chop.x - g.cam); wStep = st;
+		}
+	}
+	CHECK(worstChange <= 1);
+	CHECK(worstScr <= 2);
+	CHECK(g.cam == WORLD_W - SCREEN_W || g.cam < WORLD_W - SCREEN_W);
+	printf("smooth camera: %d frames, step changes <= %d px, chopper drifts <= %d px a frame\n",
+		n, worstChange, worstScr);
+}
+
 static void testScrollMaths(void) {
 	CHECK(logicScrollDelay(0) == 0 && logicScrollByteOffset(0) == -2);
 	CHECK(logicScrollDelay(1) == 15 && logicScrollByteOffset(1) == 0);
@@ -519,6 +551,7 @@ int main(void) {
 	testCannonKillsJet();
 	testMineContactDestroysChopper();
 	testCameraFollowsWithLead();
+	testCameraIsSmooth();
 	testScrollMaths();
 	testSkyGradient();
 	testDrawListShowsBaseAtStart();

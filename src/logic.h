@@ -160,6 +160,9 @@ typedef struct {
 	uint32_t score;
 	uint32_t hiScore;
 	int16_t cam;
+	int16_t camLead;     // look-ahead, 1/16 px (the camera is the chopper + this)
+	int16_t camLeadV;    // its speed, 1/16 px per frame
+	int16_t camStep;     // the camera's last step (px): steps change by 1 at most
 	int16_t unloadTimer;
 	uint16_t spawnTimer;
 	uint8_t titleArmed;  // fire must be released before the title accepts it
@@ -258,8 +261,14 @@ uint8_t logicChopperFrame(const tGame *g);   // CHOP_*, + 0x80 if facing left
 uint8_t logicChopperVisible(const tGame *g);
 uint8_t logicRotorPhase(const tGame *g);
 
-// The camera follows the chopper with a look-ahead
+// The camera follows the chopper with a look-ahead. It is locked to the
+// chopper's pixel, so the chopper only moves on screen when the look-ahead
+// does, and that glides (accelerates, cruises, slows) - never jumps.
+#define CAM_LEAD 56          // px ahead of the facing
+#define CAM_LEAD_VMAX 32     // look-ahead speed limit, 1/16 px a frame (2 px)
+#define CAM_LEAD_ACCEL 2     // 1/16 px a frame per frame
 void logicCameraUpdate(tGame *g);
+void logicCameraSnap(tGame *g);   // to the look-ahead's target at once (mission start)
 
 // Scrolling maths for the copper (from examples/sidescroller):
 // a band that moves at cam >> shift, looping every uwLoopW px

@@ -171,8 +171,7 @@ void logicStartMission(tGame *g, uint8_t ubMission) {
 	for(uint8_t i = 0; i < ESHOT_MAX; ++i) g->pEShots[i].active = 0;
 	for(uint8_t i = 0; i < BOOM_MAX; ++i) g->pBooms[i].active = 0;
 	logicChopperRespawn(g);
-	g->cam = START_X - SCREEN_W / 2 - 56;
-	logicCameraUpdate(g);
+	logicCameraSnap(g);
 	setState(g, GS_INTRO, INTRO_FRAMES);
 }
 
@@ -910,16 +909,68 @@ __attribute__((noinline)) static void boomsUpdate(tGame *g) {
 
 // -------------------------------------------------------------- camera ---
 
+static int16_t leadTarget(const tGame *g) {
+	uint8_t f = g->chop.faceTarget;
+	return (int16_t)(f == FACE_LEFT ? -CAM_LEAD * 16 : f == FACE_RIGHT ? CAM_LEAD * 16 : 0);
+}
+
+static int16_t cameraWanted(const tGame *g) {
+	// whole pixels on both sides: the chopper's screen x is exactly
+	// SCREEN_W / 2 - lead, whatever its own sub-pixel is doing
+	return clampw((int16_t)(g->chop.x - SCREEN_W / 2 + (g->camLead >> 4)), 0, WORLD_W - SCREEN_W);
+}
+
+static void cameraPlace(tGame *g) {
+	// The scroll speed may change by 1 px a frame at most (2 -> 0 at the world's
+	// edge was a visible bump every trip home: the base is beside it). Near an
+	// edge it slows in time: 1 + 2 + ... + s px are needed to stop from s.
+	int16_t want = (int16_t)(cameraWanted(g) - g->cam);
+	int16_t prev = g->camStep;
+	int16_t s = clampw(want, (int16_t)(prev - 1), (int16_t)(prev + 1));
+	int16_t as = s < 0 ? (int16_t)-s : s;
+	int16_t room = s > 0 ? (int16_t)(WORLD_W - SCREEN_W - g->cam) : (int16_t)g->cam;
+	if(as > 1 && room < (int16_t)((uint16_t)((uint16_t)as * (uint16_t)(as + 1)) >> 1)) {
+		s = (int16_t)(s > 0 ? s - 1 : s + 1);   // brake for the edge
+	}
+	g->cam = clampw((int16_t)(g->cam + s), 0, WORLD_W - SCREEN_W);
+	g->camStep = s;
+}
+
+void logicCameraSnap(tGame *g) {
+	g->camLead = leadTarget(g);
+	g->camLeadV = 0;
+	g->cam = cameraWanted(g);
+	g->camStep = 0;
+}
+
 void logicCameraUpdate(tGame *g) {
-	const tChopper *c = &g->chop;
-	int16_t wLead = c->faceTarget == FACE_LEFT ? -56 : c->faceTarget == FACE_RIGHT ? 56 : 0;
-	int16_t wTarget = (int16_t)(c->x - SCREEN_W / 2 + wLead);
-	int16_t d = (int16_t)(wTarget - g->cam);
-	int16_t step = (int16_t)(d >> 3);
-	if(!step && d) step = d > 0 ? 1 : -1;
-	step = clampw(step, -6, 6);
-	g->cam = (int16_t)(g->cam + step);
-	g->cam = clampw(g->cam, 0, WORLD_W - SCREEN_W);
+	// The look-ahead moves like a body: it speeds up by CAM_LEAD_ACCEL a frame
+	// up to CAM_LEAD_VMAX, and starts slowing when the distance left is what it
+	// needs to stop (v^2 / 2a), so it arrives without a bump.
+	int16_t d = (int16_t)(leadTarget(g) - g->camLead);
+	int16_t v = g->camLeadV;
+	int16_t s = d > 0 ? 1 : d < 0 ? -1 : 0;
+	int16_t av = v < 0 ? (int16_t)-v : v;
+	// v^2 / 2a with a = 2: a 16x16 multiply (MULU.W) and a shift, av <= 32
+	int16_t stopDist = (int16_t)((uint16_t)((uint16_t)av * (uint16_t)(av + CAM_LEAD_ACCEL)) >> 2);
+	uint8_t isToward = (v > 0 && s > 0) || (v < 0 && s < 0);
+	if(s == 0 || (isToward && absw(d) <= stopDist)) {
+		// arriving (or there): slow down, but never past the target
+		if(v > 0) v = (int16_t)(v > CAM_LEAD_ACCEL ? v - CAM_LEAD_ACCEL : 0);
+		else if(v < 0) v = (int16_t)(v < -CAM_LEAD_ACCEL ? v + CAM_LEAD_ACCEL : 0);
+	}
+	else {
+		v = clampw((int16_t)(s > 0 ? v + CAM_LEAD_ACCEL : v - CAM_LEAD_ACCEL), -CAM_LEAD_VMAX, CAM_LEAD_VMAX);
+	}
+	if(absw(d) <= absw(v) && absw(v) <= CAM_LEAD_ACCEL) {
+		g->camLead = (int16_t)(g->camLead + d);   // the last step lands exactly
+		v = 0;
+	}
+	else {
+		g->camLead = (int16_t)(g->camLead + v);
+	}
+	g->camLeadV = v;
+	cameraPlace(g);
 }
 
 // -------------------------------------------------------------- update ---
