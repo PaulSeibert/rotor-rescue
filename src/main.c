@@ -1217,38 +1217,82 @@ __attribute__((noinline)) static void weatherUpdate(void) {
 }
 
 // ------------------------------------------------------------------ rotor ---
-// Paula channel 2: a looped chop (two blade passes of filtered noise) made
-// at startup; the period follows the airspeed, the volume the state.
+// Paula channel 2: the rotor, a loop made at startup (sound/tools/make_rotor.py
+// previews it with the same integer arithmetic: keep the two in step). A
+// two-blade rotor: on every blade pass a low damped thump (the "whop", a
+// resonator at ~75 Hz) and the slap (band-passed noise, ~300-1200 Hz, fast
+// attack); a quiet rumble between. Four passes a loop, each a little different,
+// so it doesn't buzz; ~11 a second at period 428. In flight the pitch moves
+// only a little (rotor RPM is nearly constant): the loudness carries the effort.
 
 #define ROTOR_CHANNEL 2
-#define ROTOR_SAMPLES 1200
+#define ROTOR_PASS 752
+#define ROTOR_PASSES 4
+#define ROTOR_SAMPLES (ROTOR_PASS * ROTOR_PASSES)   // 3008 bytes of chip RAM
+#define ROTOR_PERIOD 428                            // 8287 Hz
 static BYTE *s_pRotorWave;   // chip RAM
 
-static void rotorCreate(void) {
-	s_pRotorWave = memAllocChip(ROTOR_SAMPLES);
+// One run of the loop's synthesis: twice through (the second kept, with the
+// resonator's tail from the first: it loops seamlessly). wScale 0: returns the
+// peak; else writes the samples times wScale / 256.
+static LONG rotorSynth(WORD wScale) {
+	static const UBYTE pStrength[ROTOR_PASSES] = {128, 112, 124, 104};
 	UWORD uwLfsr = 0x1D2B;
-	WORD wLow = 0, wLow2 = 0;
-	for(UWORD i = 0; i < ROTOR_SAMPLES; ++i) {
-		UWORD lsb = uwLfsr & 1;
+	LONG lY1 = 0, lY2 = 0, lLp1 = 0, lLp2 = 0, lRum = 0, lMax = 0;
+	for(UWORD n = 0; n < 2 * ROTOR_SAMPLES; ++n) {
+		UWORD i = n < ROTOR_SAMPLES ? n : (UWORD)(n - ROTOR_SAMPLES);
+		UBYTE k = (UBYTE)(i / ROTOR_PASS);
+		UWORD t = (UWORD)(i - k * ROTOR_PASS);
+		UWORD uwLsb = uwLfsr & 1;
 		uwLfsr >>= 1;
-		if(lsb) uwLfsr ^= 0xB400;
-		WORD wNoise = (WORD)((uwLfsr & 0xFF) - 128);
-		// two low-passes: a thump, not a hiss
-		wLow = (WORD)(wLow + ((wNoise - wLow) >> 2));
-		wLow2 = (WORD)(wLow2 + ((wLow - wLow2) >> 2));
-		// envelope: a blade pass every half loop, decaying
-		UWORD uwPhase = i < ROTOR_SAMPLES / 2 ? i : (UWORD)(i - ROTOR_SAMPLES / 2);
-		WORD wEnv = uwPhase < 40 ? (WORD)(uwPhase * 3) : (WORD)(120 - ((uwPhase - 40) >> 2));
-		if(wEnv < 8) wEnv = 8;
-		WORD v = (WORD)((wLow2 * wEnv) >> 5);
-		s_pRotorWave[i] = (BYTE)(v > 127 ? 127 : v < -128 ? -128 : v);
+		if(uwLsb) uwLfsr ^= 0xB400;
+		LONG lNoise = (LONG)(uwLfsr & 0xFF) - 128;
+		// the thump: the resonator (Q14: 75 Hz, ~40 ms), kicked at the pass start;
+		// 16 x 16 multiplies (MULS.W): its state fits a WORD
+		LONG lY = (((LONG)(WORD)32617 * (WORD)lY1 - (LONG)(WORD)16285 * (WORD)lY2) >> 14) + (t == 0 ? 750 : 0);
+		lY2 = lY1;
+		lY1 = lY;
+		// the slap: noise band-passed (a fast low-pass minus a slow one), enveloped
+		lLp1 += (lNoise * 16 - lLp1) >> 1;
+		lLp2 += (lLp1 - lLp2) >> 4;
+		LONG lBand = (lLp1 - lLp2) >> 4;
+		LONG lEnv = t < 16 ? (LONG)t * 16 : t < 528 ? 256 - ((LONG)(t - 16) >> 1) : 0;
+		LONG lSlap = (((LONG)(WORD)lBand * (WORD)lEnv >> 7) * (WORD)pStrength[k]) >> 7;
+		// the rumble: noise low-passed hard, quiet
+		lRum += (lNoise * 16 - lRum) >> 5;
+		LONG v = (lY >> 6) + lSlap + (lRum >> 5);
+		if(n < ROTOR_SAMPLES) continue;
+		if(!wScale) {
+			LONG lAbs = v < 0 ? -v : v;
+			if(lAbs > lMax) lMax = lAbs;
+			continue;
+		}
+		LONG s = ((LONG)(WORD)v * wScale) >> 8;
+		s_pRotorWave[i] = (BYTE)(s > 127 ? 127 : s < -128 ? -128 : s);
 	}
+	return lMax;
+}
+
+static UBYTE s_isRotorPending;
+
+// The loop itself, after boot (the splash is black; ~a few frames of work:
+// at startup it pushed AROS past the harness's boot window)
+static void rotorSetup(void) {
+	s_isRotorPending = 0;
+	LONG lPeak = rotorSynth(0);
+	rotorSynth((WORD)((118L << 8) / (lPeak ? lPeak : 1)));   // peak at ~118
+	agkPerfSkip();                                    // (more than a frame of work, on purpose)
+}
+
+static void rotorCreate(void) {
+	s_pRotorWave = memAllocChipClear(ROTOR_SAMPLES);  // silent until rotorSetup fills it
+	s_isRotorPending = 1;
 	ptplayerSetChannelsForPlayer(0xF & ~(1 << ROTOR_CHANNEL));
 	volatile struct AudChannel *pAud = &g_pCustom->aud[ROTOR_CHANNEL];
 	pAud->ac_ptr = (UWORD *)s_pRotorWave;
 	pAud->ac_len = ROTOR_SAMPLES / 2;
 	pAud->ac_vol = 0;
-	pAud->ac_per = 400;
+	pAud->ac_per = ROTOR_PERIOD;
 	g_pCustom->dmacon = DMAF_SETCLR | (DMAF_AUD0 << ROTOR_CHANNEL);
 }
 
@@ -1256,11 +1300,17 @@ __attribute__((noinline)) static void rotorUpdate(void) {
 	const tGame *g = &s_sGame;
 	const tChopper *c = &g->chop;
 	UBYTE ubVol = 0;
-	UWORD uwPer = 300;
+	UWORD uwPer = ROTOR_PERIOD;
 	if(c->alive && (g->state == GS_PLAY || g->state == GS_INTRO)) {
 		WORD wSpeed = c->vx < 0 ? (WORD)-c->vx : c->vx;
-		uwPer = (UWORD)(300 - wSpeed - (c->landed ? 0 : 24));
-		ubVol = c->landed ? (g->state == GS_INTRO ? 14 : 20) : 30;
+		if(c->landed) {                               // idling on the skids: slower, softer
+			uwPer = ROTOR_PERIOD + 24;
+			ubVol = g->state == GS_INTRO ? 16 : 24;
+		}
+		else {                                        // in the air: the blades bite harder with speed and climbing
+			uwPer = (UWORD)(ROTOR_PERIOD - (wSpeed >> 2));
+			ubVol = (UBYTE)(38 + (wSpeed >> 2) + (c->vy < 0 ? 4 : 0));
+		}
 	}
 	if(s_isPaused) ubVol = 0;
 	volatile struct AudChannel *pAud = &g_pCustom->aud[ROTOR_CHANNEL];
@@ -1271,7 +1321,7 @@ __attribute__((noinline)) static void rotorUpdate(void) {
 static void rotorDestroy(void) {
 	g_pCustom->dmacon = DMAF_AUD0 << ROTOR_CHANNEL;
 	g_pCustom->aud[ROTOR_CHANNEL].ac_vol = 0;
-	memFree(s_pRotorWave, ROTOR_SAMPLES);
+	memFree(s_pRotorWave, ROTOR_SAMPLES);   // (ROTOR_SAMPLES: the new size)
 }
 
 // ---------------------------------------------------------------- sound ---
@@ -1461,9 +1511,11 @@ void genericProcess(void) {
 			agkReady();
 		}
 		else if(s_isTitlePending) titleLoad();   // the splash is still black
+		else if(s_isRotorPending) rotorSetup();  // (a frame later)
 		return;
 	}
 	if(s_isTitlePending) titleLoad();   // (not loaded during the splash: now)
+	if(s_isRotorPending) rotorSetup();
 	if(s_ubAfterSplash < 3 && ++s_ubAfterSplash == 2) {
 		// the game's copper list is showing now: its colours back, the logo freed
 		for(UBYTE i = 1; i < 32; ++i) g_pCustom->color[i] = s_pVPort->pPalette[i];
