@@ -22,6 +22,8 @@
 //        with 8 of its colours reloaded line by line, the land bands below.
 //   Paula channel 2: the rotor, a looped chop whose pitch follows the
 //        airspeed (driven here); music on 0, 1, 3; effects on 1 and 3.
+//   On an A1200 (AGA, found at startup): a 24-bit sky and an 8-plane,
+//        224-colour title logo (see "AGA" below).
 
 #include <ace/generic/main.h>
 #include <ace/managers/blit.h>
@@ -48,6 +50,7 @@
 #include "splash.h"
 #include "sky_gfx.h"    // tools/mkclouds.py
 #include "title_logo.h" // art/tools/make_title_logo.py
+#include "title_logo8.h" // art/tools/make_title_logo8.py (the A1200's)
 
 // ------------------------------------------------------ display constants ---
 
@@ -92,6 +95,18 @@ _Static_assert(TITLE_LOGO_Y - 1 > PLAY_TOP + 1, "lines 24-25 load the logo's col
 _Static_assert(TITLE_MTN_Y - 1 > TITLE_LOGO_END + 3 && TITLE_MTN_Y < GAP_Y - 24, "the title's mountains");
 // HUD, top, every sky line's WAIT + COLOR00, the logo's colour changes, switches, bands
 #define TITLE_COP_COUNT (256 + 2 * (SKY_END - PLAY_TOP) + TITLE_LOGO_CHANGES + 64)
+// AGA (A1200): every sky line's COLOR00 is 4 MOVEs (24 bits), the AGA
+// registers at the top, the 8-plane logo's palette at the top of the title's
+// (per bank of 32: BPLCON3, 32 high nibbles, BPLCON3, 32 low nibbles)
+#define AGA_SKY_MOVES (4 * (SKY_END - PLAY_TOP))
+#define TITLE_LOGO8_PAL_MOVES ((TITLE_LOGO8_COLORS / 32) * 66 + 1)
+// (the OCS sky changes on few lines: AGA's has a WAIT and 4 MOVEs on each)
+#define COP_RAW_COUNT_AGA (COP_RAW_COUNT + AGA_SKY_MOVES + (SKY_END - PLAY_TOP) + 6)
+#define TITLE_COP_COUNT_AGA (TITLE_COP_COUNT + AGA_SKY_MOVES + 6 + TITLE_LOGO8_PAL_MOVES)
+_Static_assert(TITLE_LOGO8_W == TITLE_LOGO_W && TITLE_LOGO8_H == TITLE_LOGO_H, "the A1200's logo: the same size");
+_Static_assert(TITLE_LOGO8_FIRST == 32 && TITLE_LOGO8_COLORS == 224, "the A1200's logo: pens 32-255");
+_Static_assert(TITLE_LOGO8_BYTES >= TITLE_LOGO_BYTES, "its memory holds the OCS logo too (the fallback)");
+#define TITLE_LOGO8_ROW_BYTES (TITLE_LOGO_W / 8)
 
 // PF1 frame buffers: 48 px of margin left, 64 right, so objects never need
 // clipping. Screen (x, y) is buffer (x + FB_X0, y).
@@ -128,6 +143,10 @@ static tCopSlots s_sCloudSlots[2], s_sMtnSlots[2][2], s_sHillSlots[2][2], s_sGnd
 static tBitMap *s_pCloudsBm;        // the far clouds band (PF2, camera / 8)
 static UBYTE *s_pTitleLogo;         // chip RAM: the logo (from the floppy)
 static UBYTE s_isTitlePending, s_isTitleLogo;   // to load; loaded
+static UBYTE s_isTitleLogo8;        // A1200: the logo loaded is the 8-plane one
+static UWORD s_uwCopCount = COP_RAW_COUNT, s_uwTitleCopCount = TITLE_COP_COUNT;   // (more on AGA)
+static ULONG s_ulTitleLogoBytes = TITLE_LOGO_BYTES;
+static UWORD (*s_pSkyLo)[SKY_END - PLAY_TOP];   // AGA: [mission][line] the 24-bit sky's low nibbles (s_pSky: the high)
 static const UWORD *s_pTitleFixed;  // in it: colours 1..TITLE_LOGO_FIXED
 static const UWORD (*s_pTitleRows)[TITLE_LOGO_ROW_REGS];   // colours per line
 static tCopCmd *s_pTitleList[2];    // chip RAM: the title's copper list per buffer
@@ -161,6 +180,88 @@ static void skillKeys(void) {
 			agkEnd();
 			break;
 		}
+	}
+}
+
+// ------------------------------------------------------------------ AGA ---
+// On an A1200 (AGA, Lisa) the game is the same OCS game, plus (aga*, s_isAga):
+//  - the sky in 24-bit colour: COLOR00's high nibbles, then BPLCON3's LOCT
+//    and its low nibbles, on every sky line (smooth, not 12-bit bands);
+//  - the title logo in 8 bitplanes, 224 colours of 24 bits (pens 32-255: the
+//    game's colours 0-31 stay as they are), loaded by the title's copper list.
+// The AGA registers the OCS code never writes are put to the values it
+// assumes, at the top of every copper list: Kickstart 3.1 leaves BPLCON3 at 0,
+// and PF2OF 0 there gives playfield 2 colours 0-7 rather than 8-15.
+// Registers by offset (ACE's OCS build has no names for them).
+#define REG_DENISEID 0x07C
+#define REG_BPLCON3 0x106
+#define REG_BPLCON4 0x10C
+#define REG_FMODE 0x1FC
+#define REG_COLOR00 0x180
+#define BPLCON3_OCS 0x0C00   // bank 0, PF2's colours from 8 (PF2OF 3), high nibbles
+#define BPLCON3_LOCT 0x0E00  // the same, writing low nibbles
+#define BPLCON4_OCS 0x0011   // sprites in colours 16-31
+static UBYTE s_isAga;
+static UWORD s_pSkyDotColorSlot[2];   // AGA: [title] where a list's colour 29-31 MOVEs are
+
+// Lisa answers $F8 in DENISEID's low byte every time; OCS Denise has no such
+// register (whatever the bus holds), ECS Denise answers $FC
+__attribute__((noinline, optimize("Os"))) static UBYTE agaDetect(void) {
+	volatile UWORD *pId = (volatile UWORD *)((volatile UBYTE *)g_pCustom + REG_DENISEID);
+	for(UBYTE i = 0; i < 8; ++i) if((*pId & 0xFF) != 0xF8) return 0;
+	return 1;
+}
+
+static inline void cwReg(tAgkCopWriter *pW, UWORD uwReg, UWORD uwValue) {
+	pW->pList[pW->uwPos++].ulCode = ((ULONG)uwReg << 16) | uwValue;
+}
+
+// AGA: the registers the OCS lists don't write, as the OCS code assumes them
+__attribute__((noinline, optimize("Os"))) static void cwAgaOcsRegs(tAgkCopWriter *pW) {
+	cwReg(pW, REG_FMODE, 0);
+	cwReg(pW, REG_BPLCON3, BPLCON3_OCS);
+	cwReg(pW, REG_BPLCON4, BPLCON4_OCS);
+}
+
+// AGA: COLOR00 in 24 bits (4 MOVEs; the low nibbles' MOVE is 2 after the
+// high's): a write with LOCT clear sets both nibbles to the high ones, then
+// LOCT and the low nibbles, then BPLCON3 back
+__attribute__((noinline, optimize("Os"))) static void cwSky24(tAgkCopWriter *pW, UWORD uwHi, UWORD uwLo) {
+	cwReg(pW, REG_COLOR00, uwHi);
+	cwReg(pW, REG_BPLCON3, BPLCON3_LOCT);
+	cwReg(pW, REG_COLOR00, uwLo);
+	cwReg(pW, REG_BPLCON3, BPLCON3_OCS);
+}
+
+// AGA: bitplane p's pointer, for any of the 8 (BPL1PT at $E0)
+__attribute__((noinline, optimize("Os"))) static void cwPtr8(tAgkCopWriter *pW, UBYTE p, ULONG ulAddr) {
+	cwReg(pW, (UWORD)(0x0E0 + 4 * p), (UWORD)(ulAddr >> 16));
+	cwReg(pW, (UWORD)(0x0E2 + 4 * p), (UWORD)(ulAddr & 0xFFFF));
+}
+
+// AGA: the 8-plane logo's 224 colours, pens 32-255 (banks 1-7; nothing else
+// uses them, so they need no putting back): at the top of the title's list
+__attribute__((noinline, optimize("Os"))) static void cwLogo8Palette(tAgkCopWriter *pW) {
+	const UWORD *pHi = (const UWORD *)s_pTitleLogo;
+	const UWORD *pLo = (const UWORD *)(s_pTitleLogo + TITLE_LOGO8_LO_OFFS);
+	for(UBYTE b = TITLE_LOGO8_FIRST / 32; b < 8; ++b) {
+		cwReg(pW, REG_BPLCON3, (UWORD)((b << 13) | BPLCON3_OCS));
+		for(UBYTE i = 0; i < 32; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * i), *pHi++);
+		cwReg(pW, REG_BPLCON3, (UWORD)((b << 13) | BPLCON3_LOCT));
+		for(UBYTE i = 0; i < 32; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * i), *pLo++);
+	}
+	cwReg(pW, REG_BPLCON3, BPLCON3_OCS);
+}
+
+// AGA: wait for the HUD's lines (game lines 2-21), where the copper leaves
+// BPLCON3 alone: CPU colour writes there go to bank 0's high nibbles (and
+// set the low ones too), as on OCS. (The title's palette load is over by
+// then; the sky's LOCT MOVEs haven't started.)
+__attribute__((noinline, optimize("Os"))) static void agaWaitPaletteWindow(void) {
+	UWORD uwFrom = (UWORD)(s_pView->ubPosY + 2), uwTo = (UWORD)(s_pView->ubPosY + PLAY_TOP - 3);
+	for(;;) {
+		UWORD uwLine = (UWORD)(((g_pCustom->vposr & 1) << 8) | (g_pCustom->vhposr >> 8));
+		if(uwLine >= uwFrom && uwLine <= uwTo) return;
 	}
 }
 
@@ -251,12 +352,52 @@ static void copperJump(tCopCmd *pList, UBYTE ubBfr, UBYTE isTitle) {
 	copSetMoveVal(&pList[COP_JUMP_POS + 1].sMove, ulTo & 0xFFFF);
 }
 
+// After the logo's last line (y): back to the frame buffer, 3 planes
+static void cwTitleLogoOff(tAgkCopWriter *pW, UWORD y, const tBitMap *pFb) {
+	ULONG ulRow = (ULONG)(TITLE_LOGO_END * FB_ROW_BYTES + FB_FETCH_OFFS);
+	agkCopWait(pW, y, SWITCH_WAIT_X);
+	agkCopMove(pW, &g_pCustom->ddfstrt, DDFSTRT_SCROLL);
+	agkCopMove(pW, &g_pCustom->ddfstop, DDFSTOP_LORES);
+	agkCopMove(pW, &g_pCustom->bplcon0, BPLCON0_3);
+	agkCopMove(pW, &g_pCustom->bpl1mod, FB_ROW_BYTES - FETCH_BYTES);
+	agkCopMove(pW, &g_pCustom->bpl2mod, FB_ROW_BYTES - FETCH_BYTES);
+	for(UBYTE p = 0; p < 3; ++p) agkCopPtrs(pW, p, (ULONG)pFb->Planes[p] + ulRow);
+}
+
+// The A1200's logo lines: 8 planes, 1x fetch (lores allows it: the planes
+// take every slot of the logo's 12 words, the copper's sky MOVEs come before
+// them), pens 32-255 from the palette at the list's top, no colour changes
+// down the picture. Planes 4-8 aren't fetched by the 3-plane lines above:
+// their pointers go in a line early, so the switch's MOVEs that run into the
+// logo's first line (and delay its sky MOVEs) are few.
+__attribute__((noinline, optimize("Os"))) static void cwTitleLogo8(tAgkCopWriter *pW, UWORD y, const tBitMap *pFb) {
+	const UBYTE *pPlanes = s_pTitleLogo + TITLE_LOGO8_PLANES_OFFS;
+	if(y == TITLE_LOGO_Y - 2) {
+		agkCopWait(pW, y, SWITCH_WAIT_X);
+		for(UBYTE p = 3; p < 8; ++p) cwPtr8(pW, p, (ULONG)(pPlanes + p * TITLE_LOGO8_ROW_BYTES));
+	}
+	else if(y == TITLE_LOGO_Y - 1) {
+		agkCopWait(pW, y, SWITCH_WAIT_X);
+		agkCopMove(pW, &g_pCustom->ddfstrt, TITLE_LOGO_DDFSTRT);
+		agkCopMove(pW, &g_pCustom->ddfstop, TITLE_LOGO_DDFSTOP);
+		agkCopMove(pW, &g_pCustom->bplcon0, 0x0211);   // 8 planes (BPU3), ECSENA, COLOR
+		agkCopMove(pW, &g_pCustom->bpl1mod, TITLE_LOGO8_ROW_BYTES * 7);
+		agkCopMove(pW, &g_pCustom->bpl2mod, TITLE_LOGO8_ROW_BYTES * 7);
+		for(UBYTE p = 0; p < 3; ++p) cwPtr8(pW, p, (ULONG)(pPlanes + p * TITLE_LOGO8_ROW_BYTES));
+	}
+	else if(y == TITLE_LOGO_END - 1) cwTitleLogoOff(pW, y, pFb);
+}
+
 // The title's logo lines: the switch to its planes at the end of line y (and
 // its first colours before that), the colours that change on line y, the way
 // back to the frame buffer after it. The logo has its own fetch (just its 12
 // words, no early word: PF1's delay is 0 here), 4 planes, single playfield.
 static void cwTitleLogo(tAgkCopWriter *pW, UWORD y, const tBitMap *pFb) {
 	if(!s_isTitleLogo) return;
+	if(s_isTitleLogo8) {
+		cwTitleLogo8(pW, y, pFb);
+		return;
+	}
 	if(y == PLAY_TOP) {
 		// (nothing in PF1 here on the title: its colours can change)
 		agkCopWait(pW, y, SWITCH_WAIT_X);
@@ -284,17 +425,7 @@ static void cwTitleLogo(tAgkCopWriter *pW, UWORD y, const tBitMap *pFb) {
 			if(pRow[r] != pPrev[r]) agkCopMove(pW, &g_pCustom->color[TITLE_LOGO_FIRST_ROW_REG + r], pRow[r]);
 		}
 	}
-	if(y == TITLE_LOGO_END - 1) {
-		// back to the frame buffer, 3 planes
-		ULONG ulRow = (ULONG)(TITLE_LOGO_END * FB_ROW_BYTES + FB_FETCH_OFFS);
-		agkCopWait(pW, y, SWITCH_WAIT_X);
-		agkCopMove(pW, &g_pCustom->ddfstrt, DDFSTRT_SCROLL);
-		agkCopMove(pW, &g_pCustom->ddfstop, DDFSTOP_LORES);
-		agkCopMove(pW, &g_pCustom->bplcon0, BPLCON0_3);
-		agkCopMove(pW, &g_pCustom->bpl1mod, FB_ROW_BYTES - FETCH_BYTES);
-		agkCopMove(pW, &g_pCustom->bpl2mod, FB_ROW_BYTES - FETCH_BYTES);
-		for(UBYTE p = 0; p < 3; ++p) agkCopPtrs(pW, p, (ULONG)pFb->Planes[p] + ulRow);
-	}
+	if(y == TITLE_LOGO_END - 1) cwTitleLogoOff(pW, y, pFb);
 	else if(y == TITLE_LOGO_END) {
 		// PF1's colours back (the text starts below)
 		agkCopWait(pW, y, SWITCH_WAIT_X);
@@ -311,8 +442,11 @@ static void musicFor(UBYTE ubState);
 // load waits for them, to keep the boot (the time to the first picture) short.
 static void titleLoad(void) {
 	s_isTitlePending = 0;
-	s_isTitleLogo = s_pTitleLogo &&
-		agkLoadFile("titlelogo.bin.pk", s_pTitleLogo, TITLE_LOGO_BYTES) == TITLE_LOGO_BYTES;
+	// (the A1200: its 8-plane logo, or without the file the OCS one)
+	s_isTitleLogo8 = s_isAga && s_pTitleLogo &&
+		agkLoadFile("titlelogo8.bin.pk", s_pTitleLogo, TITLE_LOGO8_BYTES) == TITLE_LOGO8_BYTES;
+	s_isTitleLogo = s_isTitleLogo8 || (s_pTitleLogo &&
+		agkLoadFile("titlelogo.bin.pk", s_pTitleLogo, TITLE_LOGO_BYTES) == TITLE_LOGO_BYTES);
 	// (a hard-disk copy without the file: a title without the logo)
 	if(!s_isTitleLogo) agkPrint("AGK title logo missing\n");
 	for(UBYTE b = 0; b < 2; ++b) {
@@ -323,6 +457,9 @@ static void titleLoad(void) {
 	agkPerfSkip();
 }
 
+// (no loop unswitching: the AGA branches would copy whole loops - code size
+// counts on the A500, whose slow RAM is full)
+__attribute__((optimize("no-unswitch-loops")))
 static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE isTitle) {
 	tAgkCopWriter sW;
 	// the game list starts after the sprite pointers, the title list jumped to
@@ -340,6 +477,13 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 		agkCopMove(&sW, (volatile UWORD *)&g_pCustom->cop2lc, 0);
 		agkCopMove(&sW, (volatile UWORD *)&g_pCustom->cop2lc + 1, 0);
 		agkCopMove(&sW, &g_pCustom->copjmp2, 0);
+	}
+	if(isTitle && s_isTitleLogo8) cwLogo8Palette(&sW);   // (~8 lines of the vertical blank)
+	if(s_isAga) {
+		cwAgaOcsRegs(&sW);
+		// the sky dots' colours 29-31 (skyUpdate() patches them)
+		s_pSkyDotColorSlot[isTitle] = sW.uwPos;
+		for(UBYTE i = 0; i < 3; ++i) cwReg(&sW, (UWORD)(REG_COLOR00 + 2 * (29 + i)), g_pMissionSkyDotPal[ubMission][i]);
 	}
 	// Top of the frame (vertical blank): the HUD, 3 planes
 	agkCopMove(&sW, &g_pCustom->bplcon0, BPLCON0_3);
@@ -369,7 +513,8 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 		for(UWORD y = PLAY_TOP; y < SKY_END; ++y) {
 			agkCopWait(&sW, y, 0);
 			s_pTitleSkySlot[y - PLAY_TOP] = sW.uwPos;
-			agkCopMove(&sW, &g_pCustom->color[0], s_pSky[ubMission][y - PLAY_TOP]);
+			if(s_isAga) cwSky24(&sW, s_pSky[ubMission][y - PLAY_TOP], s_pSkyLo[ubMission][y - PLAY_TOP]);
+			else agkCopMove(&sW, &g_pCustom->color[0], s_pSky[ubMission][y - PLAY_TOP]);
 			cwTitleLogo(&sW, y, pFb);
 			if(y == TITLE_LOGO_END + 1) {
 				// BPL4-6 aren't fetched yet: load them early (PF2 blank, PF1's third plane)
@@ -398,9 +543,20 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 	else {
 		// The sky, line by line where the colour changes; the switch to dual playfield
 		UWORD uwPrev = 0xFFFF;
+		ULONG ulPrev24 = ~0UL;
 		for(UWORD y = PLAY_TOP; y < SKY_END; ++y) {
 			UWORD uwColor = s_pSky[ubMission][y - PLAY_TOP];
-			if(uwColor != uwPrev) {
+			if(s_isAga) {
+				// 24 bits: nearly every line differs
+				UWORD uwLo = s_pSkyLo[ubMission][y - PLAY_TOP];
+				ULONG ul24 = ((ULONG)uwColor << 16) | uwLo;
+				if(ul24 != ulPrev24) {
+					agkCopWait(&sW, y, 0);
+					cwSky24(&sW, uwColor, uwLo);
+					ulPrev24 = ul24;
+				}
+			}
+			else if(uwColor != uwPrev) {
 				agkCopWait(&sW, y, 0);
 				agkCopMove(&sW, &g_pCustom->color[0], uwColor);
 				uwPrev = uwColor;
@@ -454,11 +610,11 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 
 	if(isTitle) {
 		s_uwTitleCopUsed = sW.uwPos;
-		agkCopFill(&sW, TITLE_COP_COUNT);
+		agkCopFill(&sW, s_uwTitleCopCount);
 	}
 	else {
 		s_uwCopUsed = sW.uwPos;
-		agkCopFill(&sW, COP_RAW_COUNT);
+		agkCopFill(&sW, s_uwCopCount);
 		copperJump(pList, ubBfr, s_pListTitle[ubBfr]);
 	}
 }
@@ -468,6 +624,11 @@ static void titleListMission(UBYTE ubBfr, UBYTE ubMission) {
 	tCopCmd *pList = s_pTitleList[ubBfr];
 	const UWORD *pSky = s_pSky[ubMission];
 	for(UWORD i = 0; i < SKY_END - PLAY_TOP; ++i) copSetMoveVal(&pList[s_pTitleSkySlot[i]].sMove, pSky[i]);
+	if(s_isAga) {
+		// (the low nibbles' MOVE: cwSky24())
+		const UWORD *pLo = s_pSkyLo[ubMission];
+		for(UWORD i = 0; i < SKY_END - PLAY_TOP; ++i) copSetMoveVal(&pList[s_pTitleSkySlot[i] + 2].sMove, pLo[i]);
+	}
 	for(UBYTE i = 0; i < 7; ++i) {
 		copSetMoveVal(&pList[s_uwTitleMtnPal + i].sMove, g_pMissionMtnPal[ubMission][i + 1]);
 		copSetMoveVal(&pList[s_uwTitleLandPal + i].sMove, g_pMissionLandPal[ubMission][i + 1]);
@@ -1092,7 +1253,17 @@ __attribute__((noinline)) static void skyUpdate(UBYTE ubBfr) {
 	UBYTE isStars = logicSkyDotsAreStars(g->mission);
 	UWORD *pDots = s_pDotList[ubBfr][isStars];
 	const UWORD *pPal = g_pMissionSkyDotPal[g->mission];
-	g_pCustom->color[31] = isStars ? logicStarTwinkle(g) : pPal[2];   // (twinkles)
+	UWORD uwColor31 = isStars ? logicStarTwinkle(g) : pPal[2];   // (twinkles)
+	if(s_isAga) {
+		// colours 29-31 from the copper: a CPU write landing between a sky
+		// line's LOCT MOVEs would set only the low nibbles
+		tCopCmd *pCl = g->state == GS_TITLE ? s_pTitleList[ubBfr] : s_pView->pCopList->pBackBfr->pList;
+		UWORD i = s_pSkyDotColorSlot[g->state == GS_TITLE];
+		pCl[i].ulCode = ((ULONG)(REG_COLOR00 + 2 * 29) << 16) | pPal[0];
+		pCl[i + 1].ulCode = ((ULONG)(REG_COLOR00 + 2 * 30) << 16) | pPal[1];
+		pCl[i + 2].ulCode = ((ULONG)(REG_COLOR00 + 2 * 31) << 16) | uwColor31;
+	}
+	else g_pCustom->color[31] = uwColor31;
 	WORD wKey = (WORD)(((g->cam >> 4) << 2) | g->mission);
 	if(wKey == s_pShownKey[ubBfr]) return;      // the dots move 1 px per 16 px of camera
 	s_pShownKey[ubBfr] = wKey;
@@ -1105,8 +1276,10 @@ __attribute__((noinline)) static void skyUpdate(UBYTE ubBfr) {
 	tCopCmd *pList = s_pView->pCopList->pBackBfr->pList;
 	skyPointer(pList, SKY_CH_DOT, pDots);
 	// colours 29-30 (31 above): nothing else writes them (the chopper leaves 28-31 free)
-	g_pCustom->color[29] = pPal[0];
-	g_pCustom->color[30] = pPal[1];
+	if(!s_isAga) {
+		g_pCustom->color[29] = pPal[0];
+		g_pCustom->color[30] = pPal[1];
+	}
 }
 
 // ---------------------------------------------------------------- weather ---
@@ -1377,13 +1550,21 @@ static void readInput(tInput *pIn) {
 void genericCreate(void) {
 	agkDebugInit();
 	agkPrint("AGK boot rotor-rescue\n");
+	s_isAga = agaDetect();
+	if(s_isAga) {
+		// the A1200: longer copper lists (the 24-bit sky), the 8-plane logo
+		agkPrint("AGK AGA\n");
+		s_uwCopCount = COP_RAW_COUNT_AGA;
+		s_uwTitleCopCount = TITLE_COP_COUNT_AGA;
+		s_ulTitleLogoBytes = TITLE_LOGO8_BYTES;
+	}
 	keyCreate();
 	joyOpen();
 
 	s_pView = viewCreate(0,
 		TAG_VIEW_GLOBAL_PALETTE, 1,
 		TAG_VIEW_COPLIST_MODE, VIEW_COPLIST_MODE_RAW,
-		TAG_VIEW_COPLIST_RAW_COUNT, COP_RAW_COUNT,
+		TAG_VIEW_COPLIST_RAW_COUNT, s_uwCopCount,
 		TAG_DONE);
 	s_pVPort = vPortCreate(0, TAG_VPORT_VIEW, s_pView, TAG_VPORT_BPP, 6, TAG_DONE);
 
@@ -1391,10 +1572,10 @@ void genericCreate(void) {
 	for(UBYTE b = 0; b < 2; ++b) s_pHud[b] = bitmapCreate(HUD_W, PLAY_TOP, FB_BPP, BMF_CLEAR | BMF_INTERLEAVED);
 	s_pBlankRow = memAllocChipClear(FETCH_BYTES);
 	// the title logo's memory and the title's copper lists (filled by titleLoad())
-	s_pTitleLogo = memAllocChip(TITLE_LOGO_BYTES);
+	s_pTitleLogo = memAllocChip(s_ulTitleLogoBytes);
 	s_pTitleFixed = (const UWORD *)s_pTitleLogo;
 	s_pTitleRows = (const UWORD (*)[TITLE_LOGO_ROW_REGS])(s_pTitleLogo + TITLE_LOGO_ROWS_OFFS);
-	for(UBYTE b = 0; b < 2; ++b) s_pTitleList[b] = memAllocChip(TITLE_COP_COUNT * sizeof(tCopCmd));
+	for(UBYTE b = 0; b < 2; ++b) s_pTitleList[b] = memAllocChip(s_uwTitleCopCount * sizeof(tCopCmd));
 	s_pCloudsBm = artCloudsCreate();
 	s_pMountains = artMountainsCreate();
 	s_pHills = artHillsCreate();
@@ -1420,6 +1601,17 @@ void genericCreate(void) {
 
 	for(UBYTE m = 0; m < MISSION_COUNT; ++m)
 		for(UWORD y = 0; y < SKY_END - PLAY_TOP; ++y) s_pSky[m][y] = logicSkyColor(m, (UBYTE)y);
+	if(s_isAga) {
+		// the A1200's sky: 24 bits, split into the high and low nibbles' words
+		s_pSkyLo = memAllocFast(MISSION_COUNT * (SKY_END - PLAY_TOP) * sizeof(UWORD));
+		for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
+			for(UWORD y = 0; y < SKY_END - PLAY_TOP; ++y) {
+				ULONG c = logicSkyColor24(m, (UBYTE)y);
+				s_pSky[m][y] = (UWORD)(((c >> 12) & 0xF00) | ((c >> 8) & 0x0F0) | ((c >> 4) & 0x00F));
+				s_pSkyLo[m][y] = (UWORD)(((c >> 8) & 0xF00) | ((c >> 4) & 0x0F0) | (c & 0x00F));
+			}
+		}
+	}
 	tCopList *pCopList = s_pView->pCopList;
 	s_pCopBfrA = pCopList->pBackBfr;
 	// the game lists jump to the title lists (it starts at the title)
@@ -1518,6 +1710,7 @@ void genericProcess(void) {
 	if(s_isRotorPending) rotorSetup();
 	if(s_ubAfterSplash < 3 && ++s_ubAfterSplash == 2) {
 		// the game's copper list is showing now: its colours back, the logo freed
+		if(s_isAga) agaWaitPaletteWindow();
 		for(UBYTE i = 1; i < 32; ++i) g_pCustom->color[i] = s_pVPort->pPalette[i];
 		// The splash's 47 KB stay allocated until the game quits (genericDestroy):
 		// ACE's memFree switches the OS back on for each free, which froze the
@@ -1553,10 +1746,11 @@ void genericProcess(void) {
 
 	if(s_sGame.frame == 2) {
 		agkState("copper_used", s_uwCopUsed);
-		agkState("copper_max", COP_RAW_COUNT);
+		agkState("copper_max", s_uwCopCount);
 		agkState("title_copper_used", s_uwTitleCopUsed);
-		agkState("title_copper_max", TITLE_COP_COUNT);
+		agkState("title_copper_max", s_uwTitleCopCount);
 		agkEnd();
+		if(s_uwCopUsed > s_uwCopCount || s_uwTitleCopUsed > s_uwTitleCopCount) agkPrint("AGK ERR copper list overflow\n");
 		if(!s_isReady) {
 			s_isReady = 1;
 			agkReady();
@@ -1587,8 +1781,9 @@ void genericDestroy(void) {
 	bitmapDestroy(s_pHills);
 	bitmapDestroy(s_pMountains);
 	bitmapDestroy(s_pCloudsBm);
-	for(UBYTE b = 0; b < 2; ++b) memFree(s_pTitleList[b], TITLE_COP_COUNT * sizeof(tCopCmd));
-	if(s_pTitleLogo) memFree(s_pTitleLogo, TITLE_LOGO_BYTES);
+	for(UBYTE b = 0; b < 2; ++b) memFree(s_pTitleList[b], s_uwTitleCopCount * sizeof(tCopCmd));
+	if(s_pTitleLogo) memFree(s_pTitleLogo, s_ulTitleLogoBytes);
+	if(s_pSkyLo) memFree(s_pSkyLo, MISSION_COUNT * (SKY_END - PLAY_TOP) * sizeof(UWORD));
 	memFree(s_pBlankRow, FETCH_BYTES);
 	for(UBYTE b = 0; b < 2; ++b) {
 		bitmapDestroy(s_pHud[b]);

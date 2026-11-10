@@ -30,7 +30,9 @@ All versions are on the [Releases page](https://github.com/PaulSeibert/rotor-res
 **Requirements:** an Amiga 500 with **1 MB of RAM** (512K chip + 512K
 expansion), Kickstart 1.3 or later, PAL. It runs at 50 frames a second on a
 stock 7 MHz 68000 with the original OCS chips. It's tested on Kickstart 1.3,
-Kickstart 3.1 and the free AROS Kickstart replacement.
+Kickstart 3.1 and the free AROS Kickstart replacement. On an **Amiga 1200**
+(AGA chips) it shows a 24-bit sky and a 224-colour title logo; see
+[On an Amiga 1200](#on-an-amiga-1200).
 
 ## Playing it
 
@@ -136,6 +138,47 @@ red open), people, tanks, jets, mines, the base and you (yellow).
   mission-complete fanfare and the game-over tune use synthesized sampled
   instruments (`sound/tools/make_samples.py`).
 
+## On an Amiga 1200
+
+The same disk runs on an A1200. At startup the game reads Lisa's chip ID
+(DENISEID, `$F8` on AGA), and when it finds the AGA chipset it switches on the
+following. The A500 game is unchanged.
+
+- **A 24-bit sky.** On the A500 each mission's sky is a copper gradient in
+  12-bit colour: about 14 bands, each about a dozen lines tall. On AGA the
+  copper writes the sky colour in 24 bits on all 172 sky lines. It writes
+  COLOR00's high nibbles, sets BPLCON3's LOCT bit, writes the low nibbles,
+  then clears LOCT again. That's four MOVEs a line, and the sunset, night and
+  dawn skies fade smoothly with no visible steps, in play and on the title.
+- **The title logo in 224 colours.** The ROTOR RESCUE logo is drawn again
+  from the same source picture (`art/tools/make_title_logo8.py`) in
+  8 bitplanes, with 224 colours of 24 bits each and no dithering. It's
+  loaded from the floppy (`titlelogo8.bin`, 19 KB packed). The title's copper
+  list loads its palette into colour registers 32-255 in the vertical blank,
+  in banks of 32, high nibbles and then low. Pens 0-31 stay the game's, so
+  nothing has to be put back after the logo's lines. For the logo's
+  130 lines the copper switches to 8 planes at normal (1x) fetch, then back
+  to the game's 3 planes.
+- **OCS registers kept OCS.** Each copper list sets FMODE to 0, BPLCON3 to
+  `$0C00` (playfield 2's colours from 8) and BPLCON4 to `$0011` (sprites in
+  colours 16-31). Kickstart 3.1 leaves BPLCON3 at 0. In version 1.0 that gave
+  the parallax bands the wrong colours on an A1200.
+- Colours 29-31 (the sky's wisps and stars) are written by the copper on AGA
+  rather than by the CPU. A CPU colour write that lands between a sky
+  line's two LOCT MOVEs would set only the low nibbles.
+
+Two small differences show in the emulator's A1200 (vAmiga). The radar's
+dark inset starts and ends 1 pixel later, because a copper colour change in
+the middle of a line shows 1 pixel later there than on the A500. A sky wisp
+near the top left also shows that the A500 doesn't display. Version 1.0
+does both on the A1200 too. The A1200 version hasn't been tried on real
+hardware yet.
+
+`tools/checkaga.py` checks an A1200 screenshot pixel by pixel in 24-bit colour:
+the sky on every line against `logicSkyColor24()`, and the logo against
+`disk/titlelogo8.bin`. The tests run on the A1200 too (`a1200` profile, its own
+goldens in `tests/golden/*/a1200/`).
+
 ## Building
 
 The game is written in C, with the Amiga Game Kit (`agk`) and the
@@ -146,7 +189,8 @@ rules (portable C, unit-tested on a PC), `src/main.c` the Amiga side, and
 ```sh
 agk unit      # game rules on the host (tests/unit)
 agk build     # build/first.adf, a bootable floppy (the project folder is called first)
-agk test      # emulator tests on A500 (KS 1.3, KS 3.1, AROS)
+agk test      # emulator tests on A500 (KS 1.3, KS 3.1, AROS) and A1200 (AGA)
+~/amiga-tools/venv-img/bin/python tools/checkaga.py build/agk/a1200/boot/title.screen.png --mission 0 --logo --last-line 161   # the A1200's sky and logo, exactly
 agk play      # play it in FS-UAE
 agk release && python3 tools/finish_release.py   # the zip for Aminet / itch.io (build/release/)
 agk record demo/showcase.agk -o build/demo.mp4 --readme --gif demo/rotor-rescue.gif --gif-start 8.6 --gif-seconds 12   # this README's GIF and video (needs ffmpeg)
@@ -160,7 +204,9 @@ source. `art/tools/draw.py` draws the game's graphics, and
 (`art/src/desert_palms_logo_source.png`) into `disk/dpslogo.bin`, and
 `art/tools/make_title_logo.py` the title logo
 (`art/src/rotor_rescue_title_source.png`) into `disk/titlelogo.bin`
-(preview: `art/title_logo_amiga.png`).
+(preview: `art/title_logo_amiga.png`), and `art/tools/make_title_logo8.py`
+the A1200's version into `disk/titlelogo8.bin` (preview:
+`art/title_logo8_amiga.png`).
 
 ## Credits
 
