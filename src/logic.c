@@ -1327,6 +1327,25 @@ uint16_t logicSkyColor(uint8_t ubMission, uint8_t ubLine) {
 	return mix(s_pSkyTop[ubMission], s_pSkyLow[ubMission], ubLine, SKY_LINES - 1);
 }
 
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("Os")))   // (A1200 startup only: small beats fast on the A500's full slow RAM)
+#endif
+uint32_t logicSkyColor24(uint8_t ubMission, uint8_t ubLine) {
+	// the same gradient between the same two colours (x17 per channel), in
+	// 8 bits a channel, rounded to nearest (A1200 startup only: 32-bit maths)
+	if(ubLine >= SKY_LINES) ubLine = SKY_LINES - 1;
+	const int32_t n = SKY_LINES - 1;
+	uint32_t ulOut = 0;
+	for(uint8_t s = 0; s < 12; s = (uint8_t)(s + 4)) {
+		int32_t a = (int32_t)((s_pSkyTop[ubMission] >> s) & 15) * 17;
+		int32_t b = (int32_t)((s_pSkyLow[ubMission] >> s) & 15) * 17;
+		int32_t num = (b - a) * (int32_t)ubLine;
+		int32_t c = a + (num >= 0 ? (num + n / 2) / n : -((-num + n / 2) / n));
+		ulOut |= (uint32_t)c << (2 * s);
+	}
+	return ulOut;
+}
+
 const char *logicRank(uint16_t uwSaved) {
 	if(uwSaved >= 180) return "LEGEND";
 	if(uwSaved >= 140) return "HERO";

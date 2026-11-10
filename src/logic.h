@@ -304,6 +304,7 @@ static inline uint8_t logicRadarX(int16_t x) { return (uint8_t)(x >> 4); }
 // Mission palettes: sky gradient and band colours (copper)
 #define SKY_LINES 172
 uint16_t logicSkyColor(uint8_t ubMission, uint8_t ubLine);   // line 0 = PLAY_TOP
+uint32_t logicSkyColor24(uint8_t ubMission, uint8_t ubLine); // the same in 24 bits (0xRRGGBB), for AGA
 extern const uint16_t g_pMissionMtnPal[MISSION_COUNT][8];
 extern const uint16_t g_pMissionLandPal[MISSION_COUNT][8];
 extern const char *const g_pMissionName[MISSION_COUNT];

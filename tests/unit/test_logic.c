@@ -478,6 +478,24 @@ static void testScrollMaths(void) {
 static void testSkyGradient(void) {
 	CHECK(logicSkyColor(0, 0) == 0x214);
 	CHECK(logicSkyColor(0, SKY_LINES - 1) == 0xE75);
+	// the A1200's: the same ends in 24 bits, a step of at most 2 a channel a
+	// line (smooth), and within a 12-bit step of the OCS gradient everywhere
+	for(uint8_t m = 0; m < MISSION_COUNT; ++m) {
+		CHECK(logicSkyColor24(m, 0) == ((logicSkyColor(m, 0) & 0xF00) * 0x1100 | (logicSkyColor(m, 0) & 0x0F0) * 0x110 | (logicSkyColor(m, 0) & 0x00F) * 0x11));
+		uint32_t ulPrev = logicSkyColor24(m, 0);
+		for(uint8_t y = 1; y < SKY_LINES; ++y) {
+			uint32_t c = logicSkyColor24(m, y);
+			uint16_t o = logicSkyColor(m, y);
+			for(uint8_t s = 0; s < 3; ++s) {
+				int d = (int)((c >> (8 * s)) & 0xFF) - (int)((ulPrev >> (8 * s)) & 0xFF);
+				CHECK(d >= -2 && d <= 2);
+				int e = (int)((c >> (8 * s)) & 0xFF) - (int)((o >> (4 * s)) & 15) * 17;
+				CHECK(e >= -9 && e <= 9);
+			}
+			ulPrev = c;
+		}
+	}
+	CHECK(logicSkyColor24(0, SKY_LINES - 1) == 0xEE7755);
 }
 
 static void testDrawListShowsBaseAtStart(void) {

@@ -95,7 +95,10 @@ def pick(c, pal, x, y):
     return i1 if t > (BAYER[y & 3][x & 3] + 0.5) / 16 else i0
 
 
-def main():
+def logo_image():
+    """the source trimmed to its opaque box and area-averaged down to W x H:
+    rows of (r, g, b) in 0-15 units (unrounded floats), None where see-through.
+    (make_title_logo8.py, the A1200's version, starts from the same picture.)"""
     sw, sh, src = load_rgba(SRC)
     xs = [x for y in range(sh) for x in range(sw) if src[y][x][3] >= ALPHA_MIN]
     ys = [y for y in range(sh) for x in range(sw) if src[y][x][3] >= ALPHA_MIN]
@@ -130,6 +133,11 @@ def main():
             else:
                 row.append(None)
         img.append(row)
+    return H, img
+
+
+def main():
+    H, img = logo_image()
 
     # the fixed pens: the whole picture's main colours (outline, metal, red...)
     hist = {}

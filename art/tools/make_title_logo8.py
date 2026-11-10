@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""The ROTOR RESCUE title logo for the A1200 (AGA): the same picture as
+make_title_logo.py's (the same source, box, size and see-through mask), but in
+8 bitplanes with COLORS colours of 24 bits each, picked for the whole picture
+(a median cut refined by k-means). Pens FIRST..255: colours 0-31 stay the
+game's (colour 0 is see-through: the sky's copper gradient shows round it;
+16-31 are the sprites'), so nothing has to be put back after the logo's lines.
+
+Writes:
+  disk/titlelogo8.bin        the picture for the floppy (agk packs it): the
+                             colours as copper words, COLORS high nibbles then
+                             COLORS low nibbles (pen FIRST first), then 8
+                             interleaved bitplanes (W / 8 bytes a plane)
+  src/title_logo8.h          its sizes and offsets, for main.c
+  art/title_logo8_amiga.png  how it looks on the A1200 (2x, over a sky), for the docs
+
+Plain Python 3, no libraries:
+    python3 art/tools/make_title_logo8.py
+"""
+import os
+import struct
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from make_dps_logo import save_png  # noqa: E402
+from make_title_logo import logo_image, W  # noqa: E402
+
+ROOT = os.path.join(HERE, '..', '..')
+PLANES = 8
+FIRST = 32                 # pens 32-255 (0 see-through, 1-31 the game's)
+COLORS = 256 - FIRST
+KMEANS_ITERS = 8
+
+
+def dist(a, b):
+    dr, dg, db = a[0] - b[0], a[1] - b[1], a[2] - b[2]
+    return 3 * dr * dr + 4 * dg * dg + 2 * db * db
+
+
+def median_cut(hist, k):
+    """hist: {colour: count} -> k colours (weighted box means)"""
+    boxes = [list(hist.items())]
+    while len(boxes) < k:
+        # split the box with the most spread x weight, at its weighted median
+        # along its widest channel
+        best, bi = -1, -1
+        for i, b in enumerate(boxes):
+            if len(b) < 2:
+                continue
+            n = sum(c for _, c in b)
+            spread = max(max(p[0][ch] for p in b) - min(p[0][ch] for p in b) for ch in range(3))
+            if spread * n > best:
+                best, bi = spread * n, i
+        if bi < 0:
+            break
+        b = boxes.pop(bi)
+        ch = max(range(3), key=lambda ch: max(p[0][ch] for p in b) - min(p[0][ch] for p in b))
+        b.sort(key=lambda p: p[0][ch])
+        half, acc, cut = sum(c for _, c in b) / 2, 0, 1
+        for j, (_, c) in enumerate(b):
+            acc += c
+            if acc >= half:
+                cut = max(1, min(len(b) - 1, j + 1))
+                break
+        boxes += [b[:cut], b[cut:]]
+    out = []
+    for b in boxes:
+        n = sum(c for _, c in b)
+        out.append(tuple(sum(p[0][ch] * p[1] for p in b) / n for ch in range(3)))
+    return out
+
+
+def nearest(c, pal):
+    best, bi = 1 << 30, 0
+    for i, p in enumerate(pal):
+        d = dist(c, p)
+        if d < best:
+            best, bi = d, i
+    return bi
+
+
+def main():
+    H, img = logo_image()
+    # 0-15 units -> 8-bit, rounded
+    px = [[None if c is None else tuple(min(255, max(0, int(v * 17 + 0.5))) for v in c) for c in row] for row in img]
+    hist = {}
+    for row in px:
+        for c in row:
+            if c is not None:
+                hist[c] = hist.get(c, 0) + 1
+    print(f'{W}x{H}, {sum(hist.values())} solid pixels, {len(hist)} different colours')
+    pal = median_cut(hist, COLORS)
+    for it in range(KMEANS_ITERS):
+        acc = [[0.0, 0.0, 0.0, 0] for _ in pal]
+        for c, n in hist.items():
+            a = acc[nearest(c, pal)]
+            a[0] += c[0] * n; a[1] += c[1] * n; a[2] += c[2] * n; a[3] += n
+        pal = [(a[0] / a[3], a[1] / a[3], a[2] / a[3]) if a[3] else pal[i] for i, a in enumerate(acc)]
+    pal = [tuple(min(255, max(0, int(v + 0.5))) for v in c) for c in pal]
+    while len(pal) < COLORS:
+        pal.append((0, 0, 0))
+    # darkest first (neighbouring pens look alike: the planes pack better)
+    pal.sort(key=lambda c: (2 * c[0] + 5 * c[1] + c[2], c))
+    look = {c: nearest(c, pal) for c in hist}
+    err = sum(dist(c, pal[look[c]]) * n for c, n in hist.items()) / sum(hist.values())
+    print(f'{COLORS} colours, mean weighted error {err:.1f} (8-bit units squared)')
+    pens = [[0 if c is None else FIRST + look[c] for c in row] for row in px]
+
+    blob = bytearray()
+    for c in pal:
+        blob += struct.pack('>H', ((c[0] >> 4) << 8) | ((c[1] >> 4) << 4) | (c[2] >> 4))
+    lo_offs = len(blob)
+    for c in pal:
+        blob += struct.pack('>H', ((c[0] & 15) << 8) | ((c[1] & 15) << 4) | (c[2] & 15))
+    planes_offs = len(blob)
+    for y in range(H):
+        for p in range(PLANES):
+            for xb in range(W // 8):
+                v = 0
+                for bit in range(8):
+                    if (pens[y][xb * 8 + bit] >> p) & 1:
+                        v |= 0x80 >> bit
+                blob.append(v)
+    os.makedirs(os.path.join(ROOT, 'disk'), exist_ok=True)
+    open(os.path.join(ROOT, 'disk', 'titlelogo8.bin'), 'wb').write(blob)
+
+    hdr = f"""// Generated by art/tools/make_title_logo8.py - don't edit.
+// The A1200's title logo on the floppy (disk/titlelogo8.bin -> titlelogo8.bin.pk):
+// TITLE_LOGO8_COLORS colours for pens TITLE_LOGO8_FIRST.. as copper words (the
+// high nibbles, then the low ones: 24-bit AGA colour), then TITLE_LOGO8_PLANES
+// interleaved bitplanes, TITLE_LOGO_W x TITLE_LOGO_H (pen 0 is see-through).
+#ifndef _TITLE_LOGO8_H_
+#define _TITLE_LOGO8_H_
+#define TITLE_LOGO8_W {W}
+#define TITLE_LOGO8_H {H}
+#define TITLE_LOGO8_PLANES {PLANES}
+#define TITLE_LOGO8_FIRST {FIRST}
+#define TITLE_LOGO8_COLORS {COLORS}
+#define TITLE_LOGO8_LO_OFFS {lo_offs}
+#define TITLE_LOGO8_PLANES_OFFS {planes_offs}
+#define TITLE_LOGO8_BYTES {len(blob)}
+#endif
+"""
+    open(os.path.join(ROOT, 'src', 'title_logo8.h'), 'w').write(hdr)
+
+    # the preview: 2x, over a sunset sky like the title's (24-bit)
+    out = []
+    for y in range(H + 8):
+        t = y / (H + 7)
+        sky = tuple(int(a + (b - a) * t) for a, b in zip((0x22, 0x11, 0x44), (0x88, 0x44, 0x55)))
+        row = []
+        for x in range(W + 16):
+            ly, lx = y - 4, x - 8
+            if 0 <= ly < H and 0 <= lx < W and pens[ly][lx]:
+                row.append(pal[pens[ly][lx] - FIRST])
+            else:
+                row.append(sky)
+        out.append(row)
+    big = [[p for p in r for _ in range(2)] for r in out for _ in range(2)]
+    save_png(os.path.join(ROOT, 'art', 'title_logo8_amiga.png'), (W + 16) * 2, (H + 8) * 2, big)
+    print(f'disk/titlelogo8.bin {len(blob)} bytes')
+
+
+if __name__ == '__main__':
+    main()
