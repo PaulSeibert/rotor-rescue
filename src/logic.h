@@ -348,6 +348,8 @@ uint16_t logicSkyColor(uint8_t ubMission, uint8_t ubLine);   // line 0 = PLAY_TO
 // B, then B C B C...), so the eye sees half steps: ~twice the shades for one
 // MOVE a line. Within 1/4 step of a whole value a line is that value.
 uint16_t logicSkyColorDither(uint8_t ubMission, uint8_t ubLine);
+// All SKY_LINES of it at once, with no division (startup on a 68000: fast)
+void logicSkyFillDither(uint8_t ubMission, uint16_t *pOut);
 uint32_t logicSkyColor24(uint8_t ubMission, uint8_t ubLine); // the same in 24 bits (0xRRGGBB), for AGA
 extern const uint16_t g_pMissionMtnPal[MISSION_COUNT][8];
 extern const uint16_t g_pMissionLandPal[MISSION_COUNT][8];

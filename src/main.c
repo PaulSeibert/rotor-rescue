@@ -467,6 +467,7 @@ static void cwTitleLogo(tAgkCopWriter *pW, UWORD y, const tBitMap *pFb) {
 
 static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE isTitle);
 static void musicFor(UBYTE ubState);
+static void routeCreate(void);
 
 // The title logo from the floppy (10 KB packed; ACE switches the OS on for the
 // file), the title's copper lists, then the music (the OS stops it while it
@@ -474,6 +475,11 @@ static void musicFor(UBYTE ubState);
 // load waits for them, to keep the boot (the time to the first picture) short.
 static void titleLoad(void) {
 	s_isTitlePending = 0;
+	routeCreate();   // (the mission card's map: not at startup either)
+	// the hall of fame from the floppy (none yet: the defaults). Here, not at
+	// startup: AROS takes ~2800 frames to load the program and the harness
+	// waits 3000 for the first picture
+	agkPrint(hiscoreLoad(&s_sGame) == DISK_LOADED ? "AGK scores loaded\n" : "AGK scores default\n");
 	// (the A1200: its 8-plane logo, or without the file the OCS one)
 	s_isTitleLogo8 = s_isAga && s_pTitleLogo &&
 		agkLoadFile("titlelogo8.bin.pk", s_pTitleLogo, TITLE_LOGO8_BYTES) == TITLE_LOGO8_BYTES;
@@ -938,7 +944,7 @@ static UBYTE textType(tAgkText *pText, char *pStage, const char *szTarget, UBYTE
 }
 
 
-__attribute__((noinline)) static void hudUpdate(UBYTE ubBfr) {
+__attribute__((noinline, noclone)) static void hudUpdate(UBYTE ubBfr) {
 	static UBYTE pSaved[2] = {0xFF, 0xFF}, pAboard[2] = {0xFF, 0xFF}, pKilled[2] = {0xFF, 0xFF};
 	static UBYTE pLives[2] = {0xFF, 0xFF}, pTitle[2] = {0xFF, 0xFF}, pSkill[2] = {0xFF, 0xFF};
 	static ULONG pScore[2] = {~0UL, ~0UL};
@@ -1179,6 +1185,43 @@ __attribute__((noinline, optimize("Os"))) static void scoreRow(char *p, UBYTE i)
 	*p = 0;
 }
 
+// The hall of fame's and the initials' lines; returns the low bits of the key
+__attribute__((noinline, optimize("Os"))) static UWORD msgMenu(const char **pText, char (*pRows)[32], char *szA, char *szB) {
+	const tGame *g = &s_sGame;
+	if(g->state == GS_SCORES) {
+		pText[MSG_SCORES] = "HALL OF FAME";
+		for(UBYTE i = 0; i < SCORE_COUNT; ++i) {
+			scoreRow(pRows[i], i);
+			pText[MSG_SCORES + 1 + i] = pRows[i];
+		}
+		static const char *const pStatus[] = {
+			"", "SAVING TO DISK...", "SAVED TO DISK", "DISK WRITE-PROTECTED: NOT SAVED",
+			"DISK ERROR: NOT SAVED", "", "",
+		};
+		pText[MSG_SCORES + 6] = g->newRank < SCORE_COUNT ? pStatus[s_ubDiskStatus] : "";
+		return (UWORD)(s_ubDiskStatus << 1);
+	}
+	// the initials: up/down a letter, fire the next, the current one blinking
+	const tScore *s = &g->pScores[g->newRank];
+	const char *szR = "RANK 1   000000";
+	for(UBYTE i = 0; i < 16; ++i) szB[i] = szR[i];
+	szB[5] = (char)('1' + g->newRank);
+	agkTextNumber(&szB[9], s->score, 6);
+	pText[0] = "GREAT SCORE!";
+	pText[1] = szB;
+	pText[2] = "ENTER YOUR INITIALS";
+	UBYTE isBlink = (g->frame >> 4) & 1;
+	for(UBYTE c = 0; c < SCORE_NAME; ++c) {
+		szA[2 * c] = (c == g->entryPos && isBlink) ? '-' : s->name[c];
+		szA[2 * c + 1] = ' ';
+	}
+	szA[2 * SCORE_NAME - 1] = 0;
+	pText[3] = szA;
+	// (the key changes with any letter, the cursor or the blink)
+	return (UWORD)(0x8000 | ((g->entryPos & 3) << 13) | (isBlink << 12) |
+		((s->name[0] * 37 + s->name[1] * 11 + s->name[2]) & 0xFFF));
+}
+
 __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	const tGame *g = &s_sGame;
 	const char *pText[MSG_LINES] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
@@ -1186,40 +1229,10 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	char pRows[SCORE_COUNT][32];
 	UWORD uwKeyLow = 0;
 	switch(g->state) {
-		case GS_SCORES: {
-			pText[MSG_SCORES] = "HALL OF FAME";
-			for(UBYTE i = 0; i < SCORE_COUNT; ++i) {
-				scoreRow(pRows[i], i);
-				pText[MSG_SCORES + 1 + i] = pRows[i];
-			}
-			static const char *const pStatus[] = {
-				"", "SAVING TO DISK...", "SAVED TO DISK", "DISK WRITE-PROTECTED: NOT SAVED",
-				"DISK ERROR: NOT SAVED", "", "",
-			};
-			pText[MSG_SCORES + 6] = g->newRank < SCORE_COUNT ? pStatus[s_ubDiskStatus] : "";
-			uwKeyLow = (UWORD)(s_ubDiskStatus << 1);
-		} break;
-		case GS_ENTRY: {
-			// the initials: up/down a letter, fire the next, the current one blinking
-			const tScore *s = &g->pScores[g->newRank];
-			const char *szR = "RANK 1   000000";
-			for(UBYTE i = 0; i < 16; ++i) szB[i] = szR[i];
-			szB[5] = (char)('1' + g->newRank);
-			agkTextNumber(&szB[9], s->score, 6);
-			pText[0] = "GREAT SCORE!";
-			pText[1] = szB;
-			pText[2] = "ENTER YOUR INITIALS";
-			UBYTE isBlink = (g->frame >> 4) & 1;
-			for(UBYTE c = 0; c < SCORE_NAME; ++c) {
-				szA[2 * c] = (c == g->entryPos && isBlink) ? '-' : s->name[c];
-				szA[2 * c + 1] = ' ';
-			}
-			szA[2 * SCORE_NAME - 1] = 0;
-			pText[3] = szA;
-			// (the key changes with any letter, the cursor or the blink)
-			uwKeyLow = (UWORD)(0x8000 | ((g->entryPos & 3) << 13) | (isBlink << 12) |
-				((s->name[0] * 37 + s->name[1] * 11 + s->name[2]) & 0xFFF));
-		} break;
+		case GS_SCORES:
+		case GS_ENTRY:
+			uwKeyLow = msgMenu(pText, pRows, szA, szB);
+			break;
 		case GS_TITLE:
 			pText[MSG_TITLE] = "BY PAUL ROSS SEIBERT";
 			pText[MSG_TITLE + 1] = "@ 2026 DESERT PALMS SOFTWARE";
@@ -1336,7 +1349,7 @@ static UBYTE s_pRouteImg[ROUTE_H * FB_BPP * ROUTE_ROW_BYTES] __attribute__((alig
 
 // row y of x0..x0+w-1 in a pen, through a pattern (0xFF solid, 0xAA/0x55 hatched):
 // whole bytes where it can (the map starts on a byte)
-static void routeSpan(UBYTE *pTop, UWORD x0, UWORD w, UBYTE y, UBYTE ubPen, UBYTE ubPat) {
+__attribute__((noinline, optimize("Os"))) static void routeSpan(UBYTE *pTop, UWORD x0, UWORD w, UBYTE y, UBYTE ubPen, UBYTE ubPat) {
 	UBYTE *pRow = pTop + y * FB_BPP * ROUTE_ROW_BYTES;
 	UWORD x1 = (UWORD)(x0 + w);
 	for(UWORD x = x0; x < x1;) {
@@ -1352,7 +1365,7 @@ static void routeSpan(UBYTE *pTop, UWORD x0, UWORD w, UBYTE y, UBYTE ubPen, UBYT
 	}
 }
 
-static void routeBox(UBYTE *pTop, UWORD x0, UWORD w, UBYTE y0, UBYTE y1, UBYTE ubPen, UBYTE isHatch) {
+__attribute__((noinline, optimize("Os"))) static void routeBox(UBYTE *pTop, UWORD x0, UWORD w, UBYTE y0, UBYTE y1, UBYTE ubPen, UBYTE isHatch) {
 	for(UBYTE y = y0; y <= y1; ++y) routeSpan(pTop, x0, w, y, ubPen, isHatch ? ((y & 1) ? 0x55 : 0xAA) : 0xFF);
 }
 
@@ -1820,18 +1833,36 @@ void genericCreate(void) {
 	keyCreate();
 	joyOpen();
 
-	// The sky per mission and line: OCS line-dithered (a MOVE on most lines:
-	// the list grows by the extra changes), the A1200's 24-bit below
-	UWORD uwSkyMoves = 0;
-	for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
-		UWORD uwN = 0;
-		for(UWORD y = 0; y < SKY_END - PLAY_TOP; ++y) {
-			s_pSky[m][y] = logicSkyColorDither(m, (UBYTE)y);
-			uwN += !y || s_pSky[m][y] != s_pSky[m][y - 1];
+	s_pMountains = artMountainsCreate();   // (first: the copper list's length depends on it)
+	// the mountains' rows with no gap anywhere in their loop: below the first
+	// of them (down to the band's end) the sky never shows
+	for(UBYTE r = ART_MOUNTAINS_H; r--;) {
+		UBYTE isOpaque = 1;
+		for(UWORD k = 0; k < ART_MOUNTAINS_LOOP_W / 8 && isOpaque; ++k) {
+			UWORD uwOffs = (UWORD)(r * s_pMountains->BytesPerRow + k);
+			isOpaque = (s_pMountains->Planes[0][uwOffs] | s_pMountains->Planes[1][uwOffs] |
+				s_pMountains->Planes[2][uwOffs]) == 0xFF;
 		}
-		if(uwN > uwSkyMoves) uwSkyMoves = uwN;
+		if(!isOpaque) break;
+		s_ubSkyHiddenFrom = (UBYTE)(MTN_Y + r);
 	}
-	if(!s_isAga) s_uwCopCount = (UWORD)(COP_RAW_COUNT + 2 * uwSkyMoves);   // (a WAIT and a MOVE each)
+	// The sky per mission and line: OCS line-dithered (a MOVE on most lines
+	// where the sky shows: the list grows by the changes beyond the plain
+	// gradient's, which COP_RAW_COUNT has room for), the A1200's 24-bit below
+	_Static_assert(SKY_END - PLAY_TOP == SKY_LINES, "the sky table is logic.c's");
+	WORD wSkyMoves = 0;
+	for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
+		logicSkyFillDither(m, s_pSky[m]);
+		WORD wN = 0;
+		for(UWORD y = 0; y < SKY_LINES; ++y) {
+			UBYTE isShown = PLAY_TOP + y < s_ubSkyHiddenFrom || PLAY_TOP + y == SKY_END - 1;
+			wN += isShown && (!y || s_pSky[m][y] != s_pSky[m][y - 1]);
+		}
+		if(wN > wSkyMoves) wSkyMoves = wN;
+	}
+	// (the rest of the list takes ~210 of COP_RAW_COUNT; chip RAM is tight on
+	// Kickstart 3.1, so no more slack than that)
+	if(!s_isAga) s_uwCopCount = (UWORD)(COP_RAW_COUNT - 120 + 2 * wSkyMoves);   // (a WAIT and a MOVE each)
 
 	s_pView = viewCreate(0,
 		TAG_VIEW_GLOBAL_PALETTE, 1,
@@ -1849,19 +1880,6 @@ void genericCreate(void) {
 	s_pTitleRows = (const UWORD (*)[TITLE_LOGO_ROW_REGS])(s_pTitleLogo + TITLE_LOGO_ROWS_OFFS);
 	for(UBYTE b = 0; b < 2; ++b) s_pTitleList[b] = memAllocChip(s_uwTitleCopCount * sizeof(tCopCmd));
 	s_pCloudsBm = artCloudsCreate();
-	s_pMountains = artMountainsCreate();
-	// the mountains' rows with no gap anywhere in their loop: below the first
-	// of them (down to the band's end) the sky never shows
-	for(UBYTE r = ART_MOUNTAINS_H; r--;) {
-		UBYTE isOpaque = 1;
-		for(UWORD k = 0; k < ART_MOUNTAINS_LOOP_W / 8 && isOpaque; ++k) {
-			UWORD uwOffs = (UWORD)(r * s_pMountains->BytesPerRow + k);
-			isOpaque = (s_pMountains->Planes[0][uwOffs] | s_pMountains->Planes[1][uwOffs] |
-				s_pMountains->Planes[2][uwOffs]) == 0xFF;
-		}
-		if(!isOpaque) break;
-		s_ubSkyHiddenFrom = (UBYTE)(MTN_Y + r);
-	}
 	s_pHills = artHillsCreate();
 	s_pGround = artGroundCreate();
 	bobsCreate();
@@ -1871,9 +1889,6 @@ void genericCreate(void) {
 	msgInit();
 
 	logicInit(&s_sGame);
-	routeCreate();
-	// the hall of fame from the floppy (none yet: the defaults)
-	agkPrint(hiscoreLoad(&s_sGame) == DISK_LOADED ? "AGK scores loaded\n" : "AGK scores default\n");
 	s_isSplash = splashCreate(s_pView->ubPosY, s_pBlankRow);   // from the floppy: before systemUnuse
 	agkPerfSkip();
 	for(UBYTE i = 0; i < 6; ++i) { hudUpdate(0); hudUpdate(1); }   // (typed a few letters a call)

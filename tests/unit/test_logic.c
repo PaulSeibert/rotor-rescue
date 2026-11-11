@@ -751,6 +751,9 @@ static uint16_t pairKey(uint8_t m, uint8_t y) {
 
 static void testSkyDither(void) {
 	for(uint8_t m = 0; m < MISSION_COUNT; ++m) {
+		uint16_t pFill[SKY_LINES];
+		logicSkyFillDither(m, pFill);
+		for(uint8_t y = 0; y < SKY_LINES; ++y) CHECK(pFill[y] == logicSkyColorDither(m, y));
 		uint8_t ubPlainSteps = 0, ubDitherShades = 0;
 		for(uint8_t y = 0; y < SKY_LINES; ++y) {
 			uint16_t c = logicSkyColorDither(m, y);

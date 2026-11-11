@@ -1323,6 +1323,53 @@ static uint8_t missionDone(const tGame *g) {
 	return 1;
 }
 
+// The title and the hall of fame
+COLD static void menuUpdate(tGame *g, const tInput *pIn) {
+	if(!pIn->fire) g->titleArmed = 1;
+	else if(g->titleArmed && !g->stateTimer && g->state == GS_TITLE) {
+		g->titleArmed = 0;
+		logicStartGame(g);
+		return;
+	}
+	else if(g->titleArmed && g->state == GS_SCORES) {
+		// (fire on the hall of fame: the title, ready to start)
+		setState(g, GS_TITLE, 0);
+		g->titleArmed = 0;
+		return;
+	}
+	// the camera drifts over the land
+	if(g->frame & 1) {
+		g->cam = (int16_t)(g->cam - 1);
+		if(g->cam <= 0) g->cam = WORLD_W - SCREEN_W;
+	}
+	if(g->state == GS_TITLE && ++g->attract >= ATTRACT_FRAMES) {
+		g->newRank = SCORE_COUNT;
+		g->scoresNext = GS_INTRO;
+		g->titleArmed = 0;
+		setState(g, GS_SCORES, SCORES_FRAMES);
+	}
+	else if(g->state == GS_SCORES && !g->stateTimer) {
+		if(g->scoresNext == GS_INTRO) {
+			logicStartDemo(g);
+			g->titleArmed = 0;
+		}
+		else setState(g, GS_TITLE, 0);
+	}
+}
+
+// The demo's input instead of the player's; 1: it's over (back on the title)
+COLD static uint8_t demoStep(tGame *g, const tInput *pIn, tInput *pDemoIn) {
+	// fire (pressed after it began) or its end: the title
+	if(!pIn->fire) g->titleArmed = 1;
+	else if(g->titleArmed) { demoEnd(g); return 1; }
+	if(!logicDemoInput(g, pDemoIn) || g->state == GS_CLEAR || g->state == GS_OVER ||
+		(g->state == GS_LOST && g->stateTimer == 1)) {
+		demoEnd(g);
+		return 1;
+	}
+	return 0;
+}
+
 void logicUpdate(tGame *g, const tInput *pIn) {
 	++g->frame;
 	weatherUpdate(g);
@@ -1332,49 +1379,13 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 	if(g->state != GS_TITLE) g->attract = 0;
 	tInput sDemoIn;
 	if(g->demo) {
-		// the demo plays itself; fire (pressed after it began) or its end: the title
-		if(!pIn->fire) g->titleArmed = 1;
-		else if(g->titleArmed) { demoEnd(g); return; }
-		if(!logicDemoInput(g, &sDemoIn) || g->state == GS_CLEAR || g->state == GS_OVER ||
-			(g->state == GS_LOST && g->stateTimer == 1)) {
-			demoEnd(g);
-			return;
-		}
-		pIn = &sDemoIn;
+		if(demoStep(g, pIn, &sDemoIn)) return;
+		pIn = &sDemoIn;   // the demo plays itself
 	}
 	switch(g->state) {
 		case GS_TITLE:
 		case GS_SCORES:
-			if(!pIn->fire) g->titleArmed = 1;
-			else if(g->titleArmed && !g->stateTimer && g->state == GS_TITLE) {
-				g->titleArmed = 0;
-				logicStartGame(g);
-				break;
-			}
-			else if(g->titleArmed && g->state == GS_SCORES) {
-				// (fire on the hall of fame: the title, ready to start)
-				setState(g, GS_TITLE, 0);
-				g->titleArmed = 0;
-				break;
-			}
-			// the camera drifts over the land
-			if(g->frame & 1) {
-				g->cam = (int16_t)(g->cam - 1);
-				if(g->cam <= 0) g->cam = WORLD_W - SCREEN_W;
-			}
-			if(g->state == GS_TITLE && ++g->attract >= ATTRACT_FRAMES) {
-				g->newRank = SCORE_COUNT;
-				g->scoresNext = GS_INTRO;
-				g->titleArmed = 0;
-				setState(g, GS_SCORES, SCORES_FRAMES);
-			}
-			else if(g->state == GS_SCORES && !g->stateTimer) {
-				if(g->scoresNext == GS_INTRO) {
-					logicStartDemo(g);
-					g->titleArmed = 0;
-				}
-				else setState(g, GS_TITLE, 0);
-			}
+			menuUpdate(g, pIn);
 			break;
 		case GS_ENTRY:
 			entryUpdate(g, pIn);
@@ -1616,6 +1627,26 @@ uint16_t logicSkyColorDither(uint8_t ubMission, uint8_t ubLine) {
 		out |= (uint16_t)(c << s);
 	}
 	return out;
+}
+
+COLD void logicSkyFillDither(uint8_t ubMission, uint16_t *pOut) {
+	// logicSkyColorDither line by line: per channel the half steps
+	// 2a + round(2 (b - a) line / n), kept as a quotient and a remainder
+	const int16_t n = SKY_LINES - 1;
+	for(uint8_t y = 0; y < SKY_LINES; ++y) pOut[y] = 0;
+	for(uint8_t s = 0; s < 12; s = (uint8_t)(s + 4)) {
+		int16_t a = (int16_t)((s_pSkyTop[ubMission] >> s) & 15);
+		int16_t b = (int16_t)((s_pSkyLow[ubMission] >> s) & 15);
+		int16_t d = (int16_t)(2 * (b - a)), sgn = 1;
+		if(d < 0) { d = (int16_t)-d; sgn = -1; }
+		int16_t q = 0, r = n / 2;      // (|num| + n/2) = q n + r
+		for(uint8_t y = 0; y < SKY_LINES; ++y) {
+			int16_t h = (int16_t)(2 * a + sgn * q);
+			pOut[y] |= (uint16_t)(((h >> 1) + ((h & 1) & (y & 1))) << s);
+			r = (int16_t)(r + d);
+			while(r >= n) { r = (int16_t)(r - n); ++q; }
+		}
+	}
 }
 
 #if defined(__GNUC__) && !defined(__clang__)

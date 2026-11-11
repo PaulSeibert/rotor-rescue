@@ -6,7 +6,7 @@ boot = "AGK ready"                                   # serial text that means "f
 unit_sources = ["src/logic.c"]                       # host-compiled for agk unit (no Amiga headers!)
 
 [lint]
-allow = ["logicSkyColor"]                       # the undithered sky: only the host tests use it now
+allow = ["logicSkyColor", "logicSkyColorDither"]   # the line-at-a-time skies: only the host tests use them now
 
 [cmake]                                              # build options, see CMakeLists.txt
 # ACE_BOB_WRAP_Y = false
