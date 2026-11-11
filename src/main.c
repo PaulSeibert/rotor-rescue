@@ -1116,12 +1116,15 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 			pText[MSG_TITLE + 4] = (g->frame & 32) ? "PRESS FIRE" : "";
 			break;
 		case GS_INTRO: {
-			const char *szM = "MISSION 1";
-			for(UBYTE i = 0; i < 10; ++i) szA[i] = szM[i];
+			// the preview card (the route map goes between lines 1 and 2)
+			const char *szM = "MISSION 1 OF 3";
+			for(UBYTE i = 0; i < 15; ++i) szA[i] = szM[i];
 			szA[8] = (char)('1' + g->mission);
-			pText[1] = szA;
-			pText[2] = g_pMissionName[g->mission];
-			pText[3] = "64 HOSTAGES ARE WAITING";
+			szA[13] = (char)('0' + MISSION_COUNT);
+			pText[0] = szA;
+			pText[1] = g_pMissionName[g->mission];
+			pText[2] = "64 HELD IN 4 BARRACKS";
+			pText[3] = logicBrief(g);
 		} break;
 		case GS_LOST:
 			if(g->stateTimer < LOST_FRAMES - 40) {
@@ -1197,6 +1200,97 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	}
 	// all typed: settled until the key changes
 	s_pMsgKey[ubBfr] = ubBudget ? uwKey : 0xFFFF;
+}
+
+// -------------------------------------------------------------- route map ---
+// The preview card's strip map of the battlefield (logicRouteMap: world x / 12,
+// 256 px) on a dark panel between its text lines 1 and 2: the enemy ground hatched red, ours
+// blue, the fence, the four barracks, the pad and the hangar, and the chopper's
+// "you are here" arrow. The CPU draws it into each frame buffer once, after
+// the blitter's done; the blitter clears it when play starts (queued before
+// the objects). Nothing else is drawn on those lines during the card.
+#define ROUTE_Y 120
+#define ROUTE_H 10
+#define ROUTE_X0 ((SCREEN_W - ROUTE_W) / 2)
+_Static_assert(ROUTE_Y >= 110 + 9 && ROUTE_Y + ROUTE_H <= 132, "the map sits between the card's lines 1 and 2");
+_Static_assert(ROUTE_X0 % 16 == 0 && ROUTE_W % 16 == 0, "the map: whole words (the blitter clears it)");
+static UBYTE s_pRouteLit[2];
+
+// row y of x0..x0+w-1 in a pen, through a pattern (0xFF solid, 0xAA/0x55 hatched):
+// whole bytes where it can (the map starts on a byte)
+static void routeSpan(UBYTE *pTop, UWORD x0, UWORD w, UBYTE y, UBYTE ubPen, UBYTE ubPat) {
+	UBYTE *pRow = pTop + y * FB_ROW_BYTES + (FB_X0 + ROUTE_X0) / 8;
+	UWORD x1 = (UWORD)(x0 + w);
+	for(UWORD x = x0; x < x1;) {
+		UBYTE *p = pRow + (x >> 3);
+		UBYTE ubMask;
+		if(!(x & 7) && x + 8 <= x1) { ubMask = 0xFF; x += 8; }
+		else { ubMask = (UBYTE)(0x80 >> (x & 7)); ++x; }
+		ubMask &= ubPat;
+		for(UBYTE i = 0; i < FB_BPP; ++i, p += FB_PLANE_BYTES) {
+			if(ubPen & (1 << i)) *p |= ubMask;
+			else *p &= (UBYTE)~ubMask;
+		}
+	}
+}
+
+static void routeBox(UBYTE *pTop, UWORD x0, UWORD w, UBYTE y0, UBYTE y1, UBYTE ubPen, UBYTE isHatch) {
+	for(UBYTE y = y0; y <= y1; ++y) routeSpan(pTop, x0, w, y, ubPen, isHatch ? ((y & 1) ? 0x55 : 0xAA) : 0xFF);
+}
+
+__attribute__((noinline, optimize("Os"))) static void routeDraw(UBYTE ubBfr) {
+	UBYTE *pTop = s_pFb[ubBfr]->Planes[0] + s_pFbRowOffs[ROUTE_Y];
+	for(UBYTE y = 0; y < ROUTE_H; ++y) {
+		UBYTE *p = pTop + y * FB_ROW_BYTES + (FB_X0 + ROUTE_X0) / 8;
+		for(UBYTE i = 0; i < FB_BPP; ++i, p += FB_PLANE_BYTES)
+			for(UBYTE k = 0; k < ROUTE_W / 8; ++k) p[k] = i ? 0 : 0xFF;   // a dark panel (pen 1)
+	}
+	tRouteMark pMarks[ROUTE_MARKS];
+	UBYTE n = logicRouteMap(&s_sGame, pMarks);
+	for(UBYTE i = 0; i < n; ++i) {
+		const tRouteMark *m = &pMarks[i];
+		UWORD x = m->x;
+		switch(m->kind) {
+			case ROUTE_ENEMY:                                   // hostile ground: red hatching
+			case ROUTE_HOME:                                    // ours: blue
+				routeBox(pTop, x, m->w, 7, 8, m->kind == ROUTE_ENEMY ? 5 : 7, 1);
+				routeBox(pTop, x, m->w, 9, 9, 2, 0);              // the ground line
+				break;
+			case ROUTE_FENCE:
+				routeBox(pTop, x, 1, 3, 8, 3, 0);
+				break;
+			case ROUTE_BARRACKS:                                // a hut: red roof, stone walls, a door
+				routeBox(pTop, x - 2, 5, 3, 3, 5, 0);
+				routeBox(pTop, x - 3, 7, 4, 4, 5, 0);
+				routeBox(pTop, x - 3, 7, 5, 8, 3, 0);
+				routeBox(pTop, x, 1, 6, 8, 1, 0);
+				break;
+			case ROUTE_PAD:
+				routeBox(pTop, x, m->w, 8, 8, 6, 0);
+				break;
+			case ROUTE_HANGAR:
+				routeBox(pTop, x, m->w, 3, 3, 4, 0);
+				routeBox(pTop, x, m->w, 4, 8, 7, 0);
+				break;
+			case ROUTE_HERE:                                    // you are here: a yellow arrow
+				routeBox(pTop, x - 2, 5, 0, 0, 6, 0);
+				routeBox(pTop, x - 1, 3, 1, 1, 6, 0);
+				routeBox(pTop, x, 1, 2, 3, 6, 0);
+				break;
+		}
+	}
+}
+
+// Queued before the objects: the map cleared once the card's over
+__attribute__((noinline)) static void routeClear(UBYTE ubBfr) {
+	if(!s_pRouteLit[ubBfr] || s_sGame.state == GS_INTRO) return;
+	s_pRouteLit[ubBfr] = 0;
+	tAgkBlitArea sArea;
+	sArea.pD = s_pFb[ubBfr]->Planes[0] + s_pFbRowOffs[ROUTE_Y] + (FB_X0 + ROUTE_X0) / 8;
+	sArea.uwSize = (UWORD)(((ROUTE_H * FB_BPP) << 6) | (ROUTE_W / 16));
+	sArea.wMod = (WORD)(FB_PLANE_BYTES - ROUTE_W / 8);
+	agkBlitClear(agkBlitqSlot(), &sArea);
+	agkBlitqPush();
 }
 
 // ---------------------------------------------------------------- chopper ---
@@ -1785,6 +1879,7 @@ void genericProcess(void) {
 		playSounds(ubStateBefore);
 	}
 	msgLayoutClear(ubBfr);
+	routeClear(ubBfr);
 	agkBlitqPoll();
 	objectsQueue(ubBfr);
 	agkBlitqPoll();
@@ -1797,7 +1892,11 @@ void genericProcess(void) {
 
 	agkBlitqFinish();
 	radarUpdate(ubBfr);
-	msgUpdate(ubBfr);
+	if(s_sGame.state == GS_INTRO && !s_pRouteLit[ubBfr]) {
+		routeDraw(ubBfr);
+		s_pRouteLit[ubBfr] = 1;
+	}
+	else msgUpdate(ubBfr);   // (not both in one picture: the map is the heavier)
 	copProcessBlocks();
 	agkPerfEnd();
 	while(timerGet() - s_ulFrameVbl < 1) continue;

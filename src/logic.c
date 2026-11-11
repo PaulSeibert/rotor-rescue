@@ -1151,12 +1151,14 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 				if(g->cam <= 0) g->cam = WORLD_W - SCREEN_W;
 			}
 			break;
-		case GS_INTRO:
+		case GS_INTRO: {
+			// the preview card: a fresh press of fire skips it
+			uint8_t isSkip = pIn->fire && !g->chop.prevFire;
 			g->chop.prevFire = pIn->fire;
 			g->chop.prevFire2 = pIn->fire2;
 			logicCameraUpdate(g);
-			if(!g->stateTimer) setState(g, GS_PLAY, 0);
-			break;
+			if(!g->stateTimer || isSkip) setState(g, GS_PLAY, 0);
+		} break;
 		case GS_PLAY:
 			logicChopperUpdate(g, pIn);
 			unloadUpdate(g);
@@ -1407,6 +1409,31 @@ uint32_t logicSkyColor24(uint8_t ubMission, uint8_t ubLine) {
 		ulOut |= (uint32_t)c << (2 * s);
 	}
 	return ulOut;
+}
+
+const char *logicBrief(const tGame *g) {
+	// the threats this mission starts with (trip 0, this difficulty)
+	if(logicMinesOn(g)) return "TANKS, JETS AND AIR MINES";
+	if(logicJetsOn(g)) return "TANKS AND JETS ON PATROL";
+	return "TANKS ON PATROL";
+}
+
+static uint8_t routeX(int16_t x) {
+	return (uint8_t)((uint16_t)x / ROUTE_SCALE);
+}
+
+uint8_t logicRouteMap(const tGame *g, tRouteMark *pOut) {
+	uint8_t n = 0, ubFence = routeX(BORDER_X);
+	pOut[n++] = (tRouteMark){ROUTE_ENEMY, 0, ubFence};
+	pOut[n++] = (tRouteMark){ROUTE_HOME, (uint8_t)(ubFence + 1), (uint8_t)(ROUTE_W - 1 - ubFence)};
+	pOut[n++] = (tRouteMark){ROUTE_FENCE, ubFence, 1};
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
+		pOut[n++] = (tRouteMark){ROUTE_BARRACKS, routeX(g->pBarracks[b].x), 7};
+	}
+	pOut[n++] = (tRouteMark){ROUTE_PAD, routeX(BASE_PAD_X0), (uint8_t)(routeX(BASE_PAD_X1) - routeX(BASE_PAD_X0))};
+	pOut[n++] = (tRouteMark){ROUTE_HANGAR, routeX(HANGAR_X), 64 / ROUTE_SCALE};
+	pOut[n++] = (tRouteMark){ROUTE_HERE, routeX(g->chop.x), 1};
+	return n;
 }
 
 const char *logicRank(uint16_t uwSaved) {

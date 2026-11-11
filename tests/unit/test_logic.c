@@ -51,6 +51,44 @@ static void testTitleNeedsFire(void) {
 	CHECK(g.state == GS_PLAY);
 }
 
+// The preview card: the brief follows the schedule, the map has the base right
+// of the fence, the barracks left of it, the marker on the chopper; fire held
+// from the title doesn't skip it, a fresh press does
+static void testPreviewCard(void) {
+	logicInit(&g);
+	step(NONE, 1);
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.state == GS_INTRO);
+	step((tInput){.fire = 1}, 30);
+	CHECK(g.state == GS_INTRO);            // still held from the title
+	step(NONE, 1);
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.state == GS_PLAY);             // a new press skips
+	step(NONE, 20);
+	CHECK(g.pShots[0].active == 0);        // and doesn't shoot
+	tRouteMark pM[ROUTE_MARKS];
+	uint8_t n = logicRouteMap(&g, pM), ubFence = 0, ubHere = 0, ubHangar = 0, ubBarracks = 0;
+	CHECK(n <= ROUTE_MARKS);
+	for(uint8_t i = 0; i < n; ++i) {
+		CHECK(pM[i].x + pM[i].w <= ROUTE_W);
+		if(pM[i].kind == ROUTE_FENCE) ubFence = pM[i].x;
+		if(pM[i].kind == ROUTE_HERE) ubHere = pM[i].x;
+		if(pM[i].kind == ROUTE_HANGAR) ubHangar = pM[i].x;
+	}
+	for(uint8_t i = 0; i < n; ++i) {
+		if(pM[i].kind == ROUTE_BARRACKS) { CHECK(pM[i].x + 4 < ubFence); ++ubBarracks; }
+	}
+	CHECK(ubBarracks == BARRACKS_COUNT && ubHere == START_X / ROUTE_SCALE);
+	CHECK(ubFence < ubHere && ubHere < ubHangar && pM[n - 1].kind == ROUTE_HERE);
+	// the brief: tanks only at first (normal), jets from mission 2, mines from 3
+	logicStartGame(&g);
+	CHECK(logicBrief(&g)[6] == 'O');       // "TANKS ON PATROL"
+	logicStartMission(&g, 1);
+	CHECK(logicBrief(&g)[10] == 'J');      // "TANKS AND JETS..."
+	logicStartMission(&g, 2);
+	CHECK(logicBrief(&g)[7] == 'J');       // "TANKS, JETS AND AIR MINES"
+}
+
 static void testStartsLandedAtBase(void) {
 	newGame();
 	CHECK(g.chop.landed && g.chop.alive);
@@ -895,6 +933,7 @@ int main(void) {
 	testHeadOnStrafeIsSnappy();
 	testJetsGiveWarning();
 	testTitleNeedsFire();
+	testPreviewCard();
 	testStartsLandedAtBase();
 	testTakeOffAndClimb();
 	testAcceleratesToMaxSpeed();

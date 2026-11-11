@@ -371,4 +371,15 @@ uint8_t logicWeather(const tGame *g, tWeatherFrame *pW);   // 0: none now
 // Rank text for the end screen
 const char *logicRank(uint16_t uwSaved);
 
+// The preview card before each mission (GS_INTRO, fire skips it): its one-line
+// brief - what's out there this time - and a strip map of the battlefield,
+// world x / ROUTE_SCALE, with a "you are here" marker at the chopper.
+const char *logicBrief(const tGame *g);
+#define ROUTE_SCALE 12
+#define ROUTE_W (WORLD_W / ROUTE_SCALE)   // 256 px
+enum { ROUTE_ENEMY, ROUTE_HOME, ROUTE_FENCE, ROUTE_BARRACKS, ROUTE_PAD, ROUTE_HANGAR, ROUTE_HERE };
+typedef struct { uint8_t kind, x, w; } tRouteMark;   // x, w in map px
+#define ROUTE_MARKS (6 + BARRACKS_COUNT)
+uint8_t logicRouteMap(const tGame *g, tRouteMark *pOut);   // back to front
+
 #endif // _LOGIC_H_

@@ -1,0 +1,23 @@
+# Before each mission, a preview card: the mission (2 of 3...), its name, a
+# strip map of the battlefield - enemy ground hatched red, the fence, four
+# barracks, our pad and hangar, a yellow "you are here" arrow over the
+# chopper - and a one-line brief. A fresh press of fire skips it; the map is
+# gone once play starts.
+wait-serial "AGK t0"
+press fire 2
+wait 70
+screenshot card
+# the arrow over the chopper at the base (world x 2880 / 12 = map x 240)
+expect-color card 272 120 0xFC3
+# the nearest barracks' red roof (world x 2240 / 12 = 186)
+expect-color card 218 124 0xD42
+# a hut's door, the enemy ground's red hatching, our blue
+expect-color card 67 127 0x111
+expect-color card 100 128 0xD42
+expect-color card 260 128 0x36B
+press fire 1
+wait-serial "state=2" 10
+wait 12
+screenshot play
+expect-serial "state=1[\s\S]*state=2"
+expect-no-serial "AGK ERR"
