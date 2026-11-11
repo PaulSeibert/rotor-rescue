@@ -16,7 +16,7 @@ const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_SHADOW] = 4,
 };
 const uint8_t g_pBobFrames[BOB_TYPES] = {
-	[BOB_HANGAR] = 1, [BOB_FENCE] = 1, [BOB_BARRACKS] = 4, [BOB_TANK] = 6,
+	[BOB_HANGAR] = 1, [BOB_FENCE] = 1, [BOB_BARRACKS] = 4, [BOB_TANK] = 10,
 	[BOB_HOSTAGE] = 8, [BOB_JET] = 2, [BOB_MINE] = 2, [BOB_SHOT] = 1,
 	[BOB_BOMB] = 1, [BOB_SHELL] = 1, [BOB_BOOM] = 5, [BOB_FLAG] = 2,
 	[BOB_SHADOW] = SHADOW_SIZES * 2,
@@ -272,6 +272,9 @@ static const int16_t s_pJetRest[DIFFICULTY_MAX + 1] = {0, 80, 40, 0, -30, -50}; 
 // how long it's on screen before its first shot
 static const uint8_t s_pJetLead[DIFFICULTY_MAX + 1] = {255, 255, 220, 180, 150, 130};
 static const uint8_t s_pJetAim[DIFFICULTY_MAX + 1] = {40, 40, 30, 24, 20, 18};
+// a tank's wind-up before each shell (it comes out of the time between shells:
+// the rate of fire is the same, the shell is announced)
+static const uint8_t s_pTankTell[DIFFICULTY_MAX + 1] = {16, 22, 18, 16, 14, 12};
 
 void logicSetDifficulty(tGame *g, uint8_t ubLevel) {
 	if(ubLevel <= DIFFICULTY_MAX) g->difficulty = ubLevel;
@@ -288,6 +291,10 @@ uint8_t logicJetsOn(const tGame *g) {
 
 uint8_t logicMinesOn(const tGame *g) {
 	return g->trip + g->mission >= s_pMinesFrom[g->difficulty];
+}
+
+uint8_t logicTankTell(const tGame *g) {
+	return s_pTankTell[g->difficulty];
 }
 
 // --------------------------------------------------------------- hostages ---
@@ -820,17 +827,13 @@ __attribute__((noinline)) static void tanksUpdate(tGame *g) {
 		tTank *t = &g->pTanks[i];
 		if(!t->active) continue;
 		int16_t dx = (int16_t)(c->x - t->x);
-		// drive at the chopper (half a pixel a frame), stay out of friendly ground
-		if(absw(dx) > 20 && (g->frame & 1)) {
-			t->dir = dx > 0 ? 1 : -1;
-			int16_t nx = (int16_t)(t->x + t->dir);
-			if(nx <= BORDER_X - 24 && nx >= 16) { t->x = nx; ++t->anim; }
-		}
 		if(t->fireAnim) --t->fireAnim;
-		if(t->cool) { --t->cool; continue; }
-		// fire at a landed or low chopper in range
-		if(c->alive && c->y > 150 && absw(dx) < 200) {
-			tShot *s = eshotNew(g);
+		uint8_t isInRange = c->alive && c->y > 150 && absw(dx) < 200;
+		if(t->tell) {
+			// the wind-up: braced (it doesn't drive), barrel up, flashing
+			if(--t->tell) continue;
+			// the shell - unless the chopper got away meanwhile
+			tShot *s = isInRange ? eshotNew(g) : 0;
 			if(s) {
 				// lead the target, give or take 16 px
 				uint8_t ubMask = s_pAimMask[g->difficulty];
@@ -846,6 +849,26 @@ __attribute__((noinline)) static void tanksUpdate(tGame *g) {
 				t->fireAnim = 8;
 				g->events |= EV_TANKFIRE;
 			}
+			// the time to the next shell, less the next tell (the same rate of fire)
+			int16_t wCool = (int16_t)(110 - g->mission * 20 - g->trip * 8 + s_pTankCool[g->difficulty]);
+			uint8_t ubMin = s_pTankCoolMin[g->difficulty];
+			t->cool = (uint8_t)((wCool < ubMin ? ubMin : wCool) - logicTankTell(g));
+			t->cool = (uint8_t)(t->cool + (logicRandom(g) & 31));
+			continue;
+		}
+		// drive at the chopper (half a pixel a frame), stay out of friendly ground
+		if(absw(dx) > 20 && (g->frame & 1)) {
+			t->dir = dx > 0 ? 1 : -1;
+			int16_t nx = (int16_t)(t->x + t->dir);
+			if(nx <= BORDER_X - 24 && nx >= 16) { t->x = nx; ++t->anim; }
+		}
+		if(t->cool) { --t->cool; continue; }
+		// a landed or low chopper in range: the tell, then (tell frames on) the shell
+		if(isInRange) {
+			t->dir = dx > 0 ? 1 : -1;
+			t->tell = logicTankTell(g);
+			g->events |= EV_TANKTELL;
+			continue;
 		}
 		int16_t wCool = (int16_t)(110 - g->mission * 20 - g->trip * 8 + s_pTankCool[g->difficulty]);
 		uint8_t ubMin = s_pTankCoolMin[g->difficulty];
@@ -980,6 +1003,7 @@ static void enemiesSpawn(tGame *g) {
 			t->cool = 150;
 			t->anim = 0;
 			t->fireAnim = 0;
+			t->tell = 0;
 			break;
 		}
 	}
@@ -1251,7 +1275,8 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 	for(uint8_t i = 0; i < TANK_MAX; ++i) {
 		const tTank *t = &g->pTanks[i];
 		if(!t->active) continue;
-		uint8_t f = t->fireAnim ? (t->dir < 0 ? TANK_FIRE_L : TANK_FIRE_R) :
+		uint8_t f = t->tell ? (uint8_t)(((t->tell & 4) ? TANK_FLASH_L : TANK_AIM_L) + (t->dir > 0)) :
+			t->fireAnim ? (t->dir < 0 ? TANK_FIRE_L : TANK_FIRE_R) :
 			(uint8_t)((t->dir < 0 ? TANK_L0 : TANK_R0) + ((t->anim >> 2) & 1));
 		n = drawAdd(pOut, n, (int16_t)(t->x - 16 - cam), FEET_Y - 14, BOB_TANK, f);
 	}

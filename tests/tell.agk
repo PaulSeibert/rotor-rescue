@@ -1,0 +1,15 @@
+# Every tank shell is announced: the tank stops, its barrel swings up and a
+# flash blinks on its turret (16 frames on normal) before the shell leaves.
+# Sitting landed by the open barracks, the tanks roll up and shoot.
+start-at boarding
+wait-serial "tank tell"
+wait 6
+screenshot tell
+# the raised barrel's glinting tip (level, that pixel is the ground behind)
+expect-color tell 48 226 0xFEC
+wait-serial "AGK sfx tankfire"
+wait 30
+# no shell without a tell before it: not the first, not one after another
+expect-no-serial "\A(?:(?!tank tell)[\s\S])*AGK sfx tankfire"
+expect-no-serial "AGK sfx tankfire(?:(?!tank tell)[\s\S])*AGK sfx tankfire"
+expect-no-serial "AGK ERR"

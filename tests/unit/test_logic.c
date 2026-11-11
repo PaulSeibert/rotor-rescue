@@ -319,8 +319,69 @@ static void testTankShootsLowChopper(void) {
 	flyAt(1500, GROUND_Y - 10);
 	g.pTanks[0] = (tTank){.x = 1400, .active = 1, .hp = 2, .dir = 1, .cool = 0};
 	step(NONE, 1);
+	// first the tell: the tank stops, barrel up, no shell yet
+	CHECK(g.events & EV_TANKTELL);
+	CHECK(g.pTanks[0].tell == logicTankTell(&g) && !g.pEShots[0].active);
+	tDraw pDraw[DRAW_MAX];
+	uint8_t n = logicDraw(&g, pDraw), isAim = 0;
+	for(uint8_t i = 0; i < n; ++i) isAim |= pDraw[i].bob == BOB_TANK && pDraw[i].frame >= TANK_AIM_L;
+	CHECK(isAim);
+	int16_t x0 = g.pTanks[0].x;
+	step(NONE, logicTankTell(&g) - 1);
+	CHECK(!g.pEShots[0].active && g.pTanks[0].x == x0);   // braced, still no shell
+	step(NONE, 1);
 	CHECK(g.events & EV_TANKFIRE);
 	CHECK(g.pEShots[0].active && g.pEShots[0].vx > 0);
+}
+
+// The fairness rule: no shell without a tell. Play long stretches with tanks
+// round a landed chopper on every difficulty; every shell must come from a tank
+// that spent at least logicTankTell() frames, unbroken, in its wind-up, and that
+// tell is at least 12 frames on every difficulty, 12-18 on normal.
+static void testNoShellWithoutTell(void) {
+	CHECK(logicTankTell(&g) >= 12);
+	uint16_t uwShells = 0;
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		newGame();
+		logicSetDifficulty(&g, d);
+		CHECK(logicTankTell(&g) >= 12);
+		if(d == DIFFICULTY_NORMAL) CHECK(logicTankTell(&g) >= 12 && logicTankTell(&g) <= 18);
+		flyAt(1500, GROUND_Y);
+		g.chop.landed = 1;
+		uint8_t ubTell = logicTankTell(&g);
+		for(uint8_t i = 0; i < 4; ++i) {
+			g.pTanks[i] = (tTank){.x = (int16_t)(1300 + 60 * i), .active = 1, .hp = 2, .dir = 1,
+				.cool = (uint8_t)(7 * i)};
+		}
+		uint8_t pRun[TANK_MAX] = {0};
+		for(uint16_t f = 0; f < 3000; ++f) {
+			uint8_t pBefore[TANK_MAX];
+			for(uint8_t i = 0; i < TANK_MAX; ++i) pBefore[i] = pRun[i];
+			step(NONE, 1);
+			if(g.state != GS_PLAY) break;
+			// new shells this frame
+			uint8_t ubNew = 0;
+			for(uint8_t s = 0; s < ESHOT_MAX; ++s) {
+				const tShot *p = &g.pEShots[s];
+				ubNew += p->active && p->kind == ESHOT_SHELL && p->life == 100;
+			}
+			uint8_t ubFired = 0;
+			for(uint8_t i = 0; i < TANK_MAX; ++i) {
+				const tTank *t = &g.pTanks[i];
+				if(t->active && t->fireAnim == 8) {
+					++ubFired;
+					// its tell ran out this frame, after ubTell frames in a row
+					CHECK(pBefore[i] >= ubTell && !t->tell);
+				}
+				pRun[i] = t->active && t->tell ? (uint8_t)(pRun[i] + 1) : 0;
+			}
+			CHECK(ubNew == ubFired);
+			uwShells += ubNew;
+			// (taken away before they arrive: the chopper stays put)
+			for(uint8_t s = 0; s < ESHOT_MAX; ++s) g.pEShots[s].active = 0;
+		}
+	}
+	CHECK(uwShells > 50);   // (it did shoot)
 }
 
 static void testTankIgnoresHighChopper(void) {
@@ -698,9 +759,13 @@ static void testHarderTanksFireSooner(void) {
 		logicSetDifficulty(&g, d);
 		flyAt(1500, GROUND_Y - 10);
 		g.pTanks[0] = (tTank){.x = 1400, .active = 1, .hp = 2, .dir = 1, .cool = 0};
-		step(NONE, 1);
+		g.chop.landed = 1;
 		int n = 0;
-		while(g.pTanks[0].cool && n < 1000) { step(NONE, 1); ++n; }
+		while(!(g.events & EV_TANKFIRE) && n < 1000) { step(NONE, 1); ++n; }
+		g.pEShots[0].active = g.pEShots[1].active = 0;
+		g.chop.y = GROUND_Y;
+		n = 0;
+		do { step(NONE, 1); ++n; } while(!(g.events & EV_TANKFIRE) && n < 1000);
 		pFrames[d] = n;
 	}
 	CHECK(pFrames[1] > pFrames[3] && pFrames[3] > pFrames[5]);
@@ -783,6 +848,7 @@ int main(void) {
 	testVictoryAfterLastMission();
 	testDifficultySchedule();
 	testTankShootsLowChopper();
+	testNoShellWithoutTell();
 	testTankIgnoresHighChopper();
 	testTanksStayInEnemyGround();
 	testBombKillsTank();

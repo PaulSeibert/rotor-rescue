@@ -485,9 +485,36 @@ def tank():
         fire[3][x] = 'Y'
         fire[4][x] = 'Y'
     fire[2][31] = 'W'
+    # The tell (the wind-up before a shell): the barrel swings up from level to
+    # ~20 degrees and a flash blinks on the turret - the star turns yellow and
+    # the muzzle glints white.
+    aim = [r[:] for r in base]
+    for y in (3, 4):
+        for x in range(20, 30):
+            aim[y][x] = '.'
+    aim[3][19] = 'O'
+    aim[4][19] = 'K'
+    barrel = []
+    for i in range(10):                                  # a 2-px barrel, rising 1 in 3
+        x, y = 20 + i, 3 - (i + 1) // 3
+        barrel += [(x, y, 'S' if i < 9 else 'W'), (x, y + 1, 'O' if i < 9 else 'S')]
+    for x, y, c in barrel:
+        aim[y][x] = c
+    for x, y, c in barrel:                               # its outline, where there's nothing
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            if 0 <= y + dy < 14 and 0 <= x + dx < 32 and aim[y + dy][x + dx] == '.':
+                aim[y + dy][x + dx] = 'K'
+    flash = [r[:] for r in aim]
+    flash[3][16] = 'Y'                                   # the star lights up
+    flash[0][30] = 'W'                                   # the muzzle glints
+    flash[0][31] = 'Y'
+    flash[1][30] = 'Y'
+    flash[1][31] = 'W'
     # right-facing are drawn; left = mirror
-    frames = [mirror(base), mirror(alt), base, alt, mirror(fire), fire]
-    save('tank', 'Enemy tank, 32x14: left x2, right x2, firing left, firing right.', PF1, frames)
+    frames = [mirror(base), mirror(alt), base, alt, mirror(fire), fire,
+              mirror(aim), aim, mirror(flash), flash]
+    save('tank', 'Enemy tank, 32x14: left x2, right x2, firing left, firing right,\n'
+         'the tell (barrel up) left, right, the tell flashing left, right.', PF1, frames)
 
 
 def hostage():

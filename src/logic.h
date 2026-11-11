@@ -60,7 +60,8 @@ extern const uint8_t g_pBobW[BOB_TYPES], g_pBobH[BOB_TYPES], g_pBobFrames[BOB_TY
 
 // Frames inside a BOB
 enum { BARRACKS_OK, BARRACKS_HIT, BARRACKS_OPEN0, BARRACKS_OPEN1 };
-enum { TANK_L0, TANK_L1, TANK_R0, TANK_R1, TANK_FIRE_L, TANK_FIRE_R };
+enum { TANK_L0, TANK_L1, TANK_R0, TANK_R1, TANK_FIRE_L, TANK_FIRE_R,
+	TANK_AIM_L, TANK_AIM_R, TANK_FLASH_L, TANK_FLASH_R };   // the tell: barrel up, a blinking flash
 enum { MAN_STAND, MAN_RUN0, MAN_RUN1, MAN_WAVE0, MAN_WAVE1, MAN_DEAD,
 	MAN_RUNL0, MAN_RUNL1 };
 enum { JET_L, JET_R };
@@ -119,6 +120,7 @@ typedef struct {
 	uint8_t active, hp;
 	int8_t dir;
 	uint8_t cool, anim, fireAnim;
+	uint8_t tell;        // frames left in the wind-up before a shell (0: none)
 } tTank;
 
 typedef struct {
@@ -209,6 +211,7 @@ typedef struct {
 #define EV_STATE     0x1000   // game state changed
 #define EV_TAKEOFF   0x2000
 #define EV_SHRUG     0x4000   // invincible: a hit that would have destroyed the chopper
+#define EV_TANKTELL  0x8000   // a tank started its wind-up (a shell follows)
 
 // --------------------------------------------------------------- tuning ---
 #define VX_MAX 48            // 3 px/frame
@@ -267,6 +270,9 @@ void logicSetDifficulty(tGame *g, uint8_t ubLevel);   // above DIFFICULTY_MAX: i
 uint8_t logicTankLimit(const tGame *g);
 uint8_t logicJetsOn(const tGame *g);
 uint8_t logicMinesOn(const tGame *g);
+// Tanks: every shell comes after a tell - the tank stops, raises its barrel
+// and its flash blinks for this many frames (16 on normal, 12 on the hardest)
+uint8_t logicTankTell(const tGame *g);
 
 // Drawing: what's on screen, back to front, in screen coordinates (top-left)
 typedef struct {

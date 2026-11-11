@@ -1644,6 +1644,7 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	}
 	if(g->events & EV_CRASH) agkPrint("AGK chopper lost\n");
 	if(g->events & EV_SHRUG) agkPrint("AGK hit ignored (invincible)\n");
+	if(g->events & EV_TANKTELL) agkPrint("AGK tank tell\n");
 	if(g->events & EV_LAND) {
 		agkState("landed x", c->x);
 		agkEnd();
