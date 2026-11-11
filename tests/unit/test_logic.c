@@ -11,6 +11,8 @@ static int s_failures;
 static tGame g;
 static const tInput NONE = {0};
 
+static int absi(int v) { return v < 0 ? -v : v; }
+
 static void step(tInput in, int frames) {
 	for(int i = 0; i < frames; ++i) logicUpdate(&g, &in);
 }
@@ -565,6 +567,43 @@ static void testScrollMathsAga(void) {
 	CHECK(logicBandOffset4(1003, 1, 320) - logicBandOffset4(1000, 1, 320) == 6);
 }
 
+// The OCS sky's line dither: each line within 3/4 step of the true gradient
+// per channel, neighbours at most one step apart, two lines together within
+// 1/4 step (the half steps show), and twice the shades of the plain sky
+static uint16_t pairKey(uint8_t m, uint8_t y) {
+	// what the eye sees: two lines together, per channel (5 bits each)
+	uint16_t a = logicSkyColorDither(m, (uint8_t)(y - 1)), b = logicSkyColorDither(m, y), k = 0;
+	for(uint8_t s = 0; s < 3; ++s) k |= (uint16_t)((((a >> (4 * s)) & 15) + ((b >> (4 * s)) & 15)) << (5 * s));
+	return k;
+}
+
+static void testSkyDither(void) {
+	for(uint8_t m = 0; m < MISSION_COUNT; ++m) {
+		uint8_t ubPlainSteps = 0, ubDitherShades = 0;
+		for(uint8_t y = 0; y < SKY_LINES; ++y) {
+			uint16_t c = logicSkyColorDither(m, y);
+			uint32_t ul24 = logicSkyColor24(m, y);   // the true gradient, x17 per channel
+			for(uint8_t s = 0; s < 3; ++s) {
+				int16_t v = (int16_t)((c >> (4 * s)) & 15) * 68;          // in 1/4 of 1/17 steps
+				int16_t t = (int16_t)((ul24 >> (8 * s)) & 255) * 4;
+				CHECK(v - t <= 54 && t - v <= 54);                        // 3/4 step (+ the 8-bit rounding)
+				if(y) {
+					int16_t p = (int16_t)((logicSkyColorDither(m, (uint8_t)(y - 1)) >> (4 * s)) & 15);
+					int16_t d = (int16_t)(((c >> (4 * s)) & 15) - p);
+					CHECK(d >= -1 && d <= 1);
+					// a pair of lines averages to within 1/4 step of the gradient there
+					int16_t t2 = (int16_t)(((logicSkyColor24(m, (uint8_t)(y - 1)) >> (8 * s)) & 255) * 4 + t);
+					CHECK(absi(v + p * 68 - t2) <= 2 * 17 + 8);
+				}
+			}
+			if(y && logicSkyColor(m, y) != logicSkyColor(m, (uint8_t)(y - 1))) ++ubPlainSteps;
+			if(y >= 2 && pairKey(m, y) != pairKey(m, (uint8_t)(y - 1))) ++ubDitherShades;
+		}
+		printf("sky %d: %d plain steps, %d dithered shades\n", m, ubPlainSteps, ubDitherShades);
+		CHECK(ubDitherShades >= 2 * ubPlainSteps - 3);
+	}
+}
+
 static void testSkyGradient(void) {
 	CHECK(logicSkyColor(0, 0) == 0x214);
 	CHECK(logicSkyColor(0, SKY_LINES - 1) == 0xE75);
@@ -890,6 +929,7 @@ int main(void) {
 	testScrollMaths();
 	testScrollMathsAga();
 	testSkyGradient();
+	testSkyDither();
 	testDrawListShowsBaseAtStart();
 	testChopperShadow();
 	testWeather();

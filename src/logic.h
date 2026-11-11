@@ -318,6 +318,11 @@ static inline uint8_t logicRadarX(int16_t x) { return (uint8_t)(x >> 4); }
 // Mission palettes: sky gradient and band colours (copper)
 #define SKY_LINES 172
 uint16_t logicSkyColor(uint8_t ubMission, uint8_t ubLine);   // line 0 = PLAY_TOP
+// The OCS sky, line-dithered (Fire & Ice): where the gradient sits between two
+// 12-bit steps, a channel alternates line by line between them (A B A B, then
+// B, then B C B C...), so the eye sees half steps: ~twice the shades for one
+// MOVE a line. Within 1/4 step of a whole value a line is that value.
+uint16_t logicSkyColorDither(uint8_t ubMission, uint8_t ubLine);
 uint32_t logicSkyColor24(uint8_t ubMission, uint8_t ubLine); // the same in 24 bits (0xRRGGBB), for AGA
 extern const uint16_t g_pMissionMtnPal[MISSION_COUNT][8];
 extern const uint16_t g_pMissionLandPal[MISSION_COUNT][8];

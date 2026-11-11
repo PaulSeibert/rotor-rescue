@@ -10,6 +10,9 @@ expect-scroll 0 124 319 186 136 3/4
 expect-scroll 0 199 319 206 136 3/2
 expect-scroll 0 246 319 255 136 3
 screenshot flying
+# (the OCS sky here is line-dithered: python3 tools/checksky.py on this
+# screenshot checks each line against logicSkyColorDither; the A1200's is
+# 24-bit, so no pixel check can hold on every profile)
 # Ctrl+L, T: 12 frames of the far bands' fine scroll as the copper got it. On
 # the A1200 (AGA) the 35 ns bits of BPLCON1 (13-12) carry the quarter pixels:
 # the mountains (camera / 4 at 3 px a frame) step 3 quarters a frame, so every

@@ -12,7 +12,8 @@
 //   PF2 (planes 2/4/6, colours 9-15): three looping parallax bands, each
 //        with its own fine scroll and palette set by the copper: far
 //        mountains (camera / 4), near hills (camera / 2), the ground (1:1).
-//   COLOR00: a sky gradient per mission, line by line from the copper.
+//   COLOR00: a sky gradient per mission, line by line from the copper,
+//        line-dithered on OCS (half steps: alternate lines of two colours).
 //   Sprites 0-3: the chopper, 32 px wide, 15 colours (attached pairs).
 //   Sprites 4-5: the weather (dust, rain, spray), in front of everything.
 //   Sprite 6: the far sky's wisps or stars, behind the playfields.
@@ -132,7 +133,7 @@ static UBYTE *s_pBlankRow;          // FETCH_BYTES of zeros: PF2 where there's n
 static tCopBfr *s_pCopBfrA;         // copper buffer 0
 static UWORD s_uwCopUsed, s_uwTitleCopUsed;
 static UBYTE s_pListMission[2];     // which mission's colours each copper list has
-static UWORD s_pSky[MISSION_COUNT][SKY_END - PLAY_TOP];   // COLOR00 per line (from logic.c, at startup)
+static UWORD s_pSky[MISSION_COUNT][SKY_END - PLAY_TOP];   // COLOR00 per line (from logic.c, at startup: OCS line-dithered)
 
 typedef struct {
 	UWORD uwCon1;          // index of the MOVE BPLCON1
@@ -1597,6 +1598,19 @@ void genericCreate(void) {
 	keyCreate();
 	joyOpen();
 
+	// The sky per mission and line: OCS line-dithered (a MOVE on most lines:
+	// the list grows by the extra changes), the A1200's 24-bit below
+	UWORD uwSkyMoves = 0;
+	for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
+		UWORD uwN = 0;
+		for(UWORD y = 0; y < SKY_END - PLAY_TOP; ++y) {
+			s_pSky[m][y] = logicSkyColorDither(m, (UBYTE)y);
+			uwN += !y || s_pSky[m][y] != s_pSky[m][y - 1];
+		}
+		if(uwN > uwSkyMoves) uwSkyMoves = uwN;
+	}
+	if(!s_isAga) s_uwCopCount = (UWORD)(COP_RAW_COUNT + 2 * uwSkyMoves);   // (a WAIT and a MOVE each)
+
 	s_pView = viewCreate(0,
 		TAG_VIEW_GLOBAL_PALETTE, 1,
 		TAG_VIEW_COPLIST_MODE, VIEW_COPLIST_MODE_RAW,
@@ -1635,8 +1649,6 @@ void genericCreate(void) {
 	skyCreate();
 	weatherCreate();
 
-	for(UBYTE m = 0; m < MISSION_COUNT; ++m)
-		for(UWORD y = 0; y < SKY_END - PLAY_TOP; ++y) s_pSky[m][y] = logicSkyColor(m, (UBYTE)y);
 	if(s_isAga) {
 		// the A1200's sky: 24 bits, split into the high and low nibbles' words
 		s_pSkyLo = memAllocFast(MISSION_COUNT * (SKY_END - PLAY_TOP) * sizeof(UWORD));

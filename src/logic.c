@@ -816,7 +816,7 @@ static void aim(int16_t dx, int16_t dy, int16_t *pVx, int16_t *pVy) {
 	int16_t m = absw(dx) > absw(dy) ? absw(dx) : absw(dy);
 	if(!m) { *pVx = 0; *pVy = -32; return; }
 	while(m >= 64) { dx = (int16_t)(dx >> 1); dy = (int16_t)(dy >> 1); m = (int16_t)(m >> 1); }
-	while(m < 32) { dx = (int16_t)(dx << 1); dy = (int16_t)(dy << 1); m = (int16_t)(m << 1); }
+	while(m < 32) { dx = (int16_t)(dx * 2); dy = (int16_t)(dy * 2); m = (int16_t)(m * 2); }
 	*pVx = dx;
 	*pVy = dy;
 }
@@ -1369,6 +1369,25 @@ static uint16_t mix(uint16_t a, uint16_t b, uint16_t t, uint16_t n) {
 uint16_t logicSkyColor(uint8_t ubMission, uint8_t ubLine) {
 	if(ubLine >= SKY_LINES) ubLine = SKY_LINES - 1;
 	return mix(s_pSkyTop[ubMission], s_pSkyLow[ubMission], ubLine, SKY_LINES - 1);
+}
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("Os")))   // (startup only: small beats fast on the A500's full slow RAM)
+#endif
+uint16_t logicSkyColorDither(uint8_t ubMission, uint8_t ubLine) {
+	if(ubLine >= SKY_LINES) ubLine = SKY_LINES - 1;
+	const int16_t n = SKY_LINES - 1;
+	uint16_t out = 0;
+	for(uint8_t s = 0; s < 12; s = (uint8_t)(s + 4)) {
+		int16_t a = (int16_t)((s_pSkyTop[ubMission] >> s) & 15);
+		int16_t b = (int16_t)((s_pSkyLow[ubMission] >> s) & 15);
+		// the channel in half steps, rounded to nearest: odd = between two values
+		int16_t num = (int16_t)(2 * (b - a) * (int16_t)ubLine);
+		int16_t h = (int16_t)(2 * a + (num >= 0 ? (num + n / 2) / n : -((-num + n / 2) / n)));
+		int16_t c = (int16_t)((h >> 1) + ((h & 1) & (ubLine & 1)));
+		out |= (uint16_t)(c << s);
+	}
+	return out;
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
