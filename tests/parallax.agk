@@ -10,4 +10,17 @@ expect-scroll 0 124 319 186 136 3/4
 expect-scroll 0 199 319 206 136 3/2
 expect-scroll 0 246 319 255 136 3
 screenshot flying
+# Ctrl+L, T: 12 frames of the far bands' fine scroll as the copper got it. On
+# the A1200 (AGA) the 35 ns bits of BPLCON1 (13-12) carry the quarter pixels:
+# the mountains (camera / 4 at 3 px a frame) step 3 quarters a frame, so every
+# quarter turns up; the hills 6, so halves. OCS drops them (whole pixels).
+# (vAmiga doesn't draw the 35 ns bits, so screenshots can't show it: the
+# copper values can.)
+key 0x63
+key 0x28
+wait 5
+key 0x14
+wait 20
+expect-serial "pf2 mtn4=\d+ mtnq=0 hillq=0"
+expect-serial "\A(?=[\s\S]*AGK AGA)(?=[\s\S]*mtnq=1 )(?=[\s\S]*mtnq=2 hillq=[02]\b)(?=[\s\S]*mtnq=3 )(?=[\s\S]*hillq=2)|\A(?![\s\S]*AGK AGA)(?![\s\S]*mtnq=[123])(?![\s\S]*hillq=[123])[\s\S]*mtnq=0"
 release

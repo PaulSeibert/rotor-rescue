@@ -165,6 +165,8 @@ static UBYTE s_isSplash;         // the logo's showing
 static UBYTE s_ubAfterSplash;    // frames since it ended (its memory goes after 2)
 static UBYTE s_isReady;
 static UBYTE s_ubSkillKeyWait;  // frames left to press 0-5 after Ctrl+L
+static UBYTE s_ubScrollTrace;   // Ctrl+L, T: frames left to print the far bands' BPLCON1 (tests)
+static UWORD s_uwMtnCon1, s_uwHillCon1, s_uwMtnX4;   // what copperUpdate wrote last
 static const UBYTE s_pDigitKeys[DIFFICULTY_MAX + 1] = {KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5};
 
 // Ctrl+L, then 0-5 within 2 s: the difficulty (0 = invincible, for testing)
@@ -172,6 +174,11 @@ static void skillKeys(void) {
 	if(keyCheck(KEY_CONTROL) && keyUse(KEY_L)) s_ubSkillKeyWait = 100;
 	if(!s_ubSkillKeyWait) return;
 	--s_ubSkillKeyWait;
+	if(keyUse(KEY_T)) {
+		s_ubScrollTrace = 12;
+		s_ubSkillKeyWait = 0;
+		return;
+	}
 	for(UBYTE d = 0; d <= DIFFICULTY_MAX; ++d) {
 		if(keyUse(s_pDigitKeys[d])) {
 			logicSetDifficulty(&s_sGame, d);
@@ -647,6 +654,23 @@ static void bandSet(tCopCmd *pList, const tCopSlots *pSlots, const tBitMap *pBm,
 	}
 }
 
+// AGA: a band at camera >> ubShift in quarter pixels (the 35 ns bits of BPLCON1)
+__attribute__((noinline, optimize("Os"))) static UWORD bandSet4(tCopCmd *pList, const tCopSlots *pSlots,
+	const tBitMap *pBm, WORD wCam, UBYTE ubShift, UWORD uwLoopW) {
+	UWORD uwX4 = logicBandOffset4(wCam, ubShift, uwLoopW);
+	UWORD uwCon1 = logicScrollCon1Pf2Aga(uwX4);
+	pList[pSlots->uwCon1].ulCode = ((ULONG)0x102 << 16) | uwCon1;
+	WORD wOffs = logicScrollByteOffset4(uwX4);
+	for(UBYTE p = 0; p < 3; ++p) {
+		ULONG ulAddr = (ULONG)pBm->Planes[p] + wOffs;
+		UWORD i = pSlots->pPtr[p];
+		copSetMoveVal(&pList[i].sMove, ulAddr >> 16);
+		copSetMoveVal(&pList[i + 1].sMove, ulAddr & 0xFFFF);
+	}
+	if(ubShift == 2) s_uwMtnX4 = uwX4;
+	return uwCon1;
+}
+
 static UWORD s_uwMtnX, s_uwHillX, s_uwGndX;
 
 // The back list: the jump to the title list or not; this mission's colours
@@ -672,12 +696,24 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 	}
 	if(wCam == pListCam[isTitle][ubBfr]) return;   // a still camera: nothing to scroll (chip RAM writes are slow)
 	pListCam[isTitle][ubBfr] = wCam;
+	if(s_isAga) {
+		// the far bands in quarter pixels: no judder at 1/8, 1/4, 1/2 speed
+		if(!isTitle) bandSet4(pList, &s_sCloudSlots[ubBfr], s_pCloudsBm, wCam, 3, ART_CLOUDS_LOOP_W);
+		s_uwMtnCon1 = bandSet4(pList, &s_sMtnSlots[isTitle][ubBfr], s_pMountains, wCam, 2, ART_MOUNTAINS_LOOP_W);
+		s_uwHillCon1 = bandSet4(pList, &s_sHillSlots[isTitle][ubBfr], s_pHills, wCam, 1, ART_HILLS_LOOP_W);
+		s_uwGndX = logicBandOffset(wCam, 0, ART_GROUND_LOOP_W);
+		bandSet(pList, &s_sGndSlots[isTitle][ubBfr], s_pGround, s_uwGndX);
+		return;
+	}
 	if(!isTitle) bandSet(pList, &s_sCloudSlots[ubBfr], s_pCloudsBm, logicBandOffset(wCam, 3, ART_CLOUDS_LOOP_W));
 	s_uwMtnX = logicBandOffset(wCam, 2, ART_MOUNTAINS_LOOP_W);
 	s_uwHillX = logicBandOffset(wCam, 1, ART_HILLS_LOOP_W);
 	s_uwGndX = logicBandOffset(wCam, 0, ART_GROUND_LOOP_W);
 	bandSet(pList, &s_sMtnSlots[isTitle][ubBfr], s_pMountains, s_uwMtnX);
 	bandSet(pList, &s_sHillSlots[isTitle][ubBfr], s_pHills, s_uwHillX);
+	s_uwMtnCon1 = (UWORD)(logicScrollDelay(s_uwMtnX) << 4);
+	s_uwHillCon1 = (UWORD)(logicScrollDelay(s_uwHillX) << 4);
+	s_uwMtnX4 = (UWORD)(s_uwMtnX << 2);
 	bandSet(pList, &s_sGndSlots[isTitle][ubBfr], s_pGround, s_uwGndX);
 }
 
@@ -1645,6 +1681,15 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	if(g->events & EV_CRASH) agkPrint("AGK chopper lost\n");
 	if(g->events & EV_SHRUG) agkPrint("AGK hit ignored (invincible)\n");
 	if(g->events & EV_TANKTELL) agkPrint("AGK tank tell\n");
+	if(s_ubScrollTrace) {
+		// the mountains' and hills' fine scroll as written to the copper: the
+		// quarter pixels (BPLCON1 bits 13-12, AGA; always 0 on OCS)
+		--s_ubScrollTrace;
+		agkState("pf2 mtn4", s_uwMtnX4);
+		agkState("mtnq", (s_uwMtnCon1 >> 12) & 3);
+		agkState("hillq", (s_uwHillCon1 >> 12) & 3);
+		agkEnd();
+	}
 	if(g->events & EV_LAND) {
 		agkState("landed x", c->x);
 		agkEnd();

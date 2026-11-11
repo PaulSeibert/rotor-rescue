@@ -301,6 +301,14 @@ void logicCameraSnap(tGame *g);   // to the look-ahead's target at once (mission
 uint16_t logicBandOffset(int16_t wCam, uint8_t ubShift, uint16_t uwLoopW);
 uint16_t logicScrollDelay(uint16_t uwX);      // BPLCON1 nibble for pixel uwX at the left edge
 int16_t logicScrollByteOffset(uint16_t uwX);  // bitplane pointer offset, bytes
+// The same in quarter pixels, for AGA (A1200): its BPLCON1 has 35 ns steps, a
+// quarter of a lores pixel, so a band at camera / 4 or / 2 moves 0.75 or 1.5 px
+// a frame instead of 0,1,1,1 or 1,2,1,2 (judder). x4 = the band's left edge in
+// 1/4 px (0 .. 4 * uwLoopW - 1). The BPLCON1 value is PF2's: bits 7-4 the
+// whole pixels, 13-12 the quarters (FMODE 0: a 16-px range, bits 15-14 unused).
+uint16_t logicBandOffset4(int16_t wCam, uint8_t ubShift, uint16_t uwLoopW);
+uint16_t logicScrollCon1Pf2Aga(uint16_t uwX4);
+int16_t logicScrollByteOffset4(uint16_t uwX4);
 
 // Radar: 0..RADAR_W-1 from a world x
 #define RADAR_W 192

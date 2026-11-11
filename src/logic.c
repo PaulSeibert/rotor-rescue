@@ -1334,6 +1334,25 @@ int16_t logicScrollByteOffset(uint16_t uwX) {
 	return (int16_t)((((int16_t)uwX - 1) >> 4) * 2);
 }
 
+uint16_t logicBandOffset4(int16_t wCam, uint8_t ubShift, uint16_t uwLoopW) {
+	// (the camera is whole pixels: cam * 4 >> shift is exact for shifts 0-2,
+	// and halves for 3: 1/8 speed in 1/2 px)
+	uint16_t x = (uint16_t)((uint16_t)wCam << 2) >> ubShift;
+	uint16_t uwLoop4 = (uint16_t)(uwLoopW << 2);
+	while(x >= uwLoop4) x = (uint16_t)(x - uwLoop4);
+	return x;
+}
+
+uint16_t logicScrollCon1Pf2Aga(uint16_t uwX4) {
+	// a delay of 64 - x4 % 64 quarters (the early fetch word, as above)
+	uint16_t d = (uint16_t)((64 - (uwX4 & 63)) & 63);
+	return (uint16_t)(((d >> 2) << 4) | ((d & 3) << 12));
+}
+
+int16_t logicScrollByteOffset4(uint16_t uwX4) {
+	return (int16_t)((((int16_t)uwX4 - 1) >> 6) * 2);
+}
+
 // ----------------------------------------------------------------- colours ---
 
 static uint16_t mix(uint16_t a, uint16_t b, uint16_t t, uint16_t n) {

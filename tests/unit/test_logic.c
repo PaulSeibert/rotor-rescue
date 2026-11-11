@@ -536,6 +536,35 @@ static void testScrollMaths(void) {
 	CHECK(logicBandOffset(2000, 1, 336) == 1000 - 672);
 }
 
+// AGA's quarter-pixel scroll: whole pixels give exactly the OCS values; a band
+// at camera / 4 steps 0.75 px a frame at a 3 px camera, every frame
+static void testScrollMathsAga(void) {
+	for(uint16_t x = 0; x < 320; ++x) {
+		CHECK(logicScrollCon1Pf2Aga((uint16_t)(x * 4)) == (uint16_t)(logicScrollDelay(x) << 4));
+		CHECK(logicScrollByteOffset4((uint16_t)(x * 4)) == logicScrollByteOffset(x));
+	}
+	for(int16_t c = 0; c < WORLD_W - SCREEN_W; ++c) {
+		for(uint8_t s = 0; s < 3; ++s) {
+			uint16_t x4 = logicBandOffset4(c, s, 320);
+			CHECK(x4 < 4 * 320);
+			CHECK((x4 >> 2) == logicBandOffset(c, s, 320));   // OCS: the quarters dropped
+		}
+	}
+	// 0.25 px: one quarter more delay than the whole pixel above it, in bits 13-12
+	CHECK(logicScrollCon1Pf2Aga(5) == ((14 << 4) | (3 << 12)));    // x 1.25: delay 14.75 px
+	CHECK(logicScrollCon1Pf2Aga(6) == ((14 << 4) | (2 << 12)));    // x 1.50: 14.50
+	CHECK(logicScrollByteOffset4(5) == 0);
+	// the mountains (camera / 4) at 3 px a frame: 3 quarters a frame, every frame
+	uint16_t uwPrev = logicBandOffset4(1000, 2, 320);
+	for(int16_t c = 1003; c < 1300; c += 3) {
+		uint16_t x4 = logicBandOffset4(c, 2, 320);
+		CHECK((uint16_t)((x4 - uwPrev + 1280) % 1280) == 3);
+		uwPrev = x4;
+	}
+	// the hills (camera / 2): 6 quarters (1.5 px)
+	CHECK(logicBandOffset4(1003, 1, 320) - logicBandOffset4(1000, 1, 320) == 6);
+}
+
 static void testSkyGradient(void) {
 	CHECK(logicSkyColor(0, 0) == 0x214);
 	CHECK(logicSkyColor(0, SKY_LINES - 1) == 0xE75);
@@ -859,6 +888,7 @@ int main(void) {
 	testRespawnPan();
 	testSkyLayer();
 	testScrollMaths();
+	testScrollMathsAga();
 	testSkyGradient();
 	testDrawListShowsBaseAtStart();
 	testChopperShadow();
