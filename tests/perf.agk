@@ -29,5 +29,9 @@ expect-serial "saved=16"
 expect-serial "trip=1"
 expect-no-serial "chopper lost"
 expect-no-dropped-frames
-expect-max-load 80
+# (80 until the tank tell, quarter-pixel scroll, dithered sky, preview card
+# and hall of fame: the heaviest picture - 16 people running into the hangar
+# while the score bar types - went 79% -> 81%, about 1% of it the dithered
+# sky's copper DMA, the rest spread thin; still ~19% short of a dropped frame)
+expect-max-load 83
 expect-min-chip-free 64

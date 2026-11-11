@@ -3,6 +3,14 @@
 
 #include "logic.h"
 
+// Code that runs between games (menus, the hall of fame): small, not inlined
+// into the per-frame update (the A500's slow RAM is nearly full)
+#if defined(__GNUC__) && !defined(__clang__)
+#define COLD __attribute__((noinline, optimize("Os")))
+#else
+#define COLD __attribute__((noinline))
+#endif
+
 const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_HANGAR] = 64, [BOB_FENCE] = 16, [BOB_BARRACKS] = 48, [BOB_TANK] = 32,
 	[BOB_HOSTAGE] = 16, [BOB_JET] = 32, [BOB_MINE] = 16, [BOB_SHOT] = 16,
@@ -152,8 +160,8 @@ static uint8_t boxHit(int16_t ax, int16_t ay, int16_t aw, int16_t ah,
 
 static void addScore(tGame *g, uint16_t uwPts) {
 	g->score += uwPts;
-	// an invincible game doesn't count for the hi-score
-	if(g->score > g->hiScore && g->difficulty != DIFFICULTY_INVINCIBLE) g->hiScore = g->score;
+	// an invincible game or the demo doesn't count for the hi-score
+	if(g->score > g->hiScore && g->difficulty != DIFFICULTY_INVINCIBLE && !g->demo) g->hiScore = g->score;
 }
 
 static void boomAt(tGame *g, int16_t x, int16_t y) {
@@ -184,7 +192,7 @@ static void setState(tGame *g, uint8_t ubState, uint16_t uwTimer) {
 
 // ------------------------------------------------------------- setup ---
 
-void logicInit(tGame *g) {
+COLD void logicInit(tGame *g) {
 	uint8_t *p = (uint8_t *)g;
 	for(uint16_t i = 0; i < sizeof(*g); ++i) p[i] = 0;
 	g->lfsr = 0xACE1;
@@ -193,12 +201,195 @@ void logicInit(tGame *g) {
 	g->cam = START_X - SCREEN_W / 2;
 	logicStartMission(g, 0);
 	g->state = GS_TITLE;
-	g->hiScore = 5000;
 	g->stateTimer = 0;
 	g->difficulty = DIFFICULTY_NORMAL;
+	g->newRank = SCORE_COUNT;
+	logicScoresDefault(g);
 }
 
-void logicChopperRespawn(tGame *g) {
+// ------------------------------------------------------------ hall of fame ---
+
+COLD void logicScoresDefault(tGame *g) {
+	static const char pNames[SCORE_COUNT][SCORE_NAME + 1] = {"DPS", "PRS", "ACE", "AGK", "RTR"};
+	for(uint8_t i = 0; i < SCORE_COUNT; ++i) {
+		tScore *s = &g->pScores[i];
+		for(uint8_t c = 0; c < SCORE_NAME; ++c) s->name[c] = pNames[i][c];
+		s->score = (uint32_t)(5000 - 1000 * i);
+		s->mission = (uint8_t)(i < 1 ? 3 : i < 3 ? 2 : 1);
+		s->saved = (uint16_t)(150 - 30 * i);
+	}
+	g->hiScore = g->pScores[0].score;
+}
+
+COLD uint8_t logicScoreRank(const tGame *g, uint32_t ulScore) {
+	// below an equal score already there
+	uint8_t r = 0;
+	while(r < SCORE_COUNT && g->pScores[r].score >= ulScore) ++r;
+	return r;
+}
+
+// Big-endian, so the file reads the same on any machine: "RRH1", then per
+// entry the initials, mission, saved (2), score (4), then a 16-bit sum
+COLD static uint16_t scoresSum(const uint8_t *p) {
+	uint16_t s = 0x5252;
+	for(uint8_t i = 0; i < SCORES_BYTES - 2; ++i) s = (uint16_t)(((s << 1) | (s >> 15)) + p[i]);
+	return s;
+}
+
+COLD void logicScoresPack(const tGame *g, uint8_t *pOut) {
+	uint8_t *p = pOut;
+	*p++ = 'R'; *p++ = 'R'; *p++ = 'H'; *p++ = '1';
+	for(uint8_t i = 0; i < SCORE_COUNT; ++i) {
+		const tScore *s = &g->pScores[i];
+		for(uint8_t c = 0; c < SCORE_NAME; ++c) *p++ = (uint8_t)s->name[c];
+		*p++ = s->mission;
+		*p++ = (uint8_t)(s->saved >> 8); *p++ = (uint8_t)s->saved;
+		for(int8_t b = 24; b >= 0; b -= 8) *p++ = (uint8_t)(s->score >> b);
+	}
+	uint16_t uwSum = scoresSum(pOut);
+	*p++ = (uint8_t)(uwSum >> 8);
+	*p = (uint8_t)uwSum;
+}
+
+COLD static uint8_t isNameChar(uint8_t c) {
+	for(const char *p = DEMO_LETTERS; *p; ++p) if((uint8_t)*p == c) return 1;
+	return 0;
+}
+
+COLD uint8_t logicScoresUnpack(tGame *g, const uint8_t *pIn) {
+	if(pIn[0] != 'R' || pIn[1] != 'R' || pIn[2] != 'H' || pIn[3] != '1') return 0;
+	if(scoresSum(pIn) != (uint16_t)((pIn[SCORES_BYTES - 2] << 8) | pIn[SCORES_BYTES - 1])) return 0;
+	tScore pNew[SCORE_COUNT];
+	const uint8_t *p = pIn + 4;
+	for(uint8_t i = 0; i < SCORE_COUNT; ++i) {
+		tScore *s = &pNew[i];
+		for(uint8_t c = 0; c < SCORE_NAME; ++c) {
+			if(!isNameChar(*p)) return 0;
+			s->name[c] = (char)*p++;
+		}
+		s->mission = *p++;
+		s->saved = (uint16_t)((p[0] << 8) | p[1]);
+		p += 2;
+		s->score = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+		p += 4;
+		// best first, and sane
+		if(!s->mission || s->mission > MISSION_COUNT + 1 || (i && s->score > pNew[i - 1].score)) return 0;
+	}
+	for(uint8_t i = 0; i < SCORE_COUNT; ++i) g->pScores[i] = pNew[i];
+	g->hiScore = g->pScores[0].score;
+	return 1;
+}
+
+uint8_t logicIsMenu(const tGame *g) {
+	return g->state == GS_TITLE || g->state == GS_SCORES;
+}
+
+// After a game: the hall of fame if the score made it (not invincible, not the demo)
+COLD static void gameEnded(tGame *g) {
+	uint8_t r = logicScoreRank(g, g->score);
+	if(r >= SCORE_COUNT || g->difficulty == DIFFICULTY_INVINCIBLE || g->demo) {
+		setState(g, GS_TITLE, 50);
+		g->titleArmed = 0;
+		return;
+	}
+	for(uint8_t i = SCORE_COUNT - 1; i > r; --i) g->pScores[i] = g->pScores[i - 1];
+	tScore *s = &g->pScores[r];
+	s->name[0] = 'A';
+	s->name[1] = s->name[2] = ' ';
+	s->score = g->score;
+	s->saved = g->savedTotal;
+	s->mission = (uint8_t)(g->state == GS_VICTORY ? MISSION_COUNT + 1 : g->mission + 1);
+	g->hiScore = g->pScores[0].score;
+	g->newRank = r;
+	g->entryPos = 0;
+	g->entryHold = 0;
+	g->chop.prevFire = 1;   // (fire held from the end screen doesn't choose a letter)
+	setState(g, GS_ENTRY, ENTRY_FRAMES);
+}
+
+COLD static void entryUpdate(tGame *g, const tInput *pIn) {
+	tScore *s = &g->pScores[g->newRank];
+	char *pC = &s->name[g->entryPos];
+	uint8_t isFireEdge = pIn->fire && !g->chop.prevFire;
+	uint8_t isLeftEdge = pIn->dx < 0 && !g->chop.prevFire2;
+	g->chop.prevFire = pIn->fire;
+	g->chop.prevFire2 = pIn->dx < 0;
+	// up/down: the next or previous letter, at once and then repeating
+	if(pIn->dy) {
+		if(!g->entryHold) {
+			const char *pL = DEMO_LETTERS;
+			uint8_t n = 0, i = 0;
+			while(pL[n]) ++n;
+			while(i < n && pL[i] != *pC) ++i;
+			i = (uint8_t)(pIn->dy < 0 ? (i + 1 >= n ? 0 : i + 1) : (i ? i - 1 : n - 1));
+			*pC = pL[i];
+			g->entryHold = 8;
+		}
+		else --g->entryHold;
+	}
+	else g->entryHold = 0;
+	if(isLeftEdge && g->entryPos) --g->entryPos;   // back a letter
+	if(isFireEdge) {
+		if(++g->entryPos < SCORE_NAME) {
+			if(s->name[g->entryPos] == ' ') s->name[g->entryPos] = *pC;   // start from the last letter
+		}
+	}
+	if(g->entryPos >= SCORE_NAME || !g->stateTimer) {
+		g->entryPos = SCORE_NAME;
+		g->scoresChanged = 1;
+		g->scoresNext = GS_TITLE;
+		g->titleArmed = 0;
+		setState(g, GS_SCORES, SCORES_FRAMES);
+	}
+}
+
+// ------------------------------------------------------------ the demo ---
+// A recorded trip (the inputs of tests/rescue.agk): from the base to the
+// nearest barracks, shoot it open, take 16 aboard, fly them home. Runs of
+// {frames, input bits}: 1 left, 2 right, 4 up, 8 down, 16 fire.
+#define DI_L 1
+#define DI_R 2
+#define DI_U 4
+#define DI_D 8
+#define DI_F 16
+static const uint8_t s_pDemo[][2] = {
+	{126, 0}, {30, DI_U}, {170, DI_L}, {60, 0}, {70, DI_D}, {1, DI_F}, {25, 0}, {1, DI_F},
+	{250, 0}, {70, 0}, {30, DI_U}, {180, DI_R}, {50, 0}, {70, DI_D}, {250, 0}, {70, 0},
+};
+#define DEMO_RUNS (sizeof(s_pDemo) / sizeof(s_pDemo[0]))
+
+COLD void logicStartDemo(tGame *g) {
+	g->demoDifficulty = g->difficulty;
+	g->difficulty = DIFFICULTY_NORMAL;
+	g->lfsr = 0xACE1;     // as at boot: the recording's game, frame for frame
+	g->frame = 11;        // (its first frame's number: the same odd and even frames)
+	logicStartGame(g);
+	g->demo = 1;
+	g->demoRun = 0;
+	g->demoLeft = s_pDemo[0][0];
+}
+
+uint8_t logicDemoInput(tGame *g, tInput *pOut) {
+	if(g->demoRun >= DEMO_RUNS) return 0;
+	uint8_t b = s_pDemo[g->demoRun][1];
+	pOut->dx = (int8_t)((b & DI_L) ? -1 : (b & DI_R) ? 1 : 0);
+	pOut->dy = (int8_t)((b & DI_U) ? -1 : (b & DI_D) ? 1 : 0);
+	pOut->fire = (uint8_t)((b & DI_F) != 0);
+	pOut->fire2 = 0;
+	if(!--g->demoLeft && ++g->demoRun < DEMO_RUNS) g->demoLeft = s_pDemo[g->demoRun][0];
+	return 1;
+}
+
+COLD static void demoEnd(tGame *g) {
+	g->demo = 0;
+	g->difficulty = g->demoDifficulty;
+	g->score = 0;
+	logicStartMission(g, 0);   // a fresh battlefield behind the title
+	setState(g, GS_TITLE, 25);
+	g->titleArmed = 0;
+}
+
+COLD void logicChopperRespawn(tGame *g) {
 	tChopper *c = &g->chop;
 	uint8_t *p = (uint8_t *)c;
 	for(uint16_t i = 0; i < sizeof(*c); ++i) p[i] = 0;
@@ -214,7 +405,7 @@ void logicChopperRespawn(tGame *g) {
 	g->unloadTimer = UNLOAD_FRAMES;
 }
 
-void logicStartMission(tGame *g, uint8_t ubMission) {
+COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->mission = ubMission;
 	g->trip = 0;
 	g->aboard = 0;
@@ -250,7 +441,7 @@ void logicStartMission(tGame *g, uint8_t ubMission) {
 	setState(g, GS_INTRO, INTRO_FRAMES);
 }
 
-void logicStartGame(tGame *g) {
+COLD void logicStartGame(tGame *g) {
 	g->lives = LIVES_START;
 	g->score = 0;
 	g->savedTotal = 0;
@@ -1138,18 +1329,55 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 	g->events = 0;
 	g->evBarracks = 0;
 	if(g->stateTimer) --g->stateTimer;
+	if(g->state != GS_TITLE) g->attract = 0;
+	tInput sDemoIn;
+	if(g->demo) {
+		// the demo plays itself; fire (pressed after it began) or its end: the title
+		if(!pIn->fire) g->titleArmed = 1;
+		else if(g->titleArmed) { demoEnd(g); return; }
+		if(!logicDemoInput(g, &sDemoIn) || g->state == GS_CLEAR || g->state == GS_OVER ||
+			(g->state == GS_LOST && g->stateTimer == 1)) {
+			demoEnd(g);
+			return;
+		}
+		pIn = &sDemoIn;
+	}
 	switch(g->state) {
 		case GS_TITLE:
+		case GS_SCORES:
 			if(!pIn->fire) g->titleArmed = 1;
-			else if(g->titleArmed && !g->stateTimer) {
+			else if(g->titleArmed && !g->stateTimer && g->state == GS_TITLE) {
 				g->titleArmed = 0;
 				logicStartGame(g);
+				break;
+			}
+			else if(g->titleArmed && g->state == GS_SCORES) {
+				// (fire on the hall of fame: the title, ready to start)
+				setState(g, GS_TITLE, 0);
+				g->titleArmed = 0;
+				break;
 			}
 			// the camera drifts over the land
 			if(g->frame & 1) {
 				g->cam = (int16_t)(g->cam - 1);
 				if(g->cam <= 0) g->cam = WORLD_W - SCREEN_W;
 			}
+			if(g->state == GS_TITLE && ++g->attract >= ATTRACT_FRAMES) {
+				g->newRank = SCORE_COUNT;
+				g->scoresNext = GS_INTRO;
+				g->titleArmed = 0;
+				setState(g, GS_SCORES, SCORES_FRAMES);
+			}
+			else if(g->state == GS_SCORES && !g->stateTimer) {
+				if(g->scoresNext == GS_INTRO) {
+					logicStartDemo(g);
+					g->titleArmed = 0;
+				}
+				else setState(g, GS_TITLE, 0);
+			}
+			break;
+		case GS_ENTRY:
+			entryUpdate(g, pIn);
 			break;
 		case GS_INTRO: {
 			// the preview card: a fresh press of fire skips it
@@ -1204,10 +1432,7 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 		case GS_OVER:
 		case GS_VICTORY:
 			boomsUpdate(g);
-			if(!g->stateTimer || (pIn->fire && g->stateTimer < OVER_FRAMES - 100)) {
-				setState(g, GS_TITLE, 50);
-				g->titleArmed = 0;
-			}
+			if(!g->stateTimer || (pIn->fire && g->stateTimer < OVER_FRAMES - 100)) gameEnded(g);
 			break;
 	}
 }
@@ -1215,7 +1440,8 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 // --------------------------------------------------------------- drawing ---
 
 uint8_t logicChopperVisible(const tGame *g) {
-	return g->state != GS_TITLE && !(g->state == GS_LOST && !g->chop.alive && g->chop.crashTimer == 0);
+	return !logicIsMenu(g) && g->state != GS_ENTRY &&
+		!(g->state == GS_LOST && !g->chop.alive && g->chop.crashTimer == 0);
 }
 
 uint8_t logicChopperFrame(const tGame *g) {
@@ -1411,7 +1637,7 @@ uint32_t logicSkyColor24(uint8_t ubMission, uint8_t ubLine) {
 	return ulOut;
 }
 
-const char *logicBrief(const tGame *g) {
+COLD const char *logicBrief(const tGame *g) {
 	// the threats this mission starts with (trip 0, this difficulty)
 	if(logicMinesOn(g)) return "TANKS, JETS AND AIR MINES";
 	if(logicJetsOn(g)) return "TANKS AND JETS ON PATROL";
@@ -1422,7 +1648,7 @@ static uint8_t routeX(int16_t x) {
 	return (uint8_t)((uint16_t)x / ROUTE_SCALE);
 }
 
-uint8_t logicRouteMap(const tGame *g, tRouteMark *pOut) {
+COLD uint8_t logicRouteMap(const tGame *g, tRouteMark *pOut) {
 	uint8_t n = 0, ubFence = routeX(BORDER_X);
 	pOut[n++] = (tRouteMark){ROUTE_ENEMY, 0, ubFence};
 	pOut[n++] = (tRouteMark){ROUTE_HOME, (uint8_t)(ubFence + 1), (uint8_t)(ROUTE_W - 1 - ubFence)};

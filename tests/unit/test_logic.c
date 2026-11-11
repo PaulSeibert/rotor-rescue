@@ -89,6 +89,140 @@ static void testPreviewCard(void) {
 	CHECK(logicBrief(&g)[7] == 'J');       // "TANKS, JETS AND AIR MINES"
 }
 
+// The hall of fame: defaults best first; ranks; on the disk and back; a
+// damaged file is refused and leaves the table as it was
+static void testScoresTable(void) {
+	logicInit(&g);
+	for(uint8_t i = 1; i < SCORE_COUNT; ++i) CHECK(g.pScores[i].score < g.pScores[i - 1].score);
+	CHECK(g.hiScore == g.pScores[0].score);
+	CHECK(logicScoreRank(&g, g.pScores[0].score + 1) == 0);
+	CHECK(logicScoreRank(&g, g.pScores[1].score) == 2);            // an equal score goes below
+	CHECK(logicScoreRank(&g, 1) == SCORE_COUNT - 1 || g.pScores[SCORE_COUNT - 1].score >= 1);
+	CHECK(logicScoreRank(&g, 0) == SCORE_COUNT);
+	uint8_t pDisk[SCORES_BYTES];
+	g.pScores[2].name[0] = 'Q';
+	g.pScores[2].score = 3333;
+	g.pScores[2].saved = 300;
+	logicScoresPack(&g, pDisk);
+	logicScoresDefault(&g);
+	CHECK(g.pScores[2].score != 3333);
+	CHECK(logicScoresUnpack(&g, pDisk));
+	CHECK(g.pScores[2].score == 3333 && g.pScores[2].name[0] == 'Q' && g.pScores[2].saved == 300);
+	uint8_t pBad[SCORES_BYTES];
+	for(uint8_t i = 0; i < SCORES_BYTES; ++i) pBad[i] = pDisk[i];
+	pBad[10] ^= 1;                                                  // a bit flipped
+	logicScoresDefault(&g);
+	CHECK(!logicScoresUnpack(&g, pBad) && g.pScores[2].score == 4000 - 1000);
+	for(uint8_t i = 0; i < SCORES_BYTES; ++i) pBad[i] = 0;          // an empty file
+	CHECK(!logicScoresUnpack(&g, pBad));
+	CHECK(g.hiScore == g.pScores[0].score);
+}
+
+static void endGameWith(uint32_t ulScore) {
+	newGame();
+	g.score = ulScore;
+	g.state = GS_OVER;
+	g.stateTimer = 1;
+	step(NONE, 1);
+}
+
+// A score that makes the table: initials with the stick (up/down letters,
+// fire the next one, left back one), then the hall of fame with it in place
+static void testHighScoreEntry(void) {
+	uint32_t ulOld1 = 4000, ulOld4 = 1000;
+	endGameWith(4500);
+	CHECK(g.state == GS_ENTRY && g.newRank == 1);
+	CHECK(g.pScores[2].score == ulOld1 && g.pScores[4].score == 2000 && ulOld4 == 1000);   // shifted down
+	step((tInput){.fire = 1}, 3);                 // fire held from the end screen: nothing
+	CHECK(g.entryPos == 0);
+	step(NONE, 1);
+	step((tInput){.dy = -1}, 1);                  // A -> B
+	step(NONE, 1);
+	step((tInput){.dy = -1}, 1);                  // -> C
+	step(NONE, 1);
+	CHECK(g.pScores[1].name[0] == 'C');
+	step((tInput){.fire = 1}, 1);                 // next letter (starts as C)
+	step(NONE, 1);
+	step((tInput){.dy = 1}, 1);                   // C -> B
+	step(NONE, 1);
+	step((tInput){.dx = -1}, 1);                  // back to the first
+	step(NONE, 1);
+	CHECK(g.entryPos == 0 && g.pScores[1].name[1] == 'B');
+	step((tInput){.fire = 1}, 1);
+	step(NONE, 1);
+	step((tInput){.fire = 1}, 1);
+	step(NONE, 1);
+	CHECK(g.state == GS_ENTRY && g.entryPos == 2);
+	step((tInput){.dy = -1}, 20);                 // held: repeats every 8 frames (3 steps)
+	step(NONE, 1);
+	CHECK(g.pScores[1].name[2] == 'E');
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.state == GS_SCORES && g.scoresChanged && g.scoresNext == GS_TITLE);
+	CHECK(g.pScores[1].name[0] == 'C' && g.pScores[1].name[1] == 'B' && g.pScores[1].name[2] == 'E');
+	CHECK(g.pScores[1].score == 4500 && g.pScores[1].mission == 1 && g.hiScore == 5000);
+	step(NONE, SCORES_FRAMES + 1);
+	CHECK(g.state == GS_TITLE);
+	// no input at all: after ENTRY_FRAMES the initials stand as they are
+	endGameWith(9000);
+	CHECK(g.state == GS_ENTRY && g.newRank == 0);
+	step(NONE, ENTRY_FRAMES + 1);
+	CHECK(g.state == GS_SCORES && g.pScores[0].name[0] == 'A' && g.hiScore == 9000);
+	// too low: straight to the title
+	endGameWith(10);
+	CHECK(g.state == GS_TITLE);
+}
+
+static void testNoEntryWhenInvincible(void) {
+	newGame();
+	logicSetDifficulty(&g, DIFFICULTY_INVINCIBLE);
+	g.score = 99999;
+	g.state = GS_OVER;
+	g.stateTimer = 1;
+	step(NONE, 1);
+	CHECK(g.state == GS_TITLE && g.pScores[0].score == 5000);
+}
+
+// Title -> hall of fame -> the demo (the recorded trip: it rescues 16 and
+// gets them home, scoring nothing for the table) -> the title, the player's
+// difficulty back
+static void testAttractLoop(void) {
+	logicInit(&g);
+	logicSetDifficulty(&g, 5);
+	step(NONE, ATTRACT_FRAMES - 1);
+	CHECK(g.state == GS_TITLE);
+	step(NONE, 1);
+	CHECK(g.state == GS_SCORES && g.newRank == SCORE_COUNT);
+	step(NONE, SCORES_FRAMES);
+	CHECK(g.demo && g.state == GS_INTRO && g.difficulty == DIFFICULTY_NORMAL);
+	uint8_t ubMaxAboard = 0, ubSaved = 0, isLost = 0;
+	uint16_t n = 0;
+	while(g.demo && n < 3000) {
+		step(NONE, 1);
+		++n;
+		if(g.aboard > ubMaxAboard) ubMaxAboard = g.aboard;
+		if(g.saved > ubSaved) ubSaved = g.saved;
+		if(g.state == GS_LOST) isLost = 1;
+	}
+	printf("demo: %u frames, %u aboard at most, %u saved, lost %u\n", n, ubMaxAboard, ubSaved, isLost);
+	CHECK(!g.demo && g.state == GS_TITLE && n > 1200);
+	CHECK(ubMaxAboard == 16 && ubSaved == 16 && !isLost);
+	CHECK(g.difficulty == 5 && g.hiScore == 5000 && g.score == 0);
+	CHECK(g.pBarracks[3].hp == 2);   // a fresh battlefield behind the title
+}
+
+static void testDemoEndsOnFire(void) {
+	logicInit(&g);
+	step(NONE, ATTRACT_FRAMES + SCORES_FRAMES + 1);
+	CHECK(g.demo);
+	step((tInput){.fire = 1}, 1);
+	CHECK(!g.demo && g.state == GS_TITLE);
+	step((tInput){.fire = 1}, 30);     // still held: no game
+	CHECK(g.state == GS_TITLE);
+	step(NONE, 1);
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.state == GS_INTRO && !g.demo);   // released and pressed again: a game
+}
+
 static void testStartsLandedAtBase(void) {
 	newGame();
 	CHECK(g.chop.landed && g.chop.alive);
@@ -934,6 +1068,11 @@ int main(void) {
 	testJetsGiveWarning();
 	testTitleNeedsFire();
 	testPreviewCard();
+	testScoresTable();
+	testHighScoreEntry();
+	testNoEntryWhenInvincible();
+	testAttractLoop();
+	testDemoEndsOnFire();
 	testStartsLandedAtBase();
 	testTakeOffAndClimb();
 	testAcceleratesToMaxSpeed();

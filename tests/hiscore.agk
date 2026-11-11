@@ -1,0 +1,60 @@
+# A score for the hall of fame: after the first trip home (16 saved, 1,625
+# points), on the hardest setting, the chopper sits in enemy ground until the
+# tanks get it, three times: game over, then the initials - P (15 steps up,
+# held), R (2 more), S (1 more), fire after each. The table shows the new
+# entry and it goes to the floppy; Ctrl+L, H reads the file back.
+start-at rescued
+key 0x63
+key 0x28
+wait 5
+key 0x05
+wait 30
+press up 30
+press left 170
+wait 60
+press down 70
+wait-serial "chopper lost" 2000
+wait 170
+press up 30
+press left 170
+wait 60
+press down 70
+wait-serial "lives=1" 2000
+wait 170
+press up 30
+press left 170
+wait 60
+press down 70
+wait-serial "lives=0" 2000
+wait-serial "state=5" 300
+wait 120
+press fire 1
+wait-serial "state=8" 10
+wait 60
+screenshot entry
+press up 127
+wait 1
+press fire 1
+wait 1
+press up 10
+wait 1
+press fire 1
+wait 1
+press up 1
+wait 1
+press fire 1
+wait-serial "state=7" 10
+wait-serial "scores names=" 600
+wait 40
+screenshot table
+# fifth, below the defaults' 2000, above their 1000 (which drops off)
+expect-serial "AGK scores saved\nAGK scores names=DPS/PRS/ACE/AGK/PRS\nAGK top=5000 last=16\d\d"
+wait-serial "state=0" 600
+# back on the title: the file read again, as at boot
+key 0x63
+key 0x28
+wait 5
+key 0x25
+wait 30
+expect-serial "AGK scores loaded\nAGK scores names=DPS/PRS/ACE/AGK/PRS\nAGK top=5000 last=16\d\d"
+expect-no-serial "AGK ERR"

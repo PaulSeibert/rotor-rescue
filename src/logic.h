@@ -152,7 +152,20 @@ typedef struct {
 	uint8_t active, frame, timer;
 } tBoom;
 
-enum { GS_TITLE, GS_INTRO, GS_PLAY, GS_LOST, GS_CLEAR, GS_OVER, GS_VICTORY };
+enum { GS_TITLE, GS_INTRO, GS_PLAY, GS_LOST, GS_CLEAR, GS_OVER, GS_VICTORY,
+	GS_SCORES,   // the hall of fame: in the attract loop, or after a new entry
+	GS_ENTRY };  // a new high score: the player's initials
+
+// The hall of fame: SCORE_COUNT entries, best first, saved to the floppy
+#define SCORE_COUNT 5
+#define SCORE_NAME 3         // initials
+typedef struct {
+	char name[SCORE_NAME];
+	uint8_t mission;     // reached: 1..MISSION_COUNT, MISSION_COUNT + 1 = all done
+	uint16_t saved;      // hostages saved over the game (the rank comes from it)
+	uint32_t score;
+} tScore;
+#define SCORES_BYTES (4 + SCORE_COUNT * 10 + 2)   // what's on the disk: magic, entries, checksum
 
 typedef struct {
 	uint8_t state;
@@ -177,6 +190,18 @@ typedef struct {
 	uint8_t difficulty;  // 0 (invincible) .. DIFFICULTY_MAX; kept from game to game
 	uint16_t wxFall;     // the weather's slide, 1/4 px (wraps)
 	int16_t wxDrift;     // its wind, 1/4 px, 0..4 * SCREEN_W - 1
+	// the attract loop: title -> hall of fame -> a self-playing demo -> title
+	uint16_t attract;    // frames on the title without a game
+	uint8_t demo;        // the demo is playing (no scores kept, fire ends it)
+	uint8_t demoRun, demoLeft;   // where it is in its input stream
+	uint8_t demoDifficulty;      // the player's, put back after it
+	uint8_t scoresNext;  // after the hall of fame: GS_INTRO (the demo) or GS_TITLE
+	// the hall of fame, and a new entry
+	tScore pScores[SCORE_COUNT];
+	uint8_t newRank;     // the entry being or just made (SCORE_COUNT: none)
+	uint8_t entryPos;    // its letter being chosen (0..SCORE_NAME-1)
+	uint8_t entryHold;   // the stick held up/down: frames to the next letter
+	uint8_t scoresChanged;   // set when an entry is done: main.c saves the table
 	tChopper chop;
 	tHostage pHostages[HOSTAGE_COUNT];
 	// The hostages out in the open (free, running, walking home, a body still
@@ -370,6 +395,20 @@ uint8_t logicWeather(const tGame *g, tWeatherFrame *pW);   // 0: none now
 
 // Rank text for the end screen
 const char *logicRank(uint16_t uwSaved);
+
+// The attract loop and the hall of fame (scores are kept only on difficulties
+// 1-5, and never from the demo)
+#define ATTRACT_FRAMES 600   // idle on the title, then the hall of fame
+#define SCORES_FRAMES 400    // the hall of fame shows this long
+#define ENTRY_FRAMES 1500    // initials: 30 s, then what's chosen stands
+#define DEMO_LETTERS " ABCDEFGHIJKLMNOPQRSTUVWXYZ."   // a name's letters, in stick order
+void logicScoresDefault(tGame *g);
+uint8_t logicScoreRank(const tGame *g, uint32_t ulScore);   // its place, or SCORE_COUNT
+void logicScoresPack(const tGame *g, uint8_t *pOut);        // SCORES_BYTES
+uint8_t logicScoresUnpack(tGame *g, const uint8_t *pIn);    // 0: not a valid table (g unchanged)
+void logicStartDemo(tGame *g);
+uint8_t logicDemoInput(tGame *g, tInput *pOut);             // 0: the stream is over
+uint8_t logicIsMenu(const tGame *g);                        // the title or the hall of fame
 
 // The preview card before each mission (GS_INTRO, fire skips it): its one-line
 // brief - what's out there this time - and a strip map of the battlefield,

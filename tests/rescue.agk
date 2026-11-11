@@ -30,3 +30,4 @@ wait 120
 expect-serial "saved=16"
 expect-serial "trip=1"
 expect-no-serial "chopper lost"
+checkpoint rescued

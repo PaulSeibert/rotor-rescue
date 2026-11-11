@@ -1,0 +1,22 @@
+# The attract loop: left alone on the title for 12 s, the hall of fame, then
+# a self-playing demo (DEMO where the skill shows; it starts with the preview
+# card) of the first trip: off to the nearest barracks, shoot it open, take 16
+# aboard. Fire ends the demo: back to the title, the score bar on the hi-score.
+wait-serial "AGK t0"
+wait-serial "state=7" 700
+wait 130
+screenshot scores
+expect-no-serial "AGK sfx start"
+wait-serial "AGK demo" 400
+wait 70
+screenshot demo
+# DEMO in the score bar (its D, top row, white HUD ink there)
+expect-color demo 289 14 0xFFF
+wait-serial "barracks open=3" 600
+wait-serial "aboard=16" 500
+wait 10
+press fire 1
+wait-serial "state=0" 10
+expect-serial "AGK demo[\s\S]*landed x=233\d[\s\S]*aboard=16[\s\S]*state=0"
+expect-no-serial "chopper lost"
+expect-no-serial "AGK ERR"
