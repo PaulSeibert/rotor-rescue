@@ -70,6 +70,8 @@ two-button pad) makes turning quicker.
 | Fire 2 (second button) | Turn: left → front → right → front … |
 | Keyboard | Arrows, Space = fire, X = turn, P = pause, M = music on/off, Esc = quit |
 | Ctrl+L, then 0-5 | Difficulty (see below), on the title screen or during play |
+| Fire on the mission card | Skip it and start flying |
+| Initials (a new high score) | Stick up / down: the letter; Fire: the next; left: back one |
 
 ## Difficulty
 
@@ -94,13 +96,23 @@ the right of the score bar and stays until you change it.
 - Fly back to the base on the far right and land on the pad. Each person who
   reaches the hangar counts as **SAVED**.
 - Tanks shell a chopper that's low or on the ground, so don't sit still for
-  long.
+  long. A tank about to fire stops, swings its barrel up and flashes for a
+  moment (16 frames on Normal) before the shell leaves: that's your cue.
 - Jets join in after your first trip home, and air mines after the second. You hear a jet
   and see it on the radar before it's on screen, mostly coming from ahead, and it holds
   its fire for a moment after it appears.
 - One hit and the chopper goes down with everyone aboard.
 - A mission ends when all 64 are saved or lost. The game ends when the last
   chopper is gone, and you get a rank for everyone you saved.
+- Each mission opens with a card: which of the three it is, a map of the
+  battlefield (the enemy ground in red, the four barracks, the fence, our pad
+  and hangar, and an arrow where you are) and what's out there this time.
+- A score in the top five goes into the **hall of fame** with your initials,
+  the mission you reached and your rank. It's saved to the floppy (a small
+  file, `rrscores`) and read back at boot. On a write-protected disk the table
+  still shows, it just isn't saved, and the game says so.
+- Leave the title alone and it shows the hall of fame, then a demo of the
+  first trip (DEMO in the score bar). Fire ends it.
 
 The HUD shows SAVED / ABOARD / LOST and the score. Below them are the
 choppers left and a radar of the whole battlefield: barracks (blue closed,
@@ -130,6 +142,10 @@ red open), people, tanks, jets, mines, the base and you (yellow).
 - **Copper.** A sky gradient for each mission, palette changes between the
   bands, and a split between the HUD and the play area. The top 120 lines
   run with 3 bitplanes instead of 6 to leave more of the bus to the CPU.
+  The sky is line-dithered, as in Fire & Ice: where the gradient falls
+  between two of the A500's 4096 colours, the lines alternate between them,
+  so the eye sees the half step. That's twice the shades for a MOVE a line
+  (`tools/checksky.py` checks a screenshot line by line).
 - **Sprites.** The chopper is a 32-pixel-wide, 15-colour attached hardware
   sprite (four channels), with tilt, turn, front and wreck poses and an
   animated rotor.
@@ -145,7 +161,8 @@ The same disk runs on an A1200. At startup the game reads Lisa's chip ID
 following. The A500 game is unchanged.
 
 - **A 24-bit sky.** On the A500 each mission's sky is a copper gradient in
-  12-bit colour: about 14 bands, each about a dozen lines tall. On AGA the
+  12-bit colour: about 14 bands, each about a dozen lines tall, line-dithered
+  into half steps. On AGA the
   copper writes the sky colour in 24 bits on all 172 sky lines. It writes
   COLOR00's high nibbles, sets BPLCON3's LOCT bit, writes the low nibbles,
   then clears LOCT again. That's four MOVEs a line, and the sunset, night and
@@ -163,6 +180,13 @@ following. The A500 game is unchanged.
   `$0C00` (playfield 2's colours from 8) and BPLCON4 to `$0011` (sprites in
   colours 16-31). Kickstart 3.1 leaves BPLCON3 at 0. In version 1.0 that gave
   the parallax bands the wrong colours on an A1200.
+- **Quarter-pixel parallax.** AGA's BPLCON1 scrolls in 35 ns steps, a
+  quarter of a lores pixel (bits 13-12 for playfield 2). The clouds,
+  mountains and hills take their fine scroll in quarter pixels, so at full
+  speed the mountains move 0.75 px every frame and the hills 1.5, instead of
+  the A500's 0, 1, 1, 1 and 1, 2, 1, 2. (vAmiga ignores those bits when it
+  draws, so the emulator's screenshots show whole pixels; `tests/parallax.agk`
+  checks the values the copper gets.)
 - Colours 29-31 (the sky's wisps and stars) are written by the copper on AGA
   rather than by the CPU. A CPU colour write that lands between a sky
   line's two LOCT MOVEs would set only the low nibbles.
