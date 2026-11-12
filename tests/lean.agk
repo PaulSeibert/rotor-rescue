@@ -1,0 +1,42 @@
+# The turn through the front and the stick's bomb stance (Paul's playtest, 2026-11-12;
+# unit tests: testTurnShowsLeanFramesInOrder, testFrontHoverSways, testVolleysNeverBomb).
+# X from the left side: three-quarter view (5 frames), a lean to the right (6), the front.
+# Then on to the right: a lean, the three-quarter view, the side. Then back through
+# the front, leaning left. A volley with the stick down never turns to the bombs.
+wait-serial "AGK t0"
+press fire 2
+wait 125
+press up 60
+wait 20
+screenshot side
+press fire2 1
+wait 2
+screenshot turn34
+wait 5
+screenshot leanR
+expect-color leanR 220 111 0x778   # the rotor's right end is low: a lean right
+wait 20
+screenshot front
+wait 30
+screenshot sway
+press fire2 1
+wait 8
+screenshot leanR2
+wait 20
+press fire2 1
+wait 8
+screenshot leanL
+expect-color leanL 120 111 0x778   # the rotor's left end is low: a lean left
+wait 20
+expect-serial "face=1"
+# a volley while diving: the stick down and fire tapped, never the bombs
+press fire2 1
+wait 30
+press down+fire 1
+wait 5
+press down+fire 1
+wait 5
+press down+fire 1
+wait 30
+expect-serial "sfx cannon"
+expect-no-serial "sfx bomb"

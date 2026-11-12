@@ -1,5 +1,5 @@
-# Turning: the second button (or X) cycles left -> front -> right; down+fire
-# faces front to bomb.
+# Turning: the second button (or X) cycles left -> front -> right; the stick held
+# down 20 frames and then fire faces front to bomb (a volley never does: tests/lean.agk).
 wait-serial "AGK t0"
 press fire 2
 wait 125
@@ -12,6 +12,8 @@ press fire2 1
 wait 20
 expect-serial "face=2"
 screenshot right
+press up 30
+press down 21
 press down+fire 1
 wait 20
 expect-serial "face=1"
