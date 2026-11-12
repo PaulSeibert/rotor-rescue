@@ -38,14 +38,32 @@ routes (there is one battlefield, repeated three times with harder numbers).
 
 | machine | what it gets |
 |---|---|
-| **A500 OCS, PAL 50 Hz, Kickstart 1.3** | the whole game. README and `agk.toml` state **1 MB (512K chip + 512K slow)**: the 425.6 KB program lives in slow RAM. 50 fps, worst frame 81% (section 11). |
-| 512K chip, no expansion | **to be measured** (decision E, "decided by Paul, 2026-11-11": measure only, shrink nothing). Result below in this table once run. |
+| **A500 OCS, PAL 50 Hz, Kickstart 1.3** | the whole game. README and `agk.toml` state **1 MB (512K chip + 512K slow)**: the 425.6 KB program lives in slow RAM. 50 fps, worst frame 82% (section 11). |
+| 512K chip, no expansion | **does not boot: AmigaDOS says "Unable to load first: Error code 103"** (no free store). Measured 2026-11-11 on vAmiga with an A500 OCS, Kickstart 1.3 and no slow RAM (decision E, decided by Paul, 2026-11-11: measure only, nothing shrunk); the numbers are under the table. |
 | **A1200 AGA** (found at boot: Lisa's DENISEID low byte `$F8`, `agaDetect` in `main.c`) | a 24-bit copper sky on all 172 sky lines (4 MOVEs a line via BPLCON3 LOCT), a 224-colour title logo (8 planes, `titlelogo8.bin`), quarter-pixel parallax (BPLCON1 35 ns bits) for the clouds, mountains and hills. The game itself is the OCS game. |
-| Kickstart 3.1, AROS ROM | tested profiles `a500-ks31`, `a500-aros`. AROS loads the program at about 10 frames a KB; the first picture arrives by frame ~2990 against the harness's 3000-frame boot window (`b9d5987`). |
+| Kickstart 3.1, AROS ROM | tested profiles `a500-ks31`, `a500-aros`. AROS loads the program at about 10 frames a KB; the first picture arrives at frame 2938 against the harness's 3000-frame boot window (2931 at 17ece43; the damage, jet-flash and smoke art and code added 7 frames). |
+
+**The 512K measurement** (vAmiga, scheme `A500_OCS_1MB` with `mem set SLOW_RAM 0`, a local profile
+(the kit's profiles all have more than 512K), the build at `design-decisions`, 2026-11-11). It never
+gets as far as `AGK ready`: the DOS reports error 103 when it loads `first` (the screen is on the
+CLI with that message at frame 800, and still at 3000).
+- **Free store with nothing loaded:** read from Exec's memory list after the failed load: one
+  region, 512K chip (`$8E8-$7E800`), **400,944 bytes free** in nine chunks, the largest 400,536
+  bytes. Kickstart 1.3 and its CLI use about 123 KB of the 512K.
+- **What the executable asks for:** five hunks, all "any memory": 396,560 (code and data), 440,
+  33,780 (BSS), 40 and 28 = **430,848 bytes**. LoadSeg takes the first hunk (it fits) and fails on
+  the 33,780-byte one: **29,904 bytes short** for the executable alone.
+- **What it would need to play:** on the 1 MB machine (512K chip + 512K slow) the lowest free store
+  during play is 85 KB chip + 4 KB slow (`AGK mem`), so the game uses about 834 KB there
+  (1,048,576 less 89 KB free less the ~123 KB the OS takes): the 430,848-byte executable plus about
+  403 KB of allocations (`main.c`: frame buffers, HUD, copper lists, logos, the rotor wave and so
+  on). Derived, to the nearest KB: 2.1 times what a 512K machine has free.
+- **So it needs 1 MB.** A 512K master would have to load in under 400 KB and run in that, which
+  means streaming most of the data from the floppy, not a trim. Nothing was shrunk for this test.
 
 **Gap vs playbook:** the playbook's master is a 512K A500 that boots and plays complete. This
-game needs the 1 MB expansion; its 425.6 KB executable alone is most of an unexpanded machine's
-RAM. Moving data to the floppy (as Rotor Raider does) is the route; not planned.
+game needs the 1 MB expansion (measured above); moving data to the floppy (as Rotor Raider does) is
+the route; not planned.
 
 ## 3. Core loop and feel
 
@@ -143,7 +161,7 @@ hills y197 (27 rows, / 2), ground y224 (32 rows, / 1). The title shows no cloud 
   hall of fame file `rrscores` (56 bytes) written by the game. About 477 KB of 880 KB used, derived.
 - **Boot to play:** the DPS logo and title load during the black splash. Time from fire to play on
   a real floppy is **not measured** (open question 1); the AROS profile's first picture is at frame
-  ~2990 (60 s of emulated time), its worst case.
+  2938 (59 s of emulated time), its worst case.
 - **Tile statistics:** n/a (parallax bands, no map). The art pilot's one-off budget is 40 feature
   stamps per mission band (section 8).
 
@@ -378,12 +396,12 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 - **BOBs:** 13 types, `DRAW_MAX` 96 a frame. Limits: 3 player shots, 6 enemy shots, 5 tanks, 2 jets,
   3 mines, 6 explosions.
 - **Frame budget (A500):** `tests/perf.agk` (a whole trip: 16 boarding, 16 running into the hangar)
-  asserts `expect-max-load 83`; the heaviest picture measures 81%, about 19% short of a dropped
+  asserts `expect-max-load 83`; the heaviest picture measures 82% (v1.2; 81% before), about 18% short of a dropped
   frame (`e6cc691`). No dropped frames. The average load is not recorded. Target (average <= 70%,
   worst < 100%): the worst is met; the average is unmeasured.
 - **Memory:** executable 425.6 KB in slow RAM (`b9d5987`); `expect-min-chip-free 64` (KB) on every
   profile. Kickstart 3.1's chip RAM was the binding limit when it dipped below 64 KB; earlier
-  builds measured lowest chip free 95 / 88 / 155 KB (a500 / ks31 / aros).
+  builds measured lowest chip free 95 / 88 / 155 KB (a500 / ks31 / aros); at v1.2 85 / 83 / 158 KB (a1200 1075 KB).
 - **Kit techniques used:** `blitq` (blit queue), `copw` (raw copper writer), `text`, `pack` (the
   packed logos), `perf`, ACE's ptplayer for the music mask; our own splash and title copper
   pictures. Not used: `wavescript`, `longmap`, `modcredits`, `agahud`.
@@ -413,7 +431,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 - [ ] the pacing checker passes section 5's targets: **no checker exists** for this game
 - [x] tells on every tank shell, unit-tested and scenario-tested (`testNoShellWithoutTell`, `tests/tell.agk`)
 - [ ] boss anti-stall: **n/a** (no boss); no set piece
-- [ ] the 512K master boots: **no**, needs 1 MB (section 2)
+- [ ] the 512K master boots: **no**, error 103 at load, needs 1 MB (measured, section 2)
 - [x] a release zip with README and the demo video (`build/release/first-1.0.zip`); no `CREDITS.txt`
 
 **Prove It** (what each recent feature needs on WinUAE or real hardware, and who runs it. vAmiga is
