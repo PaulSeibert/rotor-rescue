@@ -13,8 +13,9 @@ press up 40
 wait-serial "jet tell"
 wait 2
 screenshot jettell
-# the flash: the glowing nose is yellow, 0xFC3 (a plain jet has dark pixels there)
-expect-color jettell 7 152 0xFC3
+# the flash: the glowing nose is yellow, 0xFC3 (a plain jet has dark pixels there); the flash now begins as the jet comes on
+# screen (3/4 of its length early), so the jet is caught at the screen edge
+expect-color jettell 5 152 0xFC3
 wait-serial "jet fire"
 wait 600
 # no shot without a flash before it: not the first, not one after another
