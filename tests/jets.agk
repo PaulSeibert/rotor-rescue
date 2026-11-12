@@ -1,0 +1,23 @@
+# Every jet shot is announced: the jet's nose and exhaust flash for a few frames
+# (16 on normal, 12 on the hardest) before a missile or bomb leaves, and only
+# while the whole jet is on screen (tests/unit: testNoMissileWithoutTell,
+# testJetNeverFiresOffScreen). On the hardest skill jets are on from the start.
+start-at boarding
+key 0x63
+key 0x28
+wait 5
+key 0x05
+wait 30
+expect-serial "difficulty=5"
+press up 40
+wait-serial "jet tell"
+wait 2
+screenshot jettell
+# the flash: the glowing nose is yellow, 0xFC3 (a plain jet has dark pixels there)
+expect-color jettell 7 152 0xFC3
+wait-serial "jet fire"
+wait 600
+# no shot without a flash before it: not the first, not one after another
+expect-no-serial "\A(?:(?!jet tell)[\s\S])*AGK jet fire"
+expect-no-serial "AGK jet fire(?:(?!jet tell)[\s\S])*AGK jet fire"
+expect-no-serial "AGK ERR"

@@ -787,7 +787,7 @@ static UBYTE s_pMsgAnyFix[2];
 static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
-#define TPL_MAX 48
+#define TPL_MAX 52
 static tAgkBlitArea s_pErase[2][DRAW_MAX];
 static UBYTE s_pErased[2];
 static UBYTE s_ubLastDrawn;          // objects in the last picture (the HUD types less after a busy one)
@@ -1968,6 +1968,8 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	if(g->events & EV_CRASH) agkPrint("AGK chopper lost\n");
 	if(g->events & EV_SHRUG) agkPrint("AGK hit ignored (invincible)\n");
 	if(g->events & EV_TANKTELL) agkPrint("AGK tank tell\n");
+	if(g->events2 & EV2_JETTELL) agkPrint("AGK jet tell\n");
+	if(g->events2 & EV2_JETFIRE) agkPrint("AGK jet fire\n");
 	if(s_ubScrollTrace) {
 		// the mountains' and hills' fine scroll as written to the copper: the
 		// quarter pixels (BPLCON1 bits 13-12, AGA; always 0 on OCS)

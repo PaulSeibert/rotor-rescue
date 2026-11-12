@@ -66,7 +66,7 @@ enum { TANK_L0, TANK_L1, TANK_R0, TANK_R1, TANK_FIRE_L, TANK_FIRE_R,
 	TANK_AIM_L, TANK_AIM_R, TANK_FLASH_L, TANK_FLASH_R };   // the tell: barrel up, a blinking flash
 enum { MAN_STAND, MAN_RUN0, MAN_RUN1, MAN_WAVE0, MAN_WAVE1, MAN_DEAD,
 	MAN_RUNL0, MAN_RUNL1 };
-enum { JET_L, JET_R };
+enum { JET_L, JET_R, JET_FLASH_L, JET_FLASH_R };   // the tell: nose and engine glowing
 
 // The chopper's sprite poses (art/chopper.txt), right-facing. Art frame =
 // pose * 2 + rotor phase; main.c adds ART_CHOPPER_MIRROR for left-facing.
@@ -131,6 +131,7 @@ typedef struct {
 	uint8_t active, cool, hp;
 	uint8_t pass;        // passes made
 	uint8_t seen;        // frames on screen this pass: no shot before JET_AIM frames
+	uint8_t tell;        // frames left of the flash before a missile or bomb (0: none)
 } tJet;
 
 typedef struct {
@@ -221,6 +222,7 @@ typedef struct {
 	tBoom pBooms[BOOM_MAX];
 	// events of the latest frame (sound, serial): bit flags
 	uint16_t events;
+	uint8_t events2;     // more event bits (EV2_*)
 	uint8_t evBarracks;  // which barracks opened (index + 1)
 } tGame;
 
@@ -242,6 +244,11 @@ typedef struct {
 #define EV_SHRUG     0x4000   // invincible: a hit that would have destroyed the chopper
 #define EV_TANKTELL  0x8000   // a tank started its wind-up (a shell follows)
 
+#define EV2_JETTELL  0x01     // a jet started its flash (a missile or bomb follows)
+#define EV2_JETFIRE  0x02     // a jet launched one
+#define EV2_DAMAGE   0x04     // the chopper took its first hit
+#define EV2_REPAIR   0x08     // landing on the pad mended it
+
 // --------------------------------------------------------------- tuning ---
 #define VX_MAX 48            // 3 px/frame
 #define VX_ACCEL 2
@@ -254,7 +261,12 @@ typedef struct {
 #define HO_REVERSE 12        // pushing against the drift
 #define HO_DRAG 5
 // Jets: heard and seen on the radar before they're on screen, and a beat to react
-#define JET_MISSILE_SPEED 80 // 5 px/frame (was 6)
+#define JET_MISSILE_SPEED 40 // 2.5 px/frame (80 = 5 before 2026-11-11; 6 before e46d2a1)
+#define JET_MISSILE_LIFE 80  // frames: 200 px at 2.5
+#define JET_GAP 40           // frames between missiles, the tell included (was 50 without a tell)
+#define TANK_SHELL_SPEED 24  // 1.5 px/frame on the larger axis (2-4 before 2026-11-11)
+#define SHELL_LIFE 140       // frames: 210 px at 1.5 (a tank fires from up to 200 px)
+#define TANK_GAP_BASE 85     // frames between a tank's shells at mission 1, trip 0, normal (110 before)
 #define JET_AHEAD_MIN 56     // no shot from closer than this ahead
 #define VY_UP_MAX 28
 #define VY_DOWN_MAX 32
@@ -306,6 +318,10 @@ uint8_t logicMinesOn(const tGame *g);
 // Tanks: every shell comes after a tell - the tank stops, raises its barrel
 // and its flash blinks for this many frames (16 on normal, 12 on the hardest)
 uint8_t logicTankTell(const tGame *g);
+// Jets: every missile or bomb comes after a flash of this many frames (the same
+// table as the tank's: 16 on normal, 12 on the hardest), and only while the
+// whole jet is on screen
+uint8_t logicJetTell(const tGame *g);
 
 // Drawing: what's on screen, back to front, in screen coordinates (top-left)
 typedef struct {

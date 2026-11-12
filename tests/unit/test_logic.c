@@ -538,7 +538,7 @@ static void testNoShellWithoutTell(void) {
 			uint8_t ubNew = 0;
 			for(uint8_t s = 0; s < ESHOT_MAX; ++s) {
 				const tShot *p = &g.pEShots[s];
-				ubNew += p->active && p->kind == ESHOT_SHELL && p->life == 100;
+				ubNew += p->active && p->kind == ESHOT_SHELL && p->life == SHELL_LIFE;
 			}
 			uint8_t ubFired = 0;
 			for(uint8_t i = 0; i < TANK_MAX; ++i) {
@@ -1121,7 +1121,143 @@ static void testTankQuotaStopsFarming(void) {
 	CHECK(g.score == ulM2 + 50);
 }
 
+// Slower enemy shots (decided by Paul, 2026-11-11): a shell leaves a tank at about
+// 1.5 px/frame and reaches as far as a tank can aim; a jet missile at 2.5. The
+// slower shells are paid for in fire timing: the gap between a tank's shells
+// is 85-116 frames at mission 1, trip 0, normal (it was 110-141).
+static void testTankShellSpeedAndGap(void) {
+	newGame();
+	flyAt(1500, GROUND_Y);
+	g.chop.landed = 1;
+	g.pTanks[0] = (tTank){.x = 1320, .active = 1, .hp = 2, .dir = 1, .cool = 1};
+	int iLast = -1, iMaxGap = 0, iMinGap = 9999, iShells = 0;
+	for(int f = 0; f < 1500 && iShells < 8; ++f) {
+		g.chop.x = 1500; g.chop.y = GROUND_Y; g.chop.landed = 1; g.chop.vx = 0;
+		g.pTanks[0].x = 1320;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		for(int s = 0; s < ESHOT_MAX; ++s) {
+			tShot *p = &g.pEShots[s];
+			if(p->active && p->kind == ESHOT_SHELL && p->life == SHELL_LIFE) {
+				int vx = absi(p->vx), vy = absi(p->vy);
+				int m = vx > vy ? vx : vy;
+				CHECK(m >= 22 && m <= 26);              // 1.5 px/frame on the larger axis
+				CHECK(vx * vx + vy * vy <= 36 * 36);    // never above 2.25 px/frame
+				CHECK(p->life * m >= 200 * 16 * 9 / 10);   // it flies to the chopper: 200 px of range
+				if(iLast >= 0 && g.frame - iLast > iMaxGap) iMaxGap = g.frame - iLast;
+				if(iLast >= 0 && g.frame - iLast < iMinGap) iMinGap = g.frame - iLast;
+				if(iLast >= 0 && g.frame > iLast) {}
+				iLast = g.frame;
+				++iShells;
+				p->active = 0;
+			}
+		}
+	}
+	CHECK(iShells == 8);
+	printf("tank shells: gaps %d..%d frames\n", iMinGap, iMaxGap);
+	CHECK(iMaxGap <= 116);
+	CHECK(iMinGap >= 85);
+}
+
+// Jets: a flash (at least 12 frames, 16 on normal) before every missile; the
+// missile flies at 2.5 px/frame; nothing is fired unless the whole jet is on screen
+static uint8_t jetOnScreenFully(const tJet *j) {
+	return j->x - 16 >= g.cam && j->x + 16 <= g.cam + SCREEN_W;
+}
+
+static void testNoMissileWithoutTell(void) {
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		newGame();
+		logicSetDifficulty(&g, d);
+		uint8_t ubTell = logicJetTell(&g);
+		CHECK(ubTell >= 12);
+		if(d == DIFFICULTY_NORMAL) CHECK(ubTell >= 12 && ubTell <= 18);
+		int iMissiles = 0;
+		for(int pass = 0; pass < 6; ++pass) {
+			flyAt(1500, 120);
+			g.trip = 10;
+			g.pJets[0] = (tJet){.x = (int16_t)(g.cam + 20), .y = 112, .dir = 1, .active = 1, .hp = 1, .seen = 100};
+			uint8_t ubRun = 0;
+			for(int f = 0; f < 200; ++f) {
+				g.chop.x = 1530; g.chop.y = 120; g.chop.vx = g.chop.vy = 0; g.chop.landed = 0;
+				g.cam = 1340;
+				g.pJets[1].active = 0; g.pJets[1].cool = 255;
+				uint8_t ubBefore = ubRun;
+				step(NONE, 1);
+				if(!g.pJets[0].active) break;
+				ubRun = g.pJets[0].tell ? (uint8_t)(ubRun + 1) : 0;
+				int isNew = 0;
+				for(int s = 0; s < ESHOT_MAX; ++s) {
+					tShot *p = &g.pEShots[s];
+					if(p->active && p->kind == ESHOT_MISSILE && p->life == JET_MISSILE_LIFE) {
+						isNew = 1;
+						CHECK(absi(p->vx) == 2 * 20);          // 2.5 px/frame
+						p->active = 0;
+					}
+				}
+				if(isNew) {
+					++iMissiles;
+					CHECK(ubBefore >= ubTell);                 // the whole flash came first
+					g.pJets[0].active = 0;
+				}
+				g.chop.alive = 1;
+			}
+		}
+		CHECK(iMissiles >= 1);
+	}
+}
+
+// A jet that is only partly on screen (or beyond the edge) never fires: it used
+// to, up to ~40 px past the edge, once it had been seen for a few frames
+static void testJetNeverFiresOffScreen(void) {
+	for(int side = 0; side < 2; ++side) {
+		for(int off = -40; off <= 20; off += 4) {
+			newGame();
+			flyAt(1500, 120);
+			g.trip = 10;
+			g.cam = 1340;
+			// coming from the left, centre `off` px from the left edge (-40: off screen, 15: partly on)
+			int16_t x = (int16_t)(side == 0 ? g.cam + off : g.cam + SCREEN_W - off);
+			if(off >= 12) continue;           // it flies 4 px before it looks: from here it is whole on screen
+			g.pJets[0] = (tJet){.x = x, .y = 112, .dir = (int8_t)(side == 0 ? 1 : -1), .active = 1, .hp = 1, .seen = 100};
+			g.pJets[1].cool = 255;
+			g.chop.x = 1500;   // 148-200 px ahead of it
+			g.chop.y = 120;
+			// one frame: it must not fire, nor start a flash
+			step(NONE, 1);
+			for(int s = 0; s < ESHOT_MAX; ++s) CHECK(!(g.pEShots[s].active && g.pEShots[s].kind == ESHOT_MISSILE));
+			CHECK(g.pJets[0].tell == 0 || jetOnScreenFully(&g.pJets[0]));
+		}
+	}
+}
+
+// The flash is drawn: a jet in its tell blinks between its plain and glowing frames
+static void testJetTellShowsFlash(void) {
+	newGame();
+	flyAt(1500, 120);
+	g.cam = 1340;
+	tDraw d[DRAW_MAX];
+	int iFlash = 0, iPlain = 0;
+	for(uint8_t tell = 1; tell <= 16; ++tell) {
+		g.pJets[0] = (tJet){.x = 1400, .y = 112, .dir = -1, .active = 1, .hp = 1, .tell = tell};
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob != BOB_JET) continue;
+			if(d[i].frame == JET_FLASH_L) ++iFlash;
+			else if(d[i].frame == JET_L) ++iPlain;
+		}
+	}
+	CHECK(iFlash >= 6 && iPlain >= 6);       // it blinks, half and half
+	g.pJets[0].tell = 0;
+	uint8_t n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_JET) CHECK(d[i].frame == JET_L);
+}
+
 int main(void) {
+	testJetTellShowsFlash();
+	testTankShellSpeedAndGap();
+	testNoMissileWithoutTell();
+	testJetNeverFiresOffScreen();
 	testTankQuotaStopsFarming();
 	testGodmodeTablesEqualNormal();
 	testHeadOnStrafeIsSnappy();

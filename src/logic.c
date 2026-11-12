@@ -25,7 +25,7 @@ const uint8_t g_pBobH[BOB_TYPES] = {
 };
 const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_HANGAR] = 1, [BOB_FENCE] = 1, [BOB_BARRACKS] = 4, [BOB_TANK] = 10,
-	[BOB_HOSTAGE] = 8, [BOB_JET] = 2, [BOB_MINE] = 2, [BOB_SHOT] = 1,
+	[BOB_HOSTAGE] = 8, [BOB_JET] = 4, [BOB_MINE] = 2, [BOB_SHOT] = 1,
 	[BOB_BOMB] = 1, [BOB_SHELL] = 1, [BOB_BOOM] = 5, [BOB_FLAG] = 2,
 	[BOB_SHADOW] = SHADOW_SIZES * 2,
 };
@@ -478,6 +478,7 @@ static const uint8_t s_pJetAim[DIFFICULTY_MAX + 1] = {24, 40, 30, 24, 20, 18};
 // a tank's wind-up before each shell (it comes out of the time between shells:
 // the rate of fire is the same, the shell is announced)
 static const uint8_t s_pTankTell[DIFFICULTY_MAX + 1] = {16, 22, 18, 16, 14, 12};
+static const uint8_t s_pJetTell[DIFFICULTY_MAX + 1] = {16, 22, 18, 16, 14, 12};   // a jet's flash before a shot
 
 // Every per-difficulty table, for the unit test that index 0 (GODMODE) equals
 // index 3 (normal) in each. A new table goes in this list.
@@ -493,6 +494,7 @@ static const tDiffTable s_pDiffTables[] = {
 	{"jetLead", s_pJetLead, sizeof(s_pJetLead[0])},
 	{"jetAim", s_pJetAim, sizeof(s_pJetAim[0])},
 	{"tankTell", s_pTankTell, sizeof(s_pTankTell[0])},
+	{"jetTell", s_pJetTell, sizeof(s_pJetTell[0])},
 };
 
 const tDiffTable *logicDiffTables(uint8_t *pCount) {
@@ -519,6 +521,10 @@ uint8_t logicMinesOn(const tGame *g) {
 
 uint8_t logicTankTell(const tGame *g) {
 	return s_pTankTell[g->difficulty];
+}
+
+uint8_t logicJetTell(const tGame *g) {
+	return s_pJetTell[g->difficulty];
 }
 
 // --------------------------------------------------------------- hostages ---
@@ -1035,14 +1041,26 @@ __attribute__((noinline)) static void eshotsUpdate(tGame *g) {
 
 // ------------------------------------------------------------- enemies ---
 
-// Aim from (x, y) at (tx, ty): a speed of 2-4 px a frame, no division
+// 24 * 256 / (32 + i): the shell's speed over the aim vector's length
+static const int16_t s_pAimRecip[32] = {
+	192, 186, 181, 176, 171, 166, 162, 158,
+	154, 150, 146, 143, 140, 137, 134, 131,
+	128, 125, 123, 120, 118, 116, 114, 112,
+	110, 108, 106, 104, 102, 101, 99, 98,
+};
+
+// Aim from (x, y) at (tx, ty): a speed of TANK_SHELL_SPEED (1.5 px a frame)
+// along the larger axis, a little more on a slant (the length is estimated as
+// max + 3/8 min, within 7%), no division
 static void aim(int16_t dx, int16_t dy, int16_t *pVx, int16_t *pVy) {
-	int16_t m = absw(dx) > absw(dy) ? absw(dx) : absw(dy);
-	if(!m) { *pVx = 0; *pVy = -32; return; }
-	while(m >= 64) { dx = (int16_t)(dx >> 1); dy = (int16_t)(dy >> 1); m = (int16_t)(m >> 1); }
-	while(m < 32) { dx = (int16_t)(dx * 2); dy = (int16_t)(dy * 2); m = (int16_t)(m * 2); }
-	*pVx = dx;
-	*pVy = dy;
+	int16_t ax = absw(dx), ay = absw(dy);
+	int16_t l = ax > ay ? (int16_t)(ax + (ay >> 1) - (ay >> 3)) : (int16_t)(ay + (ax >> 1) - (ax >> 3));
+	if(!l) { *pVx = 0; *pVy = -TANK_SHELL_SPEED; return; }
+	while(l >= 64) { dx = (int16_t)(dx >> 1); dy = (int16_t)(dy >> 1); l = (int16_t)(l >> 1); }
+	while(l < 32) { dx = (int16_t)(dx * 2); dy = (int16_t)(dy * 2); l = (int16_t)(l * 2); }
+	int16_t r = s_pAimRecip[l - 32];
+	*pVx = (int16_t)(((int32_t)dx * r) >> 8);
+	*pVy = (int16_t)(((int32_t)dy * r) >> 8);
 }
 
 __attribute__((noinline)) static void tanksUpdate(tGame *g) {
@@ -1069,12 +1087,12 @@ __attribute__((noinline)) static void tanksUpdate(tGame *g) {
 				s->y = FEET_Y - 13;
 				s->fx = s->fy = 0;
 				aim(tx, ty, &s->vx, &s->vy);
-				s->life = 100;
+				s->life = SHELL_LIFE;
 				t->fireAnim = 8;
 				g->events |= EV_TANKFIRE;
 			}
 			// the time to the next shell, less the next tell (the same rate of fire)
-			int16_t wCool = (int16_t)(110 - g->mission * 20 - g->trip * 8 + s_pTankCool[g->difficulty]);
+			int16_t wCool = (int16_t)(TANK_GAP_BASE - g->mission * 20 - g->trip * 8 + s_pTankCool[g->difficulty]);
 			uint8_t ubMin = s_pTankCoolMin[g->difficulty];
 			t->cool = (uint8_t)((wCool < ubMin ? ubMin : wCool) - logicTankTell(g));
 			t->cool = (uint8_t)(t->cool + (logicRandom(g) & 31));
@@ -1094,11 +1112,16 @@ __attribute__((noinline)) static void tanksUpdate(tGame *g) {
 			g->events |= EV_TANKTELL;
 			continue;
 		}
-		int16_t wCool = (int16_t)(110 - g->mission * 20 - g->trip * 8 + s_pTankCool[g->difficulty]);
+		int16_t wCool = (int16_t)(TANK_GAP_BASE - g->mission * 20 - g->trip * 8 + s_pTankCool[g->difficulty]);
 		uint8_t ubMin = s_pTankCoolMin[g->difficulty];
 		t->cool = (uint8_t)(wCool < ubMin ? ubMin : wCool);
 		t->cool = (uint8_t)(t->cool + (logicRandom(g) & 31));
 	}
+}
+
+// The whole jet (32 px) is inside the screen: no jet fires from, or into, the margin
+static inline uint8_t jetFullyOnScreen(const tGame *g, const tJet *j) {
+	return j->x - 16 >= g->cam && j->x + 16 <= g->cam + SCREEN_W;
 }
 
 __attribute__((noinline)) static void jetsUpdate(tGame *g) {
@@ -1118,6 +1141,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 			int16_t wLead = s_pJetLead[g->difficulty];
 			j->x = (int16_t)(j->dir > 0 ? g->cam - wLead : g->cam + SCREEN_W + wLead);
 			j->seen = 0;
+			j->tell = 0;
 			j->y = clampw((int16_t)(c->y - 20), PLAY_TOP + 16, 180);
 			j->hp = 1;
 			j->pass = 0;
@@ -1135,11 +1159,15 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 			if(j->seen < 255) ++j->seen;
 		}
 		int16_t dx = (int16_t)(c->x - j->x);
-		if(c->alive && !j->cool && j->seen >= s_pJetAim[g->difficulty]) {
-			int16_t ahead = j->dir > 0 ? dx : (int16_t)-dx;
-			if(!c->landed && ahead > JET_AHEAD_MIN && ahead < 200 && absw((int16_t)(c->y - 8 - j->y)) < 14) {
-				tShot *s = eshotNew(g);
-				if(s) {
+		int16_t ahead = j->dir > 0 ? dx : (int16_t)-dx;
+		uint8_t isFull = jetFullyOnScreen(g, j);
+		uint8_t ubTell = logicJetTell(g);
+		if(j->tell) {
+			// the flash: the jet flies on; at the end it shoots if it's still a good shot
+			if(!--j->tell) {
+				uint8_t isFired = 0;
+				tShot *s = c->alive && isFull ? eshotNew(g) : 0;
+				if(s && !c->landed && ahead > JET_AHEAD_MIN && absw((int16_t)(c->y - 8 - j->y)) < 14) {
 					s->active = 1;
 					s->kind = ESHOT_MISSILE;
 					s->x = (int16_t)(j->x + j->dir * 16);
@@ -1147,13 +1175,10 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 					s->vx = (int16_t)(j->dir * JET_MISSILE_SPEED);
 					s->vy = 0;
 					s->fx = s->fy = 0;
-					s->life = 60;
-					j->cool = 50;
+					s->life = JET_MISSILE_LIFE;
+					isFired = 1;
 				}
-			}
-			else if(c->landed && absw(dx) < 24) {
-				tShot *s = eshotNew(g);
-				if(s) {
+				else if(s && c->landed && absw(dx) < 32) {
 					s->active = 1;
 					s->kind = ESHOT_BOMB;
 					s->x = j->x;
@@ -1162,8 +1187,23 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 					s->vy = 8;
 					s->fx = s->fy = 0;
 					s->life = 120;
-					j->cool = 40;
+					isFired = 1;
 				}
+				if(isFired) g->events2 |= EV2_JETFIRE;
+				// the next shot's time, less its own flash (the rate of fire is JET_GAP)
+				j->cool = isFired ? (uint8_t)(JET_GAP - ubTell) : 20;
+			}
+		}
+		else if(c->alive && !j->cool && isFull && j->seen + ubTell >= s_pJetAim[g->difficulty]) {
+			// start the flash if a shot is on, allowing for how far the jet flies meanwhile
+			// (4 px a frame): a missile needs JET_AHEAD_MIN left at the end, a bomb the chopper under it
+			int16_t wRun = (int16_t)(ubTell * 4);
+			uint8_t isShot = !c->landed ? (ahead > JET_AHEAD_MIN + wRun && ahead < 200 + wRun &&
+					absw((int16_t)(c->y - 8 - j->y)) < 14) :
+				(ahead >= wRun && ahead < wRun + 24);
+			if(isShot && eshotNew(g)) {
+				j->tell = ubTell;
+				g->events2 |= EV2_JETTELL;
 			}
 		}
 		if(c->alive && boxHit((int16_t)(j->x - 14), (int16_t)(j->y - 5), 28, 10,
@@ -1408,6 +1448,7 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 	++g->frame;
 	weatherUpdate(g);
 	g->events = 0;
+	g->events2 = 0;
 	g->evBarracks = 0;
 	if(g->stateTimer) --g->stateTimer;
 	if(g->state != GS_TITLE) g->attract = 0;
@@ -1564,7 +1605,11 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 	// air
 	for(uint8_t i = 0; i < JET_MAX; ++i) {
 		const tJet *j = &g->pJets[i];
-		if(j->active) n = drawAdd(pOut, n, (int16_t)(j->x - 16 - cam), (int16_t)(j->y - 6), BOB_JET, j->dir < 0 ? JET_L : JET_R);
+		if(j->active) {
+			// the tell: the nose and engine glow, blinking every 4 frames
+			uint8_t f = (uint8_t)((j->dir < 0 ? JET_L : JET_R) + ((j->tell & 4) ? 2 : 0));
+			n = drawAdd(pOut, n, (int16_t)(j->x - 16 - cam), (int16_t)(j->y - 6), BOB_JET, f);
+		}
 	}
 	for(uint8_t i = 0; i < MINE_MAX; ++i) {
 		const tMine *m = &g->pMines[i];
