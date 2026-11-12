@@ -1082,7 +1082,47 @@ static void testGodmodeTablesEqualNormal(void) {
 	}
 }
 
+// Tank farming is closed (decided by Paul, 2026-11-11): the first TANK_QUOTA tank
+// kills of a mission pay 50 each, later ones nothing; a new mission starts the
+// count again
+static void killTankByBomb(void) {
+	flyAt(1500, 150);
+	g.chop.face = g.chop.faceTarget = FACE_FRONT;
+	g.pTanks[0] = (tTank){.x = 1500, .active = 1, .hp = 2, .dir = 1, .cool = 255};
+	step(NONE, 1);
+	step((tInput){.fire = 1}, 1);
+	step(NONE, 45);
+	CHECK(!g.pTanks[0].active);
+}
+
+static void testTankQuotaStopsFarming(void) {
+	newGame();
+	uint32_t ulStart = g.score;
+	for(int i = 0; i < TANK_QUOTA; ++i) killTankByBomb();
+	CHECK(g.score == ulStart + 50u * TANK_QUOTA);
+	CHECK(g.quotaMsg > 0);                       // the HUD says so
+	uint32_t ulAtQuota = g.score;
+	for(int i = 0; i < 3; ++i) killTankByBomb();   // more tanks die ...
+	CHECK(g.score == ulAtQuota);                   // ... for nothing
+	// the cannon too
+	flyAt(1500, GROUND_Y);
+	g.chop.landed = 1;
+	g.chop.face = g.chop.faceTarget = FACE_LEFT;
+	g.pTanks[0] = (tTank){.x = 1440, .active = 1, .hp = 1, .dir = 1, .cool = 255};
+	step((tInput){.fire = 1}, 20);
+	CHECK(!g.pTanks[0].active);
+	CHECK(g.score == ulAtQuota);
+	// the next mission counts again
+	logicStartMission(&g, 1);
+	step(NONE, INTRO_FRAMES + 1);
+	CHECK(g.tankKills == 0);
+	uint32_t ulM2 = g.score;
+	killTankByBomb();
+	CHECK(g.score == ulM2 + 50);
+}
+
 int main(void) {
+	testTankQuotaStopsFarming();
 	testGodmodeTablesEqualNormal();
 	testHeadOnStrafeIsSnappy();
 	testJetsGiveWarning();

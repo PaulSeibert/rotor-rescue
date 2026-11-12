@@ -43,6 +43,8 @@
 #define MINE_MAX 3
 #define SHOT_MAX 3           // the player's
 #define ESHOT_MAX 6          // enemy shells, missiles, bombs
+#define TANK_QUOTA 10       // tank kills that score, per mission: later ones pay nothing (no farming)
+#define QUOTA_MSG_FRAMES 200 // the HUD's QUOTA line, after the last scoring kill
 #define BOOM_MAX 6
 
 // --------------------------------------------------------------- the BOBs ---
@@ -176,6 +178,8 @@ typedef struct {
 	uint8_t lives;
 	uint8_t trip;        // completed trips home this mission
 	uint8_t aboard, saved, killed;  // this mission
+	uint8_t tankKills;   // tanks destroyed this mission (the first TANK_QUOTA score)
+	uint8_t quotaMsg;    // frames left of the HUD's QUOTA line
 	uint16_t savedTotal;            // over the game
 	uint32_t score;
 	uint32_t hiScore;

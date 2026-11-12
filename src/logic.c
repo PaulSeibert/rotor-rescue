@@ -164,6 +164,16 @@ static void addScore(tGame *g, uint16_t uwPts) {
 	if(g->score > g->hiScore && g->difficulty != DIFFICULTY_INVINCIBLE && !g->demo) g->hiScore = g->score;
 }
 
+// A tank destroyed: it pays 50 for the first TANK_QUOTA of a mission, nothing
+// after (tanks respawn on a timer: without the quota they were a score tap)
+static void tankKilled(tGame *g) {
+	if(g->tankKills < 255) ++g->tankKills;
+	if(g->tankKills <= TANK_QUOTA) {
+		addScore(g, 50);
+		if(g->tankKills == TANK_QUOTA) g->quotaMsg = QUOTA_MSG_FRAMES;
+	}
+}
+
 static void boomAt(tGame *g, int16_t x, int16_t y) {
 	tBoom *pFree = 0;
 	for(uint8_t i = 0; i < BOOM_MAX; ++i) {
@@ -408,6 +418,8 @@ COLD void logicChopperRespawn(tGame *g) {
 COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->mission = ubMission;
 	g->trip = 0;
+	g->tankKills = 0;
+	g->quotaMsg = 0;
 	g->aboard = 0;
 	g->saved = 0;
 	g->killed = 0;
@@ -914,7 +926,7 @@ static uint8_t shotHitsTargets(tGame *g, tShot *s) {
 			if(!t->hp) {
 				t->active = 0;
 				boomAt(g, t->x, FEET_Y - 10);
-				addScore(g, 50);
+				tankKilled(g);
 			}
 			return 1;
 		}
@@ -946,7 +958,7 @@ static void bombExplode(tGame *g, int16_t x) {
 		if(t->active && absw((int16_t)(t->x - x)) < 22) {
 			t->active = 0;
 			boomAt(g, t->x, FEET_Y - 10);
-			addScore(g, 50);
+			tankKilled(g);
 		}
 	}
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
@@ -1329,6 +1341,7 @@ void logicCameraUpdate(tGame *g) {
 // -------------------------------------------------------------- update ---
 
 static void worldUpdate(tGame *g) {
+	if(g->quotaMsg) --g->quotaMsg;
 	barracksUpdate(g);
 	hostagesUpdate(g);
 	shotsUpdate(g);

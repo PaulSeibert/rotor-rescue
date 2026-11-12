@@ -925,7 +925,7 @@ static void hudInit(void) {
 		agkTextInit(&s_pHudText[b], &s_sFont, s_pHud[b], 16, 3, HUD_LEN, 4, 1);
 		for(UBYTE c = 0; c < HUD_LEN; ++c) s_pHudStage[b][c] = ' ';
 		s_pHudStage[b][HUD_LEN] = 0;
-		agkTextInit(&s_pHudText2[b], &s_sFont, s_pHud[b], 16, RADAR_Y, 7, 4, 1);
+		agkTextInit(&s_pHudText2[b], &s_sFont, s_pHud[b], 16, RADAR_Y, 8, 4, 1);   // (8 letters: up to the radar)
 		agkTextInit(&s_pHudSkill[b], &s_sFont, s_pHud[b], HUD_SKILL_X, RADAR_Y, 7, 4, 1);
 	}
 }
@@ -978,11 +978,14 @@ __attribute__((noinline, noclone)) static void hudUpdate(UBYTE ubBfr) {
 		s_pHudPending[ubBfr] = !textType(&s_pHudText[ubBfr], s_pHudStage[ubBfr], szLine,
 			s_ubLastDrawn >= HUD_BUSY_BOBS ? HUD_TYPE_BUSY : HUD_TYPE_PER_FRAME);
 	}
-	if(g->lives != pLives[ubBfr]) {
-		pLives[ubBfr] = g->lives;
+	// the left slot: the choppers left; for a while after the last scoring tank
+	// kill of a mission, the quota (later tanks pay nothing)
+	UBYTE ubLeft = (UBYTE)(g->lives | (g->quotaMsg ? 0x10 : 0));
+	if(ubLeft != pLives[ubBfr]) {
+		pLives[ubBfr] = ubLeft;
 		char szLine[] = "HELI 3";
 		szLine[5] = (char)('0' + g->lives);
-		agkTextSet(&s_pHudText2[ubBfr], szLine);
+		agkTextSet(&s_pHudText2[ubBfr], g->quotaMsg ? "QUOTA 10" : szLine);
 	}
 	UBYTE ubSkill = (UBYTE)(g->difficulty | (g->demo << 4));
 	if(ubSkill != pSkill[ubBfr]) {
