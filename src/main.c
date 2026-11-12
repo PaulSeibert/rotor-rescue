@@ -2115,10 +2115,12 @@ void genericProcess(void) {
 		// title for ~6 frames right as it appeared. Chip RAM has room for it.
 	}
 	UBYTE ubBfr = backBuffer();
-	// the HUD's text first, while the blitter's idle: chip RAM writes are slow beside it
-	hudUpdate(ubBfr);
+	// last picture's BOBs erased first: the blitter clears them while the CPU
+	// types the HUD (the top of the picture is in the border, the bus mostly free)
 	erasesQueue(ubBfr);
 	radarClear(ubBfr);
+	hudUpdate(ubBfr);
+	agkBlitqPoll();
 	UBYTE ubStateBefore = s_sGame.state;
 	if(!s_isPaused) {
 		logicUpdate(&s_sGame, &sIn);
