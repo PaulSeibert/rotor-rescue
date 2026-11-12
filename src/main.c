@@ -196,6 +196,22 @@ static void skillKeys(void) {
 		s_ubSkillKeyWait = 0;
 		return;
 	}
+	if(keyUse(KEY_G)) {
+		// ghost: nothing destroys the chopper, at any difficulty (the pacing run)
+		s_sGame.ghost = !s_sGame.ghost;
+		s_ubSkillKeyWait = 0;
+		agkState("ghost", s_sGame.ghost);
+		agkEnd();
+		return;
+	}
+	if(keyUse(KEY_N)) {
+		// the next trip's schedule at once (the pacing run: jets and mines come with the trips)
+		if(s_sGame.trip < 9) ++s_sGame.trip;
+		s_ubSkillKeyWait = 0;
+		agkState("trip", s_sGame.trip);
+		agkEnd();
+		return;
+	}
 	if(keyUse(KEY_H)) {
 		// the hall of fame read from the disk again, as at boot (tests)
 		s_ubSkillKeyWait = 0;
@@ -1086,8 +1102,23 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 		if(g->pTanks[i].active) radarDot(pRow[4], logicRadarX(g->pTanks[i].x), 5);
 	}
 	for(UBYTE i = 0; i < JET_MAX; ++i) {
-		WORD x = g->pJets[i].x;
-		if(g->pJets[i].active && x >= 0 && x < WORLD_W) radarDot(pRow[1], logicRadarX(x), 5);
+		const tJet *pJet = &g->pJets[i];
+		WORD x = pJet->x;
+		if(!pJet->active) continue;
+		if(pJet->warn) {
+			// the incoming-jet warning (its first 2 s): the blip, wider and a row taller, flashes white,
+			// and holds at the radar's edge while the jet is still beyond the battlefield
+			x = x < 0 ? 0 : x >= WORLD_W ? WORLD_W - 1 : x;
+			if(g->frame & 8) {
+				UBYTE ubX = logicRadarX(x);
+				radarDot(pRow[1], ubX, 7);
+				radarDot(pRow[2], ubX, 7);
+				radarDot(pRow[1], (UBYTE)(ubX + 1), 7);
+				radarDot(pRow[2], (UBYTE)(ubX + 1), 7);
+				continue;
+			}
+		}
+		if(x >= 0 && x < WORLD_W) radarDot(pRow[1], logicRadarX(x), 5);
 	}
 	for(UBYTE i = 0; i < MINE_MAX; ++i) {
 		WORD x = g->pMines[i].x;
@@ -1796,6 +1827,7 @@ __attribute__((noinline)) static void playSounds(UBYTE ubStateBefore) {
 	if(e & EV_CRASH) soundPlay(SOUND_SFX_CRASH);
 	else if(e & EV_OPEN) soundPlay(SOUND_SFX_OPEN);
 	else if(e & EV_BOOM) soundPlay(SOUND_SFX_BOOM);
+	if(g->events2 & EV2_JETWARN) soundPlay(SOUND_SFX_JETWARN);   // the alert (priority 3: before the jet's scream)
 	if(e & EV_JET) soundPlay(SOUND_SFX_JET);
 	if(e & EV_TANKFIRE) soundPlay(SOUND_SFX_TANKFIRE);
 	if(e & EV_SAVED) soundPlay(SOUND_SFX_SAVED);
@@ -1967,6 +1999,7 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	if(g->events & EV_CRASH) agkPrint("AGK chopper lost\n");
 	if(g->events & EV_SHRUG) agkPrint("AGK hit ignored (invincible)\n");
 	if(g->events & EV_TANKTELL) agkPrint("AGK tank tell\n");
+	if(g->events2 & EV2_JETWARN) agkPrint("AGK jet warn\n");
 	if(g->events2 & EV2_JETTELL) agkPrint("AGK jet tell\n");
 	if(g->events2 & EV2_JETFIRE) agkPrint("AGK jet fire\n");
 	if(g->events2 & EV2_DAMAGE) agkPrint("AGK chopper damaged\n");
@@ -1989,6 +2022,32 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 		agkState("aboard", g->aboard);
 		agkState("saved", g->saved);
 		agkState("killed", g->killed);
+		agkEnd();
+	}
+	if(g->state == GS_PLAY && !(g->frame & 15)) {
+		// the pacing sample (tools/pace.py): what threatens the chopper right now
+		UBYTE ubJets = 0, ubShots = 0, ubJetShots = 0, ubTells = 0;
+		for(UBYTE i = 0; i < JET_MAX; ++i) {
+			const tJet *j = &g->pJets[i];
+			if(j->active && j->x > g->cam - 16 && j->x < g->cam + SCREEN_W + 16) ++ubJets;
+			if(j->active && j->tell) ++ubTells;
+		}
+		for(UBYTE i = 0; i < ESHOT_MAX; ++i) {
+			if(!g->pEShots[i].active) continue;
+			++ubShots;
+			if(g->pEShots[i].kind != ESHOT_SHELL) ++ubJetShots;
+		}
+		agkState("pace", g->frame);
+		agkState("pskill", g->difficulty);
+		agkState("pghost", g->ghost);
+		agkState("pmission", g->mission);
+		agkState("ptrip", g->trip);
+		agkState("jets", ubJets);
+		agkState("tells", ubTells);
+		agkState("jatk", g->jetAttacks);
+		agkState("eshots", ubShots);
+		agkState("jshots", ubJetShots);
+		agkState("pland", c->landed);
 		agkEnd();
 	}
 	if(g->state != ubStateBefore || (g->events & EV_TAKEOFF) || !(g->frame & 31) || g->frame <= 3) {

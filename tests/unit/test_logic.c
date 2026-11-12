@@ -31,6 +31,8 @@ static void flyAt(int16_t x, int16_t y) {
 	g.chop.y = y;
 	g.chop.landed = 0;
 	g.chop.vx = g.chop.vy = 0;
+	g.landFrames = 0;      // (it took off a while ago)
+	g.airGrace = 0;
 	g.cam = (int16_t)(x - SCREEN_W / 2);
 	g.spawnTimer = 60000;
 }
@@ -1057,9 +1059,12 @@ static void testJetsGiveWarning(void) {
 	tJet *j = &g.pJets[k];
 	CHECK(j->x < g.cam - 100 || j->x > g.cam + SCREEN_W + 100);   // well off screen
 	CHECK(g.events & EV_JET);                                     // its sound
+	// (the roll may send it from behind, where it can't get a shot: put it ahead of the left-facing chopper)
+	j->dir = 1;
+	j->x = (int16_t)(g.cam - JET_LEAD);
 	// no missile while it's off screen, nor in its first frames on screen
 	int firstShotSeen = -1;
-	for(int f = 0; f < 200 && firstShotSeen < 0; ++f) {
+	for(int f = 0; f < 450 && firstShotSeen < 0; ++f) {
 		g.chop.x = 2400; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
 		g.chop.y = (int16_t)(j->y + 8);            // in its line of fire
 		step(NONE, 1);
@@ -1067,7 +1072,8 @@ static void testJetsGiveWarning(void) {
 			if(g.pEShots[s].active && g.pEShots[s].kind == ESHOT_MISSILE) firstShotSeen = j->seen;
 		if(!g.chop.alive) break;
 	}
-	CHECK(firstShotSeen < 0 || firstShotSeen >= 18);
+	CHECK(firstShotSeen >= 0);                  // it does come, ...
+	CHECK(j->warn == 0);                        // ... but only once its 2 s warning is over
 	printf("jets: first missile after %d frames on screen\n", firstShotSeen);
 }
 
@@ -1211,7 +1217,7 @@ static void testNoMissileWithoutTell(void) {
 	}
 }
 
-// A jet that is only partly on screen (or beyond the edge) never fires: it used
+// A jet that is only partly on screen (or beyond the edge) never fires (nor flashes more than 3/4 of a tell early): it used
 // to, up to ~40 px past the edge, once it had been seen for a few frames
 static void testJetNeverFiresOffScreen(void) {
 	for(int side = 0; side < 2; ++side) {
@@ -1230,7 +1236,9 @@ static void testJetNeverFiresOffScreen(void) {
 			// one frame: it must not fire, nor start a flash
 			step(NONE, 1);
 			for(int s = 0; s < ESHOT_MAX; ++s) CHECK(!(g.pEShots[s].active && g.pEShots[s].kind == ESHOT_MISSILE));
-			CHECK(g.pJets[0].tell == 0 || jetOnScreenFully(&g.pJets[0]));
+			// (the flash may begin up to three quarters of its length early, but never further out, and no shot)
+				{ int w = logicJetTell(&g) * 3 + 4; /* (+4: the camera moves a little after the jet decided) */ const tJet *p = &g.pJets[0];
+				CHECK(p->tell == 0 || (p->x - 16 >= g.cam - w && p->x + 16 <= g.cam + SCREEN_W + w)); }
 		}
 	}
 }
@@ -1490,6 +1498,248 @@ static void testRotorSilentWhenDead(void) {
 	CHECK(logicRotorVolume(&g) == 0);
 }
 
+// ---- jet fairness (Paul's playtest, 2026-11-11; studio tuning, pending Paul's playtest) ----
+// No jet bombs a chopper that has just landed (never on skill 1-2), none starts an
+// attack run in the 2 s after a take-off, one jet at a time on skill 1-3, a pair's
+// second attack 3 s after the first, a warning 2 s before every attack run.
+
+// A jet placed to start an attack run on the chopper this frame, if the rules let it:
+// a missile from some way ahead (airborne), or a bomb straight below (landed)
+static void aimJet(int i, int dir) {
+	tChopper *c = &g.chop;
+	int16_t wRun = (int16_t)(logicJetTell(&g) * 4);
+	int16_t wAhead = c->landed ? (int16_t)(wRun + 8) : (int16_t)(JET_AHEAD_MIN + wRun + 30);
+	g.cam = (int16_t)(c->x - (dir > 0 ? 250 : 70));
+	g.pJets[i] = (tJet){.x = (int16_t)(c->x - dir * wAhead), .y = (int16_t)(c->y - 8), .dir = (int8_t)dir,
+		.active = 1, .hp = 1, .seen = 100};
+}
+
+static int bombsUp(void) {
+	int n = 0;
+	for(int s = 0; s < ESHOT_MAX; ++s) n += g.pEShots[s].active && g.pEShots[s].kind == ESHOT_BOMB;
+	return n;
+}
+
+// Landed, with a jet always lined up to bomb it: no attack run on skill 1-2, ever;
+// on 3-5 none before the chopper has sat there the dwell time, and one soon after
+static void testNoBombOnLandedChopper(void) {
+	static const uint16_t pDwell[DIFFICULTY_MAX + 1] = {300, GROUND_NEVER, GROUND_NEVER, 300, 200, 150};
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		newGame();
+		logicSetDifficulty(&g, d);
+		g.ghost = 1;
+		g.trip = 10;
+		flyAt(1500, GROUND_Y);
+		g.chop.landed = 1;
+		CHECK(logicGroundDwell(&g) == pDwell[d]);
+		int iFirst = -1, iBombs = 0;
+		for(int f = 0; f < 1000; ++f) {
+			g.chop.x = 1500; g.chop.y = GROUND_Y; g.chop.landed = 1; g.chop.vx = g.chop.vy = 0;
+			g.spawnTimer = 60000;
+			g.pJets[1].active = 0; g.pJets[1].cool = 255;
+			if(!g.pJets[0].tell) aimJet(0, 1);
+			uint16_t uwBefore = g.jetAttacks;
+			step(NONE, 1);
+			iBombs += bombsUp() > 0;
+			if(g.jetAttacks != uwBefore && iFirst < 0) {
+				iFirst = f;
+				if(pDwell[d] != GROUND_NEVER) CHECK(g.landFrames >= pDwell[d]);   // never before the dwell time
+			}
+		}
+		if(pDwell[d] == GROUND_NEVER) CHECK(iFirst < 0 && iBombs == 0);
+		else CHECK(iFirst >= 0 && iFirst < pDwell[d] + 40);   // and soon after it
+	}
+}
+
+// After a take-off nothing starts an attack run for JET_TAKEOFF_GRACE frames; a
+// chopper that has been airborne a while is attacked at once
+static void testTakeoffGrace(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		int iAt[2] = {-1, -1};
+		for(int takeoff = 0; takeoff < 2; ++takeoff) {
+			newGame();
+			logicSetDifficulty(&g, d);
+			g.ghost = 1;
+			g.trip = 10;
+			flyAt(1500, 120);
+			if(takeoff) {                                  // sat landed, then up
+				g.chop.landed = 1;
+				g.chop.y = GROUND_Y;
+				for(int f = 0; f < 400; ++f) {
+					g.chop.x = 1500; g.chop.y = GROUND_Y; g.chop.vx = g.chop.vy = 0;
+					g.spawnTimer = 60000;
+					step(NONE, 1);
+				}
+				g.chop.landed = 0;
+			}
+			for(int f = 0; f < 300 && iAt[takeoff] < 0; ++f) {
+				g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+				g.spawnTimer = 60000;
+				g.pJets[1].active = 0; g.pJets[1].cool = 255;
+				if(!g.pJets[0].tell) aimJet(0, 1);
+				uint16_t uwBefore = g.jetAttacks;
+				step(NONE, 1);
+				if(g.jetAttacks != uwBefore) iAt[takeoff] = f;
+			}
+		}
+		CHECK(iAt[0] >= 0 && iAt[0] <= 2);
+		CHECK(iAt[1] >= JET_TAKEOFF_GRACE - 2 && iAt[1] <= JET_TAKEOFF_GRACE + 4);
+	}
+}
+
+// Skill 1-3 (until mission 3 on skill 3): one jet out at a time, over a long game;
+// two jets lined up start one attack run, the other waits until the first has gone
+static void testOneJetAtATime(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_NORMAL; ++d) {
+		newGame();
+		logicSetDifficulty(&g, d);
+		CHECK(logicJetsMax(&g) == 1);
+		g.ghost = 1;
+		g.trip = 10;
+		flyAt(1500, 120);
+		int iSpawned = 0, iMax = 0, iWas = 0;
+		for(int f = 0; f < 9000; ++f) {
+			g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+			g.spawnTimer = 60000;
+			step(NONE, 1);
+			int n = g.pJets[0].active + g.pJets[1].active;
+			if(n > iMax) iMax = n;
+			if(n && !iWas) ++iSpawned;
+			iWas = n;
+		}
+		CHECK(iSpawned >= 3);
+		CHECK(iMax == 1);
+		// two lined up
+		newGame();
+		logicSetDifficulty(&g, d);
+		g.ghost = 1;
+		g.trip = 10;
+		flyAt(1500, 120);
+		aimJet(0, 1);
+		aimJet(1, 1);
+		g.pJets[1].x = (int16_t)(g.pJets[1].x - 8);
+		for(int f = 0; f < 60; ++f) {
+			g.chop.x = 1500; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+			g.cam = 1250;
+			g.spawnTimer = 60000;
+			step(NONE, 1);
+			CHECK(g.jetAttacks <= 1);
+		}
+		printf("one at a time: skill %d, %d attack run(s)\n", d, g.jetAttacks);
+		CHECK(g.jetAttacks == 1);
+	}
+}
+
+// Skill 4-5 (and 3 in mission 3): pairs, but the second jet's attack run starts at
+// least JET_PAIR_GAP frames (3 s) after the first's (one jet may follow a missile
+// with another on the same pass: that is the same run)
+static void testPairOffset(void) {
+	for(uint8_t d = 3; d <= DIFFICULTY_MAX; ++d) {
+		newGame();
+		logicSetDifficulty(&g, d);
+		g.mission = d == 3 ? 2 : 0;
+		g.ghost = 1;
+		g.trip = 10;
+		flyAt(1500, 120);
+		CHECK(logicJetsMax(&g) == 2);
+		int iAt[JET_MAX] = {-1, -1}, iBoth = 0;
+		for(int f = 0; f < 400; ++f) {
+			g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+			g.spawnTimer = 60000;
+			for(int i = 0; i < JET_MAX; ++i) if(iAt[i] < 0 && !g.pJets[i].tell) aimJet(i, 1);
+			uint8_t pTell[JET_MAX] = {g.pJets[0].tell, g.pJets[1].tell};
+			step(NONE, 1);
+			iBoth |= g.pJets[0].active && g.pJets[1].active;
+			for(int i = 0; i < JET_MAX; ++i) if(iAt[i] < 0 && g.pJets[i].tell && !pTell[i]) iAt[i] = f;
+		}
+		CHECK(iBoth);
+		CHECK(iAt[0] >= 0 && iAt[1] >= 0);
+		int iGap = iAt[1] > iAt[0] ? iAt[1] - iAt[0] : iAt[0] - iAt[1];
+		CHECK(iGap >= JET_PAIR_GAP && iGap <= JET_PAIR_GAP + 6);   // the second one as soon as it may
+	}
+}
+
+// Every attack run comes at least 2 s after the jet's warning (its appearance)
+static void testWarningBeforeAttack(void) {
+	int iAttacks = 0;
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newGame();
+		logicSetDifficulty(&g, d);
+		g.ghost = 1;
+		g.trip = 10;
+		g.pJets[0].cool = 1;
+		g.pJets[1].cool = 1;
+		flyAt(1500, 120);
+		int iBorn[JET_MAX] = {-1, -1}, iWarns = 0, iSpawns = 0;
+		for(int f = 0; f < 12000; ++f) {
+			g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+			g.spawnTimer = 60000;
+			uint8_t pWas[JET_MAX] = {g.pJets[0].active, g.pJets[1].active};
+			uint8_t pTell[JET_MAX] = {g.pJets[0].tell, g.pJets[1].tell};
+			step(NONE, 1);
+			int isBorn = 0;
+			for(int i = 0; i < JET_MAX; ++i) {
+				if(g.pJets[i].active && !pWas[i]) { iBorn[i] = f; isBorn = 1; }
+				if(g.pJets[i].active && g.pJets[i].tell && !pTell[i]) {
+					++iAttacks;
+					CHECK(iBorn[i] >= 0 && f - iBorn[i] >= JET_WARN_FRAMES);
+				}
+			}
+			iSpawns += isBorn;
+			iWarns += (g.events2 & EV2_JETWARN) != 0;
+		}
+		CHECK(iSpawns >= 3 && iWarns == iSpawns);          // each one warned
+	}
+	CHECK(iAttacks >= 5);
+}
+
+// The jet's tell: longer on the low skills, 12 frames at least everywhere
+static void testJetTellTable(void) {
+	static const uint8_t pTell[DIFFICULTY_MAX + 1] = {16, 24, 20, 16, 14, 12};
+	newGame();
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		logicSetDifficulty(&g, d);
+		CHECK(logicJetTell(&g) >= 12);
+		CHECK(logicJetTell(&g) == pTell[d]);
+	}
+}
+
+// Skill 1 is noticeably easier than normal: fewer tanks, rarer jets
+static void testSkillOneEasier(void) {
+	newGame();
+	g.trip = 3;
+	logicSetDifficulty(&g, 1);
+	uint8_t ubT1 = logicTankLimit(&g);
+	logicSetDifficulty(&g, 3);
+	uint8_t ubT3 = logicTankLimit(&g);
+	CHECK(ubT1 + 2 <= ubT3);
+	// the time between a jet's passes (leaving to the next one's appearance)
+	int iRest[2];
+	for(int k = 0; k < 2; ++k) {
+		newGame();
+		logicSetDifficulty(&g, k ? 3 : 1);
+		g.trip = 10;
+		g.ghost = 1;
+		flyAt(1500, 120);
+		g.pJets[0].cool = 1;
+		int iLeft = -1, iSum = 0, iN = 0;
+		uint8_t ubWas = 0;
+		for(int f = 0; f < 12000; ++f) {
+			g.chop.x = 1500; g.chop.y = GROUND_Y; g.chop.landed = 1; g.chop.vx = g.chop.vy = 0;
+			g.spawnTimer = 60000;
+			int16_t wX = g.pJets[0].x;
+			step(NONE, 1);
+			// (it left past the screen's edge, not into the chopper)
+			if(ubWas && !g.pJets[0].active && (wX < g.cam - 40 || wX > g.cam + SCREEN_W + 40)) iLeft = f;
+			if(!ubWas && g.pJets[0].active && iLeft >= 0) { iSum += f - iLeft; ++iN; }
+			ubWas = g.pJets[0].active;
+		}
+		iRest[k] = iN ? iSum / iN : 0;
+	}
+	printf("jet rest: skill 1 %d frames, normal %d\n", iRest[0], iRest[1]);
+	CHECK(iRest[0] >= iRest[1] + 80);
+}
+
 int main(void) {
 	testRotorRateFollowsSpeedAndClimb();
 	testRotorIdlesSlowAndSoftOnTheGround();
@@ -1561,6 +1811,13 @@ int main(void) {
 	testInvincibleSurvivesHits();
 	testInvincibleKeepsHiScore();
 	testDifficultyScalesEnemies();
+	testNoBombOnLandedChopper();
+	testTakeoffGrace();
+	testOneJetAtATime();
+	testPairOffset();
+	testWarningBeforeAttack();
+	testJetTellTable();
+	testSkillOneEasier();
 	testHarderTanksFireSooner();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);

@@ -170,7 +170,7 @@ target is unproven; the preview card (2.4 s, section 10) is the only "level intr
 
 ## 5. Pacing
 
-**Not measured.** The playbook's threat metrics (mean, p90, quiet share, shots a minute) have not
+**Jet pacing is measured (v1.3, "Jet pacing" below); the rest is not.** The playbook's threat metrics (mean, p90, quiet share, shots a minute) have not
 been taken for this game: no `wavescript` or pacing run exists, and the spawns are timers and tables,
 not a wave script. Everything below is derived from the code. Measuring it (a scripted trip in
 GODMODE, as Rotor Raider's `tools/pacing.agk`) is open work (open question 3).
@@ -186,6 +186,40 @@ GODMODE, as Rotor Raider's `tools/pacing.agk`) is open work (open question 3).
 | fire ramp ~30/min first zone to ~100/min late | per tank in range: a shell every 85-116 frames on normal (31 a minute) at mission 1 trip 0 (base gap 85, was 110: slower shells are paid for in fire rate); `-20` frames a mission and `-8` a trip, floor 40-71 frames (54 a minute per tank). Up to 5 tanks, 6 shells live | plausible, **not measured** |
 | next level +50% enemies | tank cap +1 a mission, spawn gap -40 frames, shell gap -20, jet rest -30 | yes by tables |
 
+**Jet pacing** (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest). Paul's playtest of 2026-11-12: "the jets, when the player is picking up
+captives and is on the ground, even on the level 1 difficulty, they are too quick to bomb the player on the ground and it seems
+unfair. also, two jets come together and the player has trouble transitioning from bombing to missiles. game seems just a bit too
+hard still." Rules (section 6 has the mechanics, section 7 the tables):
+
+- **Ground grace.** A landed chopper (boarding) is not bombed: never on skill 1-2 (the jets overfly it); on skill 3 only after
+  6 s landed without a break, skill 4 after 4 s, skill 5 after 3 s. After take-off a 2 s grace: no jet starts an attack run.
+  GODMODE uses skill 3's numbers.
+- **One jet at a time.** Skill 1-2, and skill 3 in missions 1-2: one jet out at a time, the next waits until the first has gone
+  (this lowers the jets' frequency). Skill 3 in mission 3, and skill 4-5: pairs, but the second jet's attack run starts at least
+  3 s after the first's. (Read as: "on skill 1-3 one jet; on 4-5 or in mission 3 pairs" with skill 1-2 never paired in mission 3,
+  so that skill 1 stays the easiest: studio decision, pending Paul's playtest.)
+- **A warning, then time to switch weapons.** Every jet is announced the moment it appears: its radar blip flashes white and a
+  short two-beep alert plays (effect `jetwarn`, priority 3, on the effect channels 1/3 like the others). No attack run starts
+  until 2 s after that (it appears 384 px off screen, 100 frames of flight from being whole on screen), and the jet's flash (tell)
+  is longer on the low skills (24 / 20 / 16 / 14 / 12). The flash may begin up to three quarters of its length before the whole jet is on
+  screen (else a long tell leaves a jet from the front only about 12 frames to begin one); the missile or bomb still needs the whole jet on screen at its end.
+- **Jet pacing, measured** (`tools/pace.py`, ghost mode, 2.4 min of play, 39-40 % of it landed; before = `main` 71e762b plus the
+  instrumentation, after = this branch; skill 1 at trip 3, skill 3 at trip 1):
+
+  | | attack runs a minute | jets on screen (mean, share of time) | landed, a jet flash or shot up | first attack after touching down | runs under 3 s after another |
+  |---|---|---|---|---|---|
+  | skill 3 before | 26.8 | 0.61, 46 % | 13.7 % | 9.3 s, 1.0 s | 48 of 64 |
+  | skill 3 after | 9.2 | 0.26, 26 % | 8.0 % | 10.2 s, 6.1 s (6 s dwell) | 8 of 22 (one jet's follow-up shots; two jets never closer than 2.9 s) |
+  | skill 1 before | 14.1 | 0.65, 55 % | 18.3 % | 13.4 s, 0.3 s | 22 of 34 |
+  | skill 1 after | 3.3 | 0.24, 24 % | 0.0 % (never, by design) | none | 0 of 8 |
+
+  The coordinator's target was about half of before (12-15 and 6-8 a minute). Two tuning passes reached 9.2 and 3.3: one jet at a time
+  gives at most about 11 passes a minute (3.8 s of flight, 40-70 frames of rest), and skill 1's jets cannot attack the 40 % of the run
+  spent landed. Per minute airborne skill 1 is about 5.5 and skill 3 about 15. Left for Paul's playtest to say if it is toothless.
+- Original wording of the measurement setup: `tools/pacing1.agk`, `tools/pacing3.agk` and `tools/pace.py` (ghost mode: the difficulty's tables, an
+  immortal chopper; three cycles of 24 s landed and about 18 s airborne at the first jets-on trip): see the table in "Jet pacing,
+  measured" below. Not measured with a person: that is the playtest.
+
 **Length:** a bot-assisted trip to the nearest barracks and home takes 1452 frames (29 s,
 `tests/rescue.agk`). Pure flight for four round trips is at least 12,160 px / 3 px a frame = 4053
 frames (81 s); with unloading (10 frames a person) a clean mission is about 2 minutes (derived).
@@ -199,7 +233,7 @@ do not call the pacing "tuned".
 | enemy | HP | movement | fire / threat | tell | score |
 |---|---|---|---|---|---|
 | tank | 2 (cannon 1 each; a bomb within 22 px kills) | spawns off screen (cam -40 or +screen +40), drives at the chopper 0.5 px/frame, stays between x 16 and 2536 | a shell when the chopper is low (skids y > 150) and within 200 px: aimed with the chopper's half velocity, error +- (mask+1)/2 px, 1.5 px/frame (24/16, was 2-4), life 140 frames; first shell 150 frames after spawning | stops, barrel up, flash blinks every 4 frames, 12-22 frames by skill (16 normal) | 50 |
-| jet | 1 (cannon only) | from 130-255 px off screen (lead by skill), mostly ahead of where you fly (3 of 4), 4 px/frame, follows your height at 0.5 px/frame | a missile (2.5 px/frame, was 5; life 80 frames; the gap between missiles is 40 frames with the tell inside it, was 50) only if the jet is **fully on screen**, on screen 18-40 frames (by skill; 24 on normal), you are airborne, 56-200 px ahead and within 14 px of its height; a bomb if you are landed within 24 px (also fully on screen); a ram hurts you | heard (a sound on spawn), on the radar, then a **flash** (the jet's nose and engine glow, blinking) for the tell, 12-22 frames by skill (16 on normal, the tank's table), part of the on-screen delay, so the first shot comes as late as before. Aborted (no missile) if at the end of the tell the jet is not fully on screen, you are landed or climbed out of its height, or you are closer than 56 px | 100 |
+| jet | 1 (cannon only) | from 384 px off screen (100 frames of flight from being whole on screen), mostly ahead of where you fly (3 of 4), 4 px/frame, follows your height at 0.5 px/frame | **An attack run starts** when its flash (tell) begins; a missile follows only if the jet is **fully on screen**, you are airborne, 56-200 px ahead and within 14 px of its height; a bomb if you are landed within 24 px (also fully on screen). **Never before** its warning is 2 s old (`JET_WARN_FRAMES` 100), never within 2 s after a take-off (`JET_TAKEOFF_GRACE`), never at a landed chopper on skill 1-2 and not before the dwell time on 3-5 (section 7), on skill 1-3 not while another jet is out, and a second jet's run never within 3 s (`JET_PAIR_GAP` 150) of the first's. The gap between one jet's missiles is 40 frames with the tell inside it; a ram hurts you | **warned** (a flashing white radar blip, a two-beep alert, the jet's scream) the moment it appears, then a **flash** (nose and engine glow, blinking) for the tell, 12-24 frames by skill (section 7); aborted (no missile or bomb) if at the end of the tell the jet is not fully on screen, you have landed, climbed out of its height, are closer than 56 px, or (a bomb) have not been landed long enough | 100 |
 | air mine | 1 (cannon only) | spawns off screen at y 54-117, homes at 0.5 px/frame in x and 0.25 in y when within 300 px, never below y 200 | contact | none (it is visible and slow) | 75 |
 | barracks | 2 (cannon 1 each; a bomb within 30 px does 2) | static; releases 1 person per 8 frames after a 20-frame delay | none; roofs stop bombs and the chopper | burning frames | 25 |
 
@@ -233,18 +267,24 @@ and fails on any difference.
 
 | | 1 easiest | 2 easy | **3 normal** | 4 hard | 5 hardest |
 |---|---|---|---|---|---|
-| tanks at once (`1 + trip + mission +`) | -1 | -1 | 0 | +1 | +2 |
-| shell gap (frames, `110 - 20*mission - 8*trip +`) | +60, floor 60 | +30, floor 50 | 0, floor 40 | -15, floor 32 | -30, floor 26 |
+| tanks at once (`1 + trip + mission +`) | -2 (was -1) | -1 | 0 | +1 | +2 |
+| shell gap (frames, `85 - 20*mission - 8*trip +`, plus 0-31) | +90, floor 75 (was +60, 60) | +30, floor 50 | 0, floor 40 | -15, floor 32 | -30, floor 26 |
 | aim error (px, +-) | 32 | 32 | 16 | 8 | 4 |
 | tank tell (frames) | 22 | 18 | 16 | 14 | 12 |
 | jets from (trip + mission >=) | 3 | 2 | 1 | 1 | 0 |
 | mines from | 4 | 3 | 2 | 1 | 1 |
 | spawn gap (`220 - 40*mission +`; every skill floored at 60) | +120 | +60 | 0 | -40 | -70 |
-| jet rest between passes (`160 - 30*mission +`; floored at 40) | +80 | +40 | 0 | -30 | -50 |
-| jet starts this far off screen (px) | 255 | 220 | 180 | 150 | 130 |
-| jet on screen before its first shot (frames) | 40 | 30 | 24 | 20 | 18 |
-| jet tell, the flash before a missile (frames; part of the line above) | 22 | 18 | 16 | 14 | 12 |
+| jet rest between passes (`20 - 30*mission +` with one jet at a time, `160 - 30*mission +` with pairs; floored at 40; plus 0-63 frames) | +100 (was +80) | +60 (was +40) | 0 | -30 | -50 |
+| jet starts this far off screen (px) | 384 on every skill (it was 255 / 220 / 180 / 150 / 130) |||||
+| jet on screen before its first shot | replaced by the 2 s warning (100 frames from appearing) on every skill (was 40 / 30 / 24 / 20 / 18 frames) |||||
+| jet tell, the flash before a missile or bomb (frames; was 22 / 18 / 16 / 14 / 12; its own table now, the tank's is unchanged) | 24 | 20 | 16 | 14 | 12 |
+| landed this long before a jet may bomb the chopper | never | never | 6 s (300 frames) | 4 s (200) | 3 s (150) |
+| jets out at once (missions 1-2 / mission 3) | 1 / 1 | 1 / 1 | 1 / 2 | 2 / 2 | 2 / 2 |
 
+- **Jet fairness** (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest): the jet rows above, and section 5's rules. Also by the way, a jet's cool-down was
+  8 bits and wrapped for skill 1's rest of 240-303 frames (it was often 0-47 instead); it is 16 bits now. `testNoBombOnLandedChopper`,
+  `testTakeoffGrace`, `testOneJetAtATime`, `testPairOffset`, `testWarningBeforeAttack`, `testJetTellTable` and `testSkillOneEasier`
+  hold the rules.
 - **Never changes:** the battlefield, barracks positions and hit points, people, cabin 16, 3 lives,
   the chopper's handling and hitbox, every tell existing, the second hit's death (the first only damages).
 - **The ramp:** within a mission by trip (tanks +1, shell gap -8, jets after the first trip, mines
@@ -269,7 +309,8 @@ and fails on any difference.
     frames. 10 is about what a fair mission kills (about 2-3 a trip over four trips; derived, not
     measured). **Open:** mines still pay 75 each, endlessly (3 at once, a 1 in 2 roll per spawn): a
     smaller loop, not closed here.
-- **Testing aids:** GODMODE (key 0: plays like normal, nothing damages or destroys the chopper, no
+- **Testing aids:** ghost (Ctrl+L, G: nothing destroys the chopper at any difficulty, for the pacing runs), Ctrl+L N (the next trip's
+  schedule), GODMODE (key 0: plays like normal, nothing damages or destroys the chopper, no
   hi-score), Ctrl+L 1-5, the serial heartbeat
   (`state`, `x`, `landed`, `aboard`, `saved`, `trip`, `lives`), and the scenario checkpoints
   `boarding` and `rescued`.
@@ -475,8 +516,9 @@ writable disk.)
 
 1. Fire-to-play time from a real floppy is not measured (425.6 KB executable plus logos). What is
    the budget, and does a 1 MB requirement stand?
-3. Is a pacing run wanted (a scripted GODMODE trip, as Rotor Raider's `tools/pacing.agk`)? Section 5
-   is derived only.
+3. Jet pacing is measured (v1.3, section 5); the tank and mine pacing is not. Is a full pacing run wanted?
+9. Jet fairness (v1.3) is studio tuning, pending Paul's playtest: skill 1 landed at a barracks with jets around; a jet pair on
+   skill 4; the warning (radar flash and alert). Studio decision: skill 1-2 never get pairs, skill 3 gets them in mission 3. Is that wanted, or should skill 3 stay single there too?
 6. Add `docs/STYLE.md` (a copy of the pilot's) after the art lands?
 8. Add a credits screen and an animated ending, as the playbook's presentation list asks?
 
@@ -487,3 +529,4 @@ writable disk.)
 | v1.0 | 2026-11-11 | retroactive: the game as it is at `main` 2c0c4f9, with the approved new art noted as landing |
 | v1.1 | 2026-11-11 | the pilot art landed on `main` (567e6c5, 065a44d): section 8 and the milestones updated |
 | v1.2 | 2026-11-11 | decided by Paul, 2026-11-11: A damage instead of instant loss; B shell 1.5 and missile 2.5 px/frame, a jet tell, no off-screen fire; C a tank score quota of 10 a mission; D GODMODE's tables equal normal's, unit-tested; E the 512K test (measurement only, result in section 2). Open questions 2, 4, 5, 7 removed |
+| v1.3 | 2026-11-12 | (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest): jet fairness (ground grace, one jet at a time, a warning and a longer tell, an easier skill 1), jet pacing measured; section 5, 6, 7 |
