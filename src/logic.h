@@ -72,8 +72,10 @@ enum { JET_L, JET_R, JET_FLASH_L, JET_FLASH_R };   // the tell: nose and engine 
 
 // The chopper's sprite poses (art/chopper.txt), right-facing. Art frame =
 // pose * 2 + rotor phase; main.c adds ART_CHOPPER_MIRROR for left-facing.
+// CHOP_LEAN1 / CHOP_LEAN2: the front view banked a little / fully to the right
+// (the right side low); with CHOP_LEFT, to the left.
 enum { CHOP_SIDE0, CHOP_SIDE1, CHOP_SIDE2, CHOP_TURN, CHOP_FRONT, CHOP_WRECK,
-	CHOP_POSES };
+	CHOP_LEAN1, CHOP_LEAN2, CHOP_POSES };
 #define CHOP_LEFT 0x80       // flag in logicChopperFrame()'s result
 
 // ------------------------------------------------------------- the input ---
@@ -93,6 +95,7 @@ typedef struct {
 	uint8_t faceTarget;  // where a turn is heading
 	uint8_t turnTimer;   // frames left in the current turn step
 	uint8_t turnHold;    // frames the stick has pushed against the facing
+	int8_t holdDx;       // the stick direction that count is of
 	uint8_t lastSide;    // FACE_LEFT or FACE_RIGHT: for fire2's cycle
 	uint8_t landed;
 	uint8_t alive;
@@ -101,6 +104,11 @@ typedef struct {
 	uint8_t invuln;      // frames left in which nothing hurts it (and it blinks)
 	uint8_t fireTimer;   // auto-fire
 	uint8_t prevFire, prevFire2;
+	int8_t dyHold;       // frames the stick has been held down (+) / up (-) with no fire (saturates)
+	uint8_t stance;      // frames left of the stick's bomb stance (0: not in one)
+	uint8_t leanTimer;   // frames left of the front-view lean after / before a turn
+	uint8_t leanDir;     // FACE_LEFT or FACE_RIGHT: which way that lean banks
+	uint8_t swayTimer;   // the front-facing hover's sway clock
 } tChopper;
 
 enum { HS_INSIDE, HS_FREE, HS_TO_CHOPPER, HS_ABOARD, HS_TO_HANGAR, HS_SAVED, HS_DEAD };
@@ -304,7 +312,11 @@ typedef struct {
 #define VY_UP_MAX 28
 #define VY_DOWN_MAX 32
 #define VY_ACCEL 3
-#define TURN_STEP_FRAMES 6   // side -> front, front -> side
+#define TURN_STEP_FRAMES 5   // the three-quarter view between a side and the front
+#define LEAN_FRAMES 6        // the lean frame at the front, before / after a turn
+#define SWAY_PHASE 24        // front-facing hover: front, lean, front, lean, each this long
+#define BOMB_ARM_FRAMES 20   // stick down this long with no fire: the next fire press is the bomb stance
+#define BOMB_STANCE_FRAMES 75 // the stick's bomb stance turns back to the cannon this long after the last bomb
 #define TURN_HOLD_FRAMES 5   // stick against the facing this long starts a turn
 #define FIRE_REPEAT 10
 #define CANNON_SPEED 96      // 6 px/frame

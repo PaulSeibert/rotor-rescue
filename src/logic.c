@@ -774,9 +774,37 @@ static void shotFire(tGame *g, uint8_t ubKind) {
 }
 
 static void turnTo(tChopper *c, uint8_t ubFace) {
-	if(c->faceTarget == ubFace) return;
 	c->faceTarget = ubFace;
-	if(!c->turnTimer && c->face != ubFace) c->turnTimer = TURN_STEP_FRAMES;
+}
+
+// One frame of the turn, eased: side -> the three-quarter view -> the front (a lean toward
+// the way the nose swings, held) -> the three-quarter view -> the other side. Every pose is
+// shown for several frames and none is skipped; the front also sways (logicChopperFrame).
+static void turnStep(tChopper *c) {
+	if(c->turnTimer) {
+		if(--c->turnTimer) return;
+		uint8_t ubFrom = c->face;   // one step: side <-> front
+		if(c->faceTarget > c->face) ++c->face;
+		else if(c->faceTarget < c->face) --c->face;
+		if(c->face != FACE_FRONT) c->lastSide = c->face;
+		else if(ubFrom != FACE_FRONT) {
+			c->leanDir = ubFrom == FACE_LEFT ? FACE_RIGHT : FACE_LEFT;
+			c->leanTimer = LEAN_FRAMES;
+			c->swayTimer = 0;
+		}
+		return;
+	}
+	if(c->face == c->faceTarget) {
+		if(c->leanTimer) --c->leanTimer;
+		else if(c->face == FACE_FRONT && ++c->swayTimer >= SWAY_PHASE * 4) c->swayTimer = 0;
+		return;
+	}
+	if(c->face != FACE_FRONT) { c->turnTimer = TURN_STEP_FRAMES; return; }
+	// leaving the front: lean toward the way out first
+	c->leanDir = c->faceTarget;
+	if(c->leanTimer > 1) --c->leanTimer;
+	else if(c->leanTimer) { c->leanTimer = 0; c->turnTimer = TURN_STEP_FRAMES; }
+	else c->leanTimer = LEAN_FRAMES;
 }
 
 void logicChopperUpdate(tGame *g, const tInput *pIn) {
@@ -801,10 +829,24 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 		if(from == FACE_FRONT) turnTo(c, c->lastSide == FACE_LEFT ? FACE_RIGHT : FACE_LEFT);
 		else turnTo(c, FACE_FRONT);
 	}
-	if(pIn->dy > 0 && isFireEdge && !c->landed && c->faceTarget != FACE_FRONT) {
-		turnTo(c, FACE_FRONT);   // down + fire: face the screen to bomb
-		isFireUsed = 1;
+	// The stick's way to the bombs is deliberate: held down BOMB_ARM_FRAMES with no fire in
+	// them, then a press. Firing restarts the count, so a volley (taps or held, diving or not)
+	// is always the cannon. Up + fire from the front goes back to the cannon.
+	if(isFireEdge && !c->landed) {
+		if(c->faceTarget != FACE_FRONT && c->dyHold >= BOMB_ARM_FRAMES) {
+			turnTo(c, FACE_FRONT);
+			c->stance = BOMB_STANCE_FRAMES;
+			isFireUsed = 1;
+		}
+		else if(c->faceTarget == FACE_FRONT && pIn->dy < 0) {
+			turnTo(c, c->lastSide);
+			isFireUsed = 1;
+		}
 	}
+	if(pIn->fire || pIn->dy == 0) c->dyHold = 0;
+	else if(pIn->dy > 0) c->dyHold = c->dyHold < 0 ? 1 : c->dyHold < 100 ? c->dyHold + 1 : 100;
+	else c->dyHold = 0;
+	if(pIn->dx != c->holdDx) { c->holdDx = pIn->dx; c->turnHold = 0; }   // (a reversal starts the push again)
 	if(pIn->dx) {
 		uint8_t want = pIn->dx < 0 ? FACE_LEFT : FACE_RIGHT;
 		if(c->faceTarget != want && !isTurning) {
@@ -820,15 +862,9 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 	}
 	else c->turnHold = 0;
 
-	if(c->turnTimer) {
-		if(!--c->turnTimer) {
-			// one step: side <-> front
-			if(c->faceTarget > c->face) ++c->face;
-			else if(c->faceTarget < c->face) --c->face;
-			if(c->face != FACE_FRONT) c->lastSide = c->face;
-			if(c->face != c->faceTarget) c->turnTimer = TURN_STEP_FRAMES;
-		}
-	}
+	turnStep(c);
+	if(c->faceTarget != FACE_FRONT) c->stance = 0;
+	else if(c->stance && c->face == FACE_FRONT && !--c->stance) turnTo(c, c->lastSide);
 	isTurning = c->turnTimer || c->face != c->faceTarget;
 
 	// --- flying
@@ -890,7 +926,10 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 	if(pIn->fire && !isFireUsed && !isTurning) {
 		if(isFireEdge || c->fireTimer <= 1) {
 			if(c->face == FACE_FRONT) {
-				if(!c->landed) shotFire(g, SHOT_BOMB);
+				if(!c->landed) {
+					shotFire(g, SHOT_BOMB);
+					if(c->stance) c->stance = BOMB_STANCE_FRAMES;
+				}
 			}
 			else shotFire(g, SHOT_CANNON);
 			c->fireTimer = FIRE_REPEAT;
@@ -1648,7 +1687,18 @@ uint8_t logicChopperFrame(const tGame *g) {
 			(c->faceTarget == FACE_FRONT ? c->lastSide : c->faceTarget);
 		return CHOP_TURN | (side == FACE_LEFT ? CHOP_LEFT : 0);
 	}
-	if(c->face == FACE_FRONT) return CHOP_FRONT;
+	if(c->face == FACE_FRONT) {
+		uint8_t ubLeft = c->leanDir == FACE_LEFT ? CHOP_LEFT : 0;
+		if(c->leanTimer) return CHOP_LEAN2 | ubLeft;   // the turn's lean
+		if(c->faceTarget != FACE_FRONT) return CHOP_FRONT;
+		// a sidestep leans into the move: slightly from 0.75 px/frame, fully from 1.75
+		int16_t wV = c->vx < 0 ? (int16_t)-c->vx : c->vx;
+		if(wV >= 12) return (wV >= 28 ? CHOP_LEAN2 : CHOP_LEAN1) | (c->vx < 0 ? CHOP_LEFT : 0);
+		// the hover's sway: front, slight lean one way, front, the other way
+		uint8_t ubPhase = c->swayTimer / SWAY_PHASE;
+		if(ubPhase & 1) return CHOP_LEAN1 | (ubPhase == 3 ? CHOP_LEFT : 0);
+		return CHOP_FRONT;
+	}
 	int16_t fwd = c->face == FACE_RIGHT ? c->vx : (int16_t)-c->vx;
 	uint8_t pose = fwd >= 32 ? CHOP_SIDE2 : fwd >= 12 ? CHOP_SIDE1 : CHOP_SIDE0;
 	return pose | (c->face == FACE_LEFT ? CHOP_LEFT : 0);

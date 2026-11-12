@@ -261,8 +261,8 @@ static void testTurnThroughFront(void) {
 	CHECK(g.chop.face == FACE_LEFT);
 	step((tInput){.dx = 1}, TURN_HOLD_FRAMES + TURN_STEP_FRAMES);
 	CHECK(g.chop.face == FACE_FRONT);
-	CHECK((logicChopperFrame(&g) & 0x7F) == CHOP_TURN);
-	step((tInput){.dx = 1}, TURN_STEP_FRAMES);
+	CHECK(logicChopperFrame(&g) == CHOP_LEAN2);   // arrived: leaning right, the way it swings
+	step((tInput){.dx = 1}, LEAN_FRAMES + TURN_STEP_FRAMES);
 	CHECK(g.chop.face == FACE_RIGHT);
 }
 
@@ -272,8 +272,235 @@ static void testFrontNeedsLongPush(void) {
 	g.chop.face = g.chop.faceTarget = FACE_FRONT;
 	step((tInput){.dx = -1}, TURN_HOLD_FRAMES * 2);
 	CHECK(g.chop.faceTarget == FACE_FRONT);   // strafing, still facing front
-	step((tInput){.dx = -1}, TURN_HOLD_FRAMES * 2 + TURN_STEP_FRAMES + 1);
+	step((tInput){.dx = -1}, TURN_HOLD_FRAMES * 2 + LEAN_FRAMES + TURN_STEP_FRAMES + 2);
 	CHECK(g.chop.face == FACE_LEFT);
+}
+
+// ---- Paul's playtest, 2026-11-12: volleys never turn into bombs
+
+// Run an input pattern for some frames: 1 if a bomb left or the chopper began to turn away from the cannon
+static int volleyTurnedToBomb(const tInput *pPattern, int patLen, int frames) {
+	for(int i = 0; i < frames; ++i) {
+		tInput in = pPattern[i % patLen];
+		logicUpdate(&g, &in);
+		g.chop.y = 120; g.chop.vy = 0;   // (the dive is the stick's, not the height)
+		if(g.events & EV_BOMB) return 1;
+		if(g.chop.faceTarget != FACE_LEFT || g.chop.turnTimer) return 1;
+	}
+	return 0;
+}
+
+static void testVolleysNeverBomb(void) {
+	// tapped volleys with the stick pushed down (diving at a jet), at every rhythm shorter than the arm time
+	for(int gap = 1; gap < BOMB_ARM_FRAMES; ++gap) {
+		newGame();
+		flyAt(2000, 120);
+		tInput pat[BOMB_ARM_FRAMES + 2];
+		pat[0] = (tInput){.dy = 1, .fire = 1};
+		for(int i = 1; i <= gap; ++i) pat[i] = (tInput){.dy = 1};
+		CHECK(!volleyTurnedToBomb(pat, gap + 1, 600));
+	}
+	// diagonals: down and forward, down and back
+	for(int dx = -1; dx <= 0; ++dx) {
+		newGame();
+		flyAt(2000, 120);
+		tInput pat[4] = {
+			{.dx = (int8_t)dx, .dy = 1, .fire = 1}, {.dx = (int8_t)dx, .dy = 1},
+			{.dx = (int8_t)dx, .dy = 1}, {.dx = (int8_t)dx, .dy = 1}};
+		CHECK(!volleyTurnedToBomb(pat, 4, 600));
+	}
+	// down and against the facing: the stick turns it round (to the cannon on the other side), no bomb
+	newGame();
+	flyAt(2000, 120);
+	for(int i = 0; i < 600; ++i) {
+		tInput in = {.dx = 1, .dy = 1, .fire = (uint8_t)((i & 3) == 0)};
+		logicUpdate(&g, &in);
+		g.chop.y = 120; g.chop.vy = 0;
+		CHECK(!(g.events & EV_BOMB));
+	}
+	CHECK(g.chop.face == FACE_RIGHT);
+	// a held fire with the stick down, for ever
+	newGame();
+	flyAt(2000, 120);
+	tInput held = {.dy = 1, .fire = 1};
+	CHECK(!volleyTurnedToBomb(&held, 1, 1000));
+	// one frame short of deliberate: still a cannon shot
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.dy = 1, .fire = 1}, 3);
+	step((tInput){.dy = 1}, BOMB_ARM_FRAMES - 1);
+	step((tInput){.dy = 1, .fire = 1}, 1);
+	CHECK(g.chop.faceTarget == FACE_LEFT);
+	CHECK(g.events & EV_CANNON);
+}
+
+static void testTapsWithoutTheStickNeverBomb(void) {
+	newGame();
+	flyAt(2000, 120);
+	tInput pat[5] = {{.fire = 1}, {0}, {0}, {0}, {0}};
+	CHECK(!volleyTurnedToBomb(pat, 5, 500));
+	tInput pat2[2] = {{.dx = -1, .fire = 1}, {.dx = -1}};
+	CHECK(!volleyTurnedToBomb(pat2, 2, 500));
+}
+
+static void testDeliberateBomb(void) {
+	// down for BOMB_ARM_FRAMES, then fire: the stance. The press itself turns, it doesn't shoot
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.dy = 1}, BOMB_ARM_FRAMES);
+	step((tInput){.dy = 1, .fire = 1}, 1);
+	CHECK(g.chop.faceTarget == FACE_FRONT);
+	CHECK(!g.pShots[0].active);
+	step(NONE, TURN_STEP_FRAMES + 1);
+	g.chop.y = 120; g.chop.vy = 0;
+	CHECK(g.chop.face == FACE_FRONT);
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.events & EV_BOMB);
+	// ...and every further fire is a bomb, not the cannon
+	step(NONE, 5);
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.events & EV_BOMB);
+	// up + fire: back to the cannon, at once
+	step(NONE, 3);
+	step((tInput){.dy = -1, .fire = 1}, 1);
+	CHECK(g.chop.faceTarget == FACE_LEFT);
+	step(NONE, LEAN_FRAMES + TURN_STEP_FRAMES + 2);
+	CHECK(g.chop.face == FACE_LEFT);
+	g.chop.y = 120; g.chop.vy = 0;
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.events & EV_CANNON);
+	CHECK(!(g.events & EV_BOMB));
+	// the second button also gets there, with no hold at all
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, TURN_STEP_FRAMES + 2);
+	step((tInput){.fire = 1}, 1);
+	CHECK(g.events & EV_BOMB);
+}
+
+static void testBombStanceTimesOut(void) {
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.dy = 1}, BOMB_ARM_FRAMES);
+	step((tInput){.dy = 1, .fire = 1}, 1);
+	step(NONE, TURN_STEP_FRAMES + 1);
+	g.chop.y = 120; g.chop.vy = 0;
+	step((tInput){.fire = 1}, 1);
+	step(NONE, 20);
+	CHECK(g.chop.faceTarget == FACE_FRONT);   // still bombing 20 frames after the last bomb
+	step(NONE, BOMB_STANCE_FRAMES);
+	CHECK(g.chop.faceTarget == FACE_LEFT);    // back to the cannon on its own
+	// a stance made with the second button stays
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, BOMB_STANCE_FRAMES * 3);
+	CHECK(g.chop.faceTarget == FACE_FRONT && g.chop.face == FACE_FRONT);
+}
+
+static int rankOf(uint8_t ubFrame, const uint8_t *pOrder, int count) {
+	for(int i = 0; i < count; ++i) if(pOrder[i] == ubFrame) return i;
+	return -1;
+}
+
+// Left side through the front to the right side by pushing the stick (and the mirror): the poses in order,
+// none skipped, each held long enough to be seen, the progress never going back
+static void testTurnShowsLeanFramesInOrder(void) {
+	for(int dir = 0; dir < 2; ++dir) {
+		newGame();
+		flyAt(2000, 120);
+		uint8_t o[5];
+		if(dir == 0) {
+			const uint8_t a[5] = {CHOP_SIDE0 | CHOP_LEFT, CHOP_TURN | CHOP_LEFT, CHOP_LEAN2, CHOP_TURN, CHOP_SIDE0};
+			memcpy(o, a, 5);
+		}
+		else {
+			const uint8_t a[5] = {CHOP_SIDE0, CHOP_TURN, CHOP_LEAN2 | CHOP_LEFT, CHOP_TURN | CHOP_LEFT, CHOP_SIDE0 | CHOP_LEFT};
+			memcpy(o, a, 5);
+			g.chop.face = g.chop.faceTarget = g.chop.lastSide = FACE_RIGHT;
+		}
+		tInput push = {.dx = dir == 0 ? 1 : -1};
+		int dwell[5] = {0}, prev = 0, jump = 0, total = 0, other = 0;
+		for(int i = 0; i < 80 && prev < 4; ++i) {
+			logicUpdate(&g, &push);
+			g.chop.y = 120; g.chop.vy = 0;
+			g.chop.vx = 0;      // (a pure turn: no lean from the speed)
+			int r = rankOf(logicChopperFrame(&g), o, 5);
+			if(r < 0) { ++other; continue; }
+			if(r < prev) CHECK(!"the turn went backwards");
+			if(r - prev > jump) jump = r - prev;
+			prev = r;
+			++dwell[r];
+			++total;
+		}
+		CHECK(prev == 4);                   // reached the far side
+		CHECK(other == 0);                  // no other pose slipped in
+		CHECK(jump <= 1);                   // no pose skipped
+		CHECK(dwell[1] == TURN_STEP_FRAMES && dwell[3] >= TURN_STEP_FRAMES - 1);
+		CHECK(dwell[2] >= LEAN_FRAMES - 1); // the lean is held, not a flash
+		for(int r = 1; r <= 3; ++r) CHECK(dwell[r] >= 4);   // no snaps
+		CHECK(total <= TURN_HOLD_FRAMES + 2 * TURN_STEP_FRAMES + LEAN_FRAMES + dwell[0] + 1);
+	}
+}
+
+// The turn the other way leans the other way
+static void testLeanFollowsTheTurn(void) {
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, TURN_STEP_FRAMES);
+	CHECK(g.chop.face == FACE_FRONT);
+	CHECK(logicChopperFrame(&g) == CHOP_LEAN2);               // from the left side: leans right
+	step((tInput){.fire2 = 1}, 1);                            // on to the right...
+	step(NONE, LEAN_FRAMES + TURN_STEP_FRAMES + 2);
+	CHECK(g.chop.face == FACE_RIGHT);
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, TURN_STEP_FRAMES);
+	CHECK(g.chop.face == FACE_FRONT);
+	CHECK(logicChopperFrame(&g) == (CHOP_LEAN2 | CHOP_LEFT)); // from the right side: leans left
+}
+
+// Hovering front-facing sways: front, a slight lean, front, the slight lean the other way; never a jump
+static void testFrontHoverSways(void) {
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, LEAN_FRAMES + TURN_STEP_FRAMES + 2);
+	int sawFront = 0, sawR = 0, sawL = 0, bad = 0;
+	uint8_t last = logicChopperFrame(&g);
+	for(int i = 0; i < SWAY_PHASE * 8; ++i) {
+		step(NONE, 1);
+		g.chop.y = 120; g.chop.vy = 0;
+		uint8_t fr = logicChopperFrame(&g);
+		if(fr == CHOP_FRONT) ++sawFront;
+		else if(fr == CHOP_LEAN1) ++sawR;
+		else if(fr == (CHOP_LEAN1 | CHOP_LEFT)) ++sawL;
+		else ++bad;
+		// a lean never jumps to the other lean: it passes the front pose
+		if((last == CHOP_LEAN1 && fr == (CHOP_LEAN1 | CHOP_LEFT)) ||
+			(last == (CHOP_LEAN1 | CHOP_LEFT) && fr == CHOP_LEAN1)) ++bad;
+		last = fr;
+	}
+	CHECK(sawFront > 0 && sawR > 0 && sawL > 0 && bad == 0);
+	CHECK(sawFront >= SWAY_PHASE * 3);   // gentle: mostly the front pose
+}
+
+// A sidestep leans into the move
+static void testSidestepLeansIntoTheMove(void) {
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, LEAN_FRAMES + TURN_STEP_FRAMES + 2);
+	step((tInput){.dx = 1}, 12);
+	g.chop.y = 120; g.chop.vy = 0;
+	CHECK(g.chop.face == FACE_FRONT);
+	uint8_t fr = logicChopperFrame(&g);
+	CHECK(fr == CHOP_LEAN2 || fr == CHOP_LEAN1);        // right
+	step((tInput){.dx = -1}, 14);
+	g.chop.y = 120; g.chop.vy = 0;
+	fr = logicChopperFrame(&g);
+	CHECK((fr & CHOP_LEFT) && ((fr & 0x7F) == CHOP_LEAN2 || (fr & 0x7F) == CHOP_LEAN1));   // left
 }
 
 static void testFire2Cycles(void) {
@@ -283,20 +510,26 @@ static void testFire2Cycles(void) {
 	step(NONE, TURN_STEP_FRAMES);
 	CHECK(g.chop.face == FACE_FRONT);
 	step((tInput){.fire2 = 1}, 1);
-	step(NONE, TURN_STEP_FRAMES);
+	step(NONE, LEAN_FRAMES + TURN_STEP_FRAMES + 1);
 	CHECK(g.chop.face == FACE_RIGHT);   // on through to the other side
 	step((tInput){.fire2 = 1}, 1);
-	step(NONE, TURN_STEP_FRAMES);
+	step(NONE, TURN_STEP_FRAMES + 1);
 	CHECK(g.chop.face == FACE_FRONT);
 	step((tInput){.fire2 = 1}, 1);
-	step(NONE, TURN_STEP_FRAMES);
+	step(NONE, LEAN_FRAMES + TURN_STEP_FRAMES + 1);
 	CHECK(g.chop.face == FACE_LEFT);
+}
+
+// the deliberate way to the bombs: the stick down BOMB_ARM_FRAMES with no fire, then fire
+static void armBombStance(void) {
+	step((tInput){.dy = 1}, BOMB_ARM_FRAMES);
+	step((tInput){.dy = 1, .fire = 1}, 1);
 }
 
 static void testDownFireFacesFrontThenBombs(void) {
 	newGame();
 	flyAt(2000, 120);
-	step((tInput){.dy = 1, .fire = 1}, 1);
+	armBombStance();
 	CHECK(g.chop.faceTarget == FACE_FRONT);
 	CHECK(!g.pShots[0].active);           // the press turned, it didn't shoot
 	step(NONE, TURN_STEP_FRAMES + 1);
@@ -1025,7 +1258,7 @@ static void testHarderTanksFireSooner(void) {
 static void testHeadOnStrafeIsSnappy(void) {
 	newGame();
 	flyAt(2000, 120);
-	step((tInput){.dy = 1, .fire = 1}, 1);
+	armBombStance();
 	step(NONE, TURN_STEP_FRAMES + 1);
 	CHECK(g.chop.face == FACE_FRONT);
 	g.chop.y = 120; g.chop.vy = 0;
@@ -1773,6 +2006,14 @@ int main(void) {
 	testTurnThroughFront();
 	testFrontNeedsLongPush();
 	testFire2Cycles();
+	testVolleysNeverBomb();
+	testTapsWithoutTheStickNeverBomb();
+	testDeliberateBomb();
+	testBombStanceTimesOut();
+	testTurnShowsLeanFramesInOrder();
+	testLeanFollowsTheTurn();
+	testFrontHoverSways();
+	testSidestepLeansIntoTheMove();
 	testDownFireFacesFrontThenBombs();
 	testCannonFiresForwardAndRepeats();
 	testCannonOpensBarracks();
