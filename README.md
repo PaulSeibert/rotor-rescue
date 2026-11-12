@@ -221,9 +221,13 @@ agk record demo/showcase.agk -o build/demo.mp4 --readme --gif demo/rotor-rescue.
 cp build/demo.mp4 demo/rotor-rescue.mp4
 ```
 
-All the art is made by scripts and all the music samples by
-`sound/tools/make_samples.py`, so every asset can be regenerated from
-source. `art/tools/draw.py` draws the game's graphics, and
+The sprites and parallax bands are text art in `art/*.txt` (the Desert Palms
+art pilot's approved set; `art/tools/draw.py` is the old drawing code, kept for
+reference, and only writes the palettes), and all the music samples are made by
+`sound/tools/make_samples.py`. `art/tools/make_mountain_caps.py` points every
+summit of `art/mountains.txt` (nothing touches the band's top edge) and
+`art/tools/make_title_mtn.py` cuts the title's mountain strip from it, fading
+into the haze at its foot. Also
 `art/tools/make_dps_logo.py` converts the Desert Palms Software logo
 (`art/src/desert_palms_logo_source.png`) into `disk/dpslogo.bin`, and
 `art/tools/make_title_logo.py` the title logo
