@@ -52,6 +52,7 @@
 enum {
 	BOB_HANGAR, BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_HOSTAGE, BOB_JET,
 	BOB_MINE, BOB_SHOT, BOB_BOMB, BOB_SHELL, BOB_BOOM, BOB_FLAG, BOB_SHADOW,
+	BOB_SMOKE,
 	BOB_TYPES
 };
 // The chopper's shadow on the track: frame = size * 2 + dither phase (x & 1),
@@ -66,6 +67,7 @@ enum { TANK_L0, TANK_L1, TANK_R0, TANK_R1, TANK_FIRE_L, TANK_FIRE_R,
 	TANK_AIM_L, TANK_AIM_R, TANK_FLASH_L, TANK_FLASH_R };   // the tell: barrel up, a blinking flash
 enum { MAN_STAND, MAN_RUN0, MAN_RUN1, MAN_WAVE0, MAN_WAVE1, MAN_DEAD,
 	MAN_RUNL0, MAN_RUNL1 };
+enum { SMOKE_SMALL, SMOKE_BIG, SMOKE_THIN };   // a puff's life, in thirds
 enum { JET_L, JET_R, JET_FLASH_L, JET_FLASH_R };   // the tell: nose and engine glowing
 
 // The chopper's sprite poses (art/chopper.txt), right-facing. Art frame =
@@ -95,6 +97,8 @@ typedef struct {
 	uint8_t landed;
 	uint8_t alive;
 	uint8_t crashTimer;  // falling / burning
+	uint8_t damaged;     // the first hit: smoke, slower, until the home pad mends it
+	uint8_t invuln;      // frames left in which nothing hurts it (and it blinks)
 	uint8_t fireTimer;   // auto-fire
 	uint8_t prevFire, prevFire2;
 } tChopper;
@@ -154,6 +158,14 @@ typedef struct {
 	int16_t x, y;        // centre
 	uint8_t active, frame, timer;
 } tBoom;
+
+// The damaged chopper's smoke trail: puffs that rise and thin out
+#define SMOKE_MAX 8
+#define SMOKE_LIFE 24        // frames
+typedef struct {
+	int16_t x, y;        // centre
+	uint8_t active, age;
+} tSmoke;
 
 enum { GS_TITLE, GS_INTRO, GS_PLAY, GS_LOST, GS_CLEAR, GS_OVER, GS_VICTORY,
 	GS_SCORES,   // the hall of fame: in the attract loop, or after a new entry
@@ -220,6 +232,8 @@ typedef struct {
 	tShot pShots[SHOT_MAX];
 	tShot pEShots[ESHOT_MAX];
 	tBoom pBooms[BOOM_MAX];
+	tSmoke pSmoke[SMOKE_MAX];
+	uint8_t smokeTimer;  // frames to the next puff
 	// events of the latest frame (sound, serial): bit flags
 	uint16_t events;
 	uint8_t events2;     // more event bits (EV2_*)
@@ -280,6 +294,15 @@ typedef struct {
 #define HOSTAGE_CALL_RANGE 112  // landed chopper calls people this close
 #define UNLOAD_FRAMES 10
 #define CRASH_FRAMES 70
+// Damage (the hero device): the first hit costs smoke and a fifth of the speed,
+// then INVULN_FRAMES (2 s) of blinking in which nothing hurts; a second hit while
+// damaged destroys the chopper; landing on the pad mends it
+#define INVULN_FRAMES 100
+#define BLINK_FRAMES 4       // visible for this many frames, hidden for this many
+#define DMG_VX_MAX 38        // 2.4 px/frame (VX_MAX 48 less 20 %)
+#define DMG_HO_VX_MAX 32     // (HO_VX_MAX 40)
+#define DMG_VY_UP_MAX 22     // (VY_UP_MAX 28)
+#define DMG_VY_DOWN_MAX 26   // (VY_DOWN_MAX 32)
 #define INTRO_FRAMES 120
 #define LOST_FRAMES 150
 #define CLEAR_FRAMES 250

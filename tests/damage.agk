@@ -1,0 +1,33 @@
+# The first hit damages the chopper instead of destroying it: smoke, slower,
+# everyone aboard kept, the HUD's right slot reads DAMAGED, 2 s of blinking
+# invulnerability; landing on the home pad repairs it. (Rules: tests/unit
+# testFirstHitDamages, testSecondHitDestroys, testPadRepairs; tests/shotdown.agk
+# shows the second hit.)
+start-at boarding
+wait-serial "chopper damaged"
+wait 12
+screenshot damaged
+# the red tail-light of the chopper (sprite colour 0xD22) is drawn ...
+expect-color damaged 214 229 0xD22
+# ... the HUD's right slot says DAMAGED (the D's top row, white 0xFFF) ...
+expect-color damaged 265 14 0xFFF
+wait 4
+screenshot blinking
+# ... and 4 frames later the blink has hidden it: the ground (0x742) shows
+expect-color blinking 214 229 0x742
+expect-no-serial "chopper lost"
+wait 70
+# invulnerable for 100 frames: no shell destroys it in that time
+expect-no-serial "chopper lost"
+# take off and fly home damaged (slower), land on the pad: mended
+press up 30
+press right 220
+wait 60
+press down 70
+wait-serial "chopper repaired"
+wait 10
+screenshot repaired
+# the skill reads again (the S's top row has a pixel at 269, the D's did not)
+expect-color repaired 269 14 0xFFF
+expect-no-serial "chopper lost"
+expect-no-serial "AGK ERR"

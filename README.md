@@ -100,8 +100,14 @@ the right of the score bar and stays until you change it.
   moment (16 frames on Normal) before the shell leaves: that's your cue.
 - Jets join in after your first trip home, and air mines after the second. You hear a jet
   and see it on the radar before it's on screen, mostly coming from ahead, and it holds
-  its fire for a moment after it appears.
-- One hit and the chopper goes down with everyone aboard.
+  its fire for a moment after it appears. A jet that is about to fire glows at the nose and
+  exhaust (16 frames on Normal) and only ever fires while it is wholly on screen.
+- The first hit **damages** the chopper: it smokes, flies about a fifth slower, the HUD says
+  DAMAGED and it blinks for two seconds in which nothing can hurt it. Everyone aboard is kept.
+  Land on the base pad and it is repaired. A second hit while damaged brings it down with
+  everyone aboard.
+- Only the first 10 tanks you destroy in a mission score (50 each; the HUD says QUOTA 10 when
+  you reach it). Later tanks still shoot.
 - A mission ends when all 64 are saved or lost. The game ends when the last
   chopper is gone, and you get a rank for everyone you saved.
 - Each mission opens with a card: which of the three it is, a map of the

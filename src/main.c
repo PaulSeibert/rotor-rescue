@@ -819,6 +819,7 @@ static void bobsCreate(void) {
 	bobAdd(BOB_BOOM, artBoomCreate(), artBoomCreateMask(), ART_BOOM_W, ART_BOOM_H, ART_BOOM_FRAMES);
 	bobAdd(BOB_FLAG, artFlagCreate(), artFlagCreateMask(), ART_FLAG_W, ART_FLAG_H, ART_FLAG_FRAMES);
 	bobAdd(BOB_SHADOW, artShadowCreate(), artShadowCreateMask(), ART_SHADOW_W, ART_SHADOW_H, ART_SHADOW_FRAMES);
+	bobAdd(BOB_SMOKE, artSmokeCreate(), artSmokeCreateMask(), ART_SMOKE_W, ART_SMOKE_H, ART_SMOKE_FRAMES);
 	UBYTE t = 0;
 	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
 		s_pTplFirst[b] = t;
@@ -987,12 +988,14 @@ __attribute__((noinline, noclone)) static void hudUpdate(UBYTE ubBfr) {
 		szLine[5] = (char)('0' + g->lives);
 		agkTextSet(&s_pHudText2[ubBfr], g->quotaMsg ? "QUOTA 10" : szLine);
 	}
-	UBYTE ubSkill = (UBYTE)(g->difficulty | (g->demo << 4));
+	// the right slot: the skill; DAMAGED while the chopper is damaged (until the pad mends it)
+	UBYTE isDamaged = g->chop.damaged && g->chop.alive && !g->demo;
+	UBYTE ubSkill = (UBYTE)(g->difficulty | (g->demo << 4) | (isDamaged << 5));
 	if(ubSkill != pSkill[ubBfr]) {
 		pSkill[ubBfr] = ubSkill;
 		char szSkill[] = "SKILL 3";
 		szSkill[6] = (char)('0' + g->difficulty);
-		agkTextSet(&s_pHudSkill[ubBfr], g->demo ? "   DEMO" :
+		agkTextSet(&s_pHudSkill[ubBfr], g->demo ? "   DEMO" : isDamaged ? "DAMAGED" :
 			g->difficulty == DIFFICULTY_INVINCIBLE ? "GODMODE" : szSkill);
 	}
 }
@@ -1970,6 +1973,8 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	if(g->events & EV_TANKTELL) agkPrint("AGK tank tell\n");
 	if(g->events2 & EV2_JETTELL) agkPrint("AGK jet tell\n");
 	if(g->events2 & EV2_JETFIRE) agkPrint("AGK jet fire\n");
+	if(g->events2 & EV2_DAMAGE) agkPrint("AGK chopper damaged\n");
+	if(g->events2 & EV2_REPAIR) agkPrint("AGK chopper repaired\n");
 	if(s_ubScrollTrace) {
 		// the mountains' and hills' fine scroll as written to the copper: the
 		// quarter pixels (BPLCON1 bits 13-12, AGA; always 0 on OCS)

@@ -181,7 +181,7 @@ do not call the pacing "tuned".
 | enemy | HP | movement | fire / threat | tell | score |
 |---|---|---|---|---|---|
 | tank | 2 (cannon 1 each; a bomb within 22 px kills) | spawns off screen (cam -40 or +screen +40), drives at the chopper 0.5 px/frame, stays between x 16 and 2536 | a shell when the chopper is low (skids y > 150) and within 200 px: aimed with the chopper's half velocity, error +- (mask+1)/2 px, 1.5 px/frame (24/16, was 2-4), life 140 frames; first shell 150 frames after spawning | stops, barrel up, flash blinks every 4 frames, 12-22 frames by skill (16 normal) | 50 |
-| jet | 1 (cannon only) | from 130-255 px off screen (lead by skill), mostly ahead of where you fly (3 of 4), 4 px/frame, follows your height at 0.5 px/frame | a missile (2.5 px/frame, was 5; life 80 frames; the repeat is 35 frames, was 50) only if the jet is **fully on screen**, on screen 18-40 frames (by skill; 24 on normal), you are airborne, 56-200 px ahead and within 14 px of its height; a bomb if you are landed within 24 px (also fully on screen); a ram hurts you | heard (a sound on spawn), on the radar, then a **flash** (the jet's nose and engine glow, blinking) for the tell, 12-22 frames by skill (16 on normal, the tank's table), part of the on-screen delay, so the first shot comes as late as before. Aborted (no missile) if at the end of the tell the jet is not fully on screen, you are landed or climbed out of its height, or you are closer than 56 px | 100 |
+| jet | 1 (cannon only) | from 130-255 px off screen (lead by skill), mostly ahead of where you fly (3 of 4), 4 px/frame, follows your height at 0.5 px/frame | a missile (2.5 px/frame, was 5; life 80 frames; the gap between missiles is 40 frames with the tell inside it, was 50) only if the jet is **fully on screen**, on screen 18-40 frames (by skill; 24 on normal), you are airborne, 56-200 px ahead and within 14 px of its height; a bomb if you are landed within 24 px (also fully on screen); a ram hurts you | heard (a sound on spawn), on the radar, then a **flash** (the jet's nose and engine glow, blinking) for the tell, 12-22 frames by skill (16 on normal, the tank's table), part of the on-screen delay, so the first shot comes as late as before. Aborted (no missile) if at the end of the tell the jet is not fully on screen, you are landed or climbed out of its height, or you are closer than 56 px | 100 |
 | air mine | 1 (cannon only) | spawns off screen at y 54-117, homes at 0.5 px/frame in x and 0.25 in y when within 300 px, never below y 200 | contact | none (it is visible and slow) | 75 |
 | barracks | 2 (cannon 1 each; a bomb within 30 px does 2) | static; releases 1 person per 8 frames after a 20-frame delay | none; roofs stop bombs and the chopper | burning frames | 25 |
 
@@ -191,13 +191,13 @@ do not call the pacing "tuned".
 - **Shell and missile speed** (decided by Paul, 2026-11-11): shells 1.5 px/frame on the larger axis (a slanted shot up to
   2.1 on the diagonal; was 2-4), the jet missile 2.5 px/frame (was 5). The playbook asks 1-1.5.
   Because slower shots are easier to dodge, the difficulty is paid back in fire timing, not speed:
-  the tank's base shell gap is 85 frames (was 110) and the jet's repeat 35 (was 50). **Not
+  the tank's base shell gap is 85 frames (was 110) and the jet's gap between missiles 40 including its tell (was 50). **Not
   measured** with a person; a tuning ticket if it plays too hard or too soft.
 - **No fire from off screen, no point-blank:** a tank fires only inside 200 px and low; a jet fires
   only while fully on screen (`jetFullyOnScreen`, its 32 px box inside the screen, at the start
-  and at the end of its tell; unit-tested, `testJetNeverFiresOffScreen`), 18-40 on-screen frames
+  and at the end of its tell, with 4 px a frame allowed for in the missile's room; unit-tested, `testJetNeverFiresOffScreen`), 18-40 on-screen frames
   in, with 56 px of room. (Before, "ahead < 200 px" could place a jet up to ~40 px beyond the screen
-  edge once it had been seen, `logic.c:1154` at 17ece43.)
+  edge once it had been seen, `logic.c:1107` at 17ece43.)
 - **Sight no longer than weapon range:** tanks drive at the chopper from any distance but shoot
   only inside 200 px; mines see 300 px and have no weapon.
 - **Path scripts:** none. Movement is per-unit code in `logic.c` (no `wavescript`).
@@ -432,7 +432,7 @@ writable disk.)
 | boot time from a real floppy | fire-to-play measured with a stopwatch on a real A500 or WinUAE at floppy speed | Paul | **not measured** |
 | damage and its blink (decided by Paul, 2026-11-11) | WinUAE, play: take one hit and see the smoke, the slower flight, DAMAGED in the HUD and 2 s of blinking; take a second hit during the blink (nothing happens) and after it (the chopper is lost); land on the pad and see it repaired | Paul | unproven by a person (scenarios check state, the first picture and the HUD pixels) |
 | the jet's tell | WinUAE, play at normal: the nose-and-engine flash is noticed before the missile; the missile never comes from beyond the screen edge | Paul | unproven by a person |
-| shell and missile speeds | WinUAE, play: shells (1.5 px/frame) and missiles (2.5) read as dodgeable but still threatening; the tank gap 85 and jet repeat 35 keep the game hard enough | Paul | unproven; the compensation is a guess |
+| shell and missile speeds | WinUAE, play: shells (1.5 px/frame) and missiles (2.5) read as dodgeable but still threatening; the tank gap 85 and the jet gap 40 keep the game hard enough | Paul | unproven; the compensation is a guess |
 | the tank quota | WinUAE, GODMODE 5 or normal: after 10 kills in a mission QUOTA 10 shows on the HUD and further tanks score nothing | Paul | scenario-tested in vAmiga only |
 | the approved new art (landed 567e6c5) | the scrolled bands show no seam at 1x on a real display; the palette reads on all three missions | Paul after the art merge | pending: Paul on WinUAE/real display |
 

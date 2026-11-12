@@ -15,19 +15,19 @@ const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_HANGAR] = 64, [BOB_FENCE] = 16, [BOB_BARRACKS] = 48, [BOB_TANK] = 32,
 	[BOB_HOSTAGE] = 16, [BOB_JET] = 32, [BOB_MINE] = 16, [BOB_SHOT] = 16,
 	[BOB_BOMB] = 16, [BOB_SHELL] = 16, [BOB_BOOM] = 32, [BOB_FLAG] = 16,
-	[BOB_SHADOW] = 32,
+	[BOB_SHADOW] = 32, [BOB_SMOKE] = 16,
 };
 const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_HANGAR] = 40, [BOB_FENCE] = 32, [BOB_BARRACKS] = 28, [BOB_TANK] = 14,
 	[BOB_HOSTAGE] = 12, [BOB_JET] = 12, [BOB_MINE] = 12, [BOB_SHOT] = 3,
 	[BOB_BOMB] = 6, [BOB_SHELL] = 4, [BOB_BOOM] = 32, [BOB_FLAG] = 24,
-	[BOB_SHADOW] = 4,
+	[BOB_SHADOW] = 4, [BOB_SMOKE] = 8,
 };
 const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_HANGAR] = 1, [BOB_FENCE] = 1, [BOB_BARRACKS] = 4, [BOB_TANK] = 10,
 	[BOB_HOSTAGE] = 8, [BOB_JET] = 4, [BOB_MINE] = 2, [BOB_SHOT] = 1,
 	[BOB_BOMB] = 1, [BOB_SHELL] = 1, [BOB_BOOM] = 5, [BOB_FLAG] = 2,
-	[BOB_SHADOW] = SHADOW_SIZES * 2,
+	[BOB_SHADOW] = SHADOW_SIZES * 2, [BOB_SMOKE] = 3,
 };
 
 // Barracks positions (centres), far to near
@@ -420,6 +420,7 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->trip = 0;
 	g->tankKills = 0;
 	g->quotaMsg = 0;
+	for(uint8_t i = 0; i < SMOKE_MAX; ++i) g->pSmoke[i].active = 0;
 	g->aboard = 0;
 	g->saved = 0;
 	g->killed = 0;
@@ -668,6 +669,14 @@ __attribute__((noinline)) static void barracksUpdate(tGame *g) {
 
 // ---------------------------------------------------------------- chopper ---
 
+// Whether a shot, a mine or a ram can hurt the chopper now: not in the two
+// seconds after its first hit (they pass through it)
+static inline uint8_t chopperHurtable(const tChopper *c) {
+	return c->alive && !c->invuln;
+}
+
+// A hit on the chopper. The first one only damages it (smoke, slower, everyone
+// kept) and gives INVULN_FRAMES of grace; a hit while damaged destroys it.
 static void chopperDestroy(tGame *g) {
 	tChopper *c = &g->chop;
 	if(!c->alive) return;
@@ -675,6 +684,13 @@ static void chopperDestroy(tGame *g) {
 		// it would have been: show the hit, carry on
 		boomAt(g, c->x, (int16_t)(c->y - 8));
 		g->events |= EV_SHRUG;
+		return;
+	}
+	if(!c->damaged) {
+		c->damaged = 1;
+		c->invuln = INVULN_FRAMES;
+		boomAt(g, c->x, (int16_t)(c->y - 8));
+		g->events2 |= EV2_DAMAGE;
 		return;
 	}
 	c->alive = 0;
@@ -752,6 +768,12 @@ static void turnTo(tChopper *c, uint8_t ubFace) {
 
 void logicChopperUpdate(tGame *g, const tInput *pIn) {
 	tChopper *c = &g->chop;
+	if(c->invuln) --c->invuln;
+	// a damaged chopper is about 20 % slower
+	int16_t wVxMax = c->damaged ? DMG_VX_MAX : VX_MAX;
+	int16_t wHoMax = c->damaged ? DMG_HO_VX_MAX : HO_VX_MAX;
+	int16_t wUpMax = c->damaged ? DMG_VY_UP_MAX : VY_UP_MAX;
+	int16_t wDownMax = c->damaged ? DMG_VY_DOWN_MAX : VY_DOWN_MAX;
 	uint8_t isFireEdge = pIn->fire && !c->prevFire;
 	uint8_t isFire2Edge = pIn->fire2 && !c->prevFire2;
 	c->prevFire = pIn->fire;
@@ -810,7 +832,7 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 		if(c->face == FACE_FRONT && !isTurning) {
 			// head-on: a sidestep - quick to go, quicker to turn round, quick to stop
 			if(pIn->dx) {
-				int16_t wWant = (int16_t)(pIn->dx * HO_VX_MAX);
+				int16_t wWant = (int16_t)(pIn->dx * wHoMax);
 				uint8_t isAgainst = (c->vx > 0 && pIn->dx < 0) || (c->vx < 0 && pIn->dx > 0);
 				int16_t wStep = isAgainst ? HO_REVERSE : HO_ACCEL;
 				if(c->vx < wWant) c->vx = (int16_t)(c->vx + wStep > wWant ? wWant : c->vx + wStep);
@@ -823,13 +845,13 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 		else if(pIn->dx < 0) c->vx = (int16_t)(c->vx - VX_ACCEL);
 		else if(c->vx > 0) c->vx = (int16_t)(c->vx - VX_DRAG);
 		else if(c->vx < 0) c->vx = (int16_t)(c->vx + VX_DRAG);
-		c->vx = clampw(c->vx, -VX_MAX, VX_MAX);
+		c->vx = clampw(c->vx, -wVxMax, wVxMax);
 		if(pIn->dy < 0) c->vy = (int16_t)(c->vy - VY_ACCEL);
 		else if(pIn->dy > 0) c->vy = (int16_t)(c->vy + VY_ACCEL);
 		else if(c->vy > 1) c->vy = (int16_t)(c->vy - 2);
 		else if(c->vy < -1) c->vy = (int16_t)(c->vy + 2);
 		else c->vy = 0;
-		c->vy = clampw(c->vy, -VY_UP_MAX, VY_DOWN_MAX);
+		c->vy = clampw(c->vy, -wUpMax, wDownMax);
 	}
 	subStep(&c->x, c->vx, &c->fx);
 	subStep(&c->y, c->vy, &c->fy);
@@ -886,6 +908,11 @@ static void chopperWreckUpdate(tGame *g) {
 
 static void unloadUpdate(tGame *g) {
 	tChopper *c = &g->chop;
+	// landing on the home pad mends a damaged chopper
+	if(c->alive && c->landed && c->damaged && c->x >= BASE_PAD_X0 && c->x <= BASE_PAD_X1) {
+		c->damaged = 0;
+		g->events2 |= EV2_REPAIR;
+	}
 	if(!c->alive || !c->landed || c->x < BASE_PAD_X0 || c->x > BASE_PAD_X1 || !g->aboard) return;
 	if(--g->unloadTimer > 0) return;
 	g->unloadTimer = UNLOAD_FRAMES;
@@ -1023,7 +1050,7 @@ __attribute__((noinline)) static void eshotsUpdate(tGame *g) {
 		if(s->kind == ESHOT_BOMB) s->vy = (int16_t)(s->vy + 2);
 		subStep(&s->x, s->vx, &s->fx);
 		subStep(&s->y, s->vy, &s->fy);
-		if(c->alive && boxHit((int16_t)(s->x - 2), (int16_t)(s->y - 2), 4, 4,
+		if(chopperHurtable(c) && boxHit((int16_t)(s->x - 2), (int16_t)(s->y - 2), 4, 4,
 			(int16_t)(c->x - 13), (int16_t)(c->y - 13), 26, 13)) {
 			s->active = 0;
 			chopperDestroy(g);
@@ -1206,7 +1233,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 				g->events2 |= EV2_JETTELL;
 			}
 		}
-		if(c->alive && boxHit((int16_t)(j->x - 14), (int16_t)(j->y - 5), 28, 10,
+		if(chopperHurtable(c) && boxHit((int16_t)(j->x - 14), (int16_t)(j->y - 5), 28, 10,
 			(int16_t)(c->x - 13), (int16_t)(c->y - 13), 26, 13)) {
 			j->active = 0;
 			boomAt(g, j->x, j->y);
@@ -1235,7 +1262,7 @@ __attribute__((noinline)) static void minesUpdate(tGame *g) {
 			}
 		}
 		if(m->y > FEET_Y - 40) m->y = FEET_Y - 40;
-		if(c->alive && boxHit((int16_t)(m->x - 6), (int16_t)(m->y - 6), 12, 12,
+		if(chopperHurtable(c) && boxHit((int16_t)(m->x - 6), (int16_t)(m->y - 6), 12, 12,
 			(int16_t)(c->x - 13), (int16_t)(c->y - 13), 26, 13)) {
 			m->active = 0;
 			boomAt(g, m->x, m->y);
@@ -1380,7 +1407,37 @@ void logicCameraUpdate(tGame *g) {
 
 // -------------------------------------------------------------- update ---
 
+// The damaged chopper's trail: a puff every 3 frames in the air (6 on the
+// ground) from its tail; each rises a pixel every other frame and fades
+static void smokeUpdate(tGame *g) {
+	const tChopper *c = &g->chop;
+	if(c->alive && c->damaged) {
+		if(g->smokeTimer) --g->smokeTimer;
+		else {
+			g->smokeTimer = c->landed ? 6 : 3;
+			tSmoke *pFree = 0;
+			for(uint8_t i = 0; i < SMOKE_MAX; ++i) {
+				if(!g->pSmoke[i].active) { pFree = &g->pSmoke[i]; break; }
+			}
+			if(pFree) {
+				pFree->active = 1;
+				pFree->age = 0;
+				pFree->x = (int16_t)(c->x + (c->face == FACE_LEFT ? 12 : c->face == FACE_RIGHT ? -12 : 0));
+				pFree->y = (int16_t)(c->y - 12);
+			}
+		}
+	}
+	for(uint8_t i = 0; i < SMOKE_MAX; ++i) {
+		tSmoke *p = &g->pSmoke[i];
+		if(!p->active) continue;
+		++p->age;
+		if(p->age & 1) --p->y;
+		if(p->age >= SMOKE_LIFE) p->active = 0;
+	}
+}
+
 static void worldUpdate(tGame *g) {
+	smokeUpdate(g);
 	if(g->quotaMsg) --g->quotaMsg;
 	barracksUpdate(g);
 	hostagesUpdate(g);
@@ -1526,8 +1583,10 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 // --------------------------------------------------------------- drawing ---
 
 uint8_t logicChopperVisible(const tGame *g) {
+	// (after a first hit it blinks: BLINK_FRAMES (4) shown, 4 hidden)
 	return !logicIsMenu(g) && g->state != GS_ENTRY &&
-		!(g->state == GS_LOST && !g->chop.alive && g->chop.crashTimer == 0);
+		!(g->state == GS_LOST && !g->chop.alive && g->chop.crashTimer == 0) &&
+		!(g->chop.invuln & BLINK_FRAMES);
 }
 
 uint8_t logicChopperFrame(const tGame *g) {
@@ -1614,6 +1673,11 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 	for(uint8_t i = 0; i < MINE_MAX; ++i) {
 		const tMine *m = &g->pMines[i];
 		if(m->active) n = drawAdd(pOut, n, (int16_t)(m->x - 8 - cam), (int16_t)(m->y - 6), BOB_MINE, (uint8_t)((m->anim >> 3) & 1));
+	}
+	for(uint8_t i = 0; i < SMOKE_MAX; ++i) {
+		const tSmoke *p = &g->pSmoke[i];
+		if(p->active) n = drawAdd(pOut, n, (int16_t)(p->x - 8 - cam), (int16_t)(p->y - 4), BOB_SMOKE,
+			p->age >= 16 ? SMOKE_THIN : p->age >= 8 ? SMOKE_BIG : SMOKE_SMALL);
 	}
 	for(uint8_t i = 0; i < SHOT_MAX; ++i) {
 		const tShot *s = &g->pShots[i];

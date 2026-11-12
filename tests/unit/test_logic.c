@@ -426,6 +426,7 @@ static void testShotDownLosesPassengers(void) {
 	for(int i = 0; i < 7; ++i) g.pHostages[i].state = HS_ABOARD;
 	g.aboard = 7;
 	flyAt(1500, 150);
+	g.chop.damaged = 1;   // the second hit: the first only damages (testFirstHitDamages)
 	// an enemy shell right on the chopper
 	g.pEShots[0] = (tShot){.x = 1500, .y = 144, .vx = 0, .vy = 0, .active = 1, .kind = ESHOT_SHELL, .life = 50};
 	step(NONE, 1);
@@ -443,6 +444,7 @@ static void testGameOverAfterLastChopper(void) {
 	for(int life = 0; life < LIVES_START; ++life) {
 		g.spawnTimer = 60000;
 		flyAt(1500, 150);
+		g.chop.damaged = 1;
 		g.pEShots[0] = (tShot){.x = 1500, .y = 144, .active = 1, .kind = ESHOT_SHELL, .life = 50};
 		step(NONE, 1);
 		step(NONE, LOST_FRAMES + 1);
@@ -599,6 +601,7 @@ static void testCannonKillsJet(void) {
 static void testMineContactDestroysChopper(void) {
 	newGame();
 	flyAt(1500, 120);
+	g.chop.damaged = 1;
 	g.pMines[0] = (tMine){.x = 1500, .y = 112, .active = 1};
 	step(NONE, 1);
 	CHECK(!g.chop.alive);
@@ -651,6 +654,7 @@ static void testRespawnPan(void) {
 	g.spawnTimer = 60000;
 	step((tInput){.dy = -1}, 40);
 	step((tInput){.dx = -1}, 300);
+	g.chop.damaged = 1;
 	g.pMines[0] = (tMine){.x = g.chop.x, .y = (int16_t)(g.chop.y - 8), .active = 1};
 	int16_t wCam = g.cam, wStep = 0;
 	int reversals = 0, worstChange = 0, frames = 0;
@@ -1253,7 +1257,171 @@ static void testJetTellShowsFlash(void) {
 	for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_JET) CHECK(d[i].frame == JET_L);
 }
 
+// ---- damage instead of instant loss (decided by Paul, 2026-11-11) ----
+
+static void shellOnChopper(void) {
+	for(int i = 0; i < ESHOT_MAX; ++i) {
+		if(!g.pEShots[i].active) {
+			g.pEShots[i] = (tShot){.x = g.chop.x, .y = (int16_t)(g.chop.y - 6), .active = 1, .kind = ESHOT_SHELL, .life = 50};
+			return;
+		}
+	}
+}
+
+static void testFirstHitDamages(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	for(int i = 0; i < 7; ++i) g.pHostages[i].state = HS_ABOARD;
+	g.aboard = 7;
+	flyAt(1500, 150);
+	shellOnChopper();
+	step(NONE, 1);
+	CHECK(g.chop.alive && g.chop.damaged);
+	CHECK(g.state == GS_PLAY);
+	CHECK(g.aboard == 7 && g.killed == 0 && g.lives == LIVES_START);   // everyone is kept
+	CHECK(g.chop.invuln >= INVULN_FRAMES - 1);
+	CHECK(g.events2 & EV2_DAMAGE);
+	CHECK(!(g.events & EV_CRASH));
+}
+
+static void testDamagedFliesSlower(void) {
+	newGame();
+	flyAt(1000, 120);
+	step((tInput){.dx = 1}, 120);
+	int iHealthy = g.chop.vx;
+	CHECK(iHealthy == VX_MAX);
+	newGame();
+	flyAt(1000, 120);
+	g.chop.damaged = 1;
+	step((tInput){.dx = 1}, 120);
+	CHECK(g.chop.vx <= DMG_VX_MAX && g.chop.vx >= DMG_VX_MAX - 2);   // 38 of 48: about 20 % slower
+	CHECK(g.chop.vx * 100 / iHealthy >= 75 && g.chop.vx * 100 / iHealthy <= 85);
+	step((tInput){.dy = -1}, 60);
+	CHECK(g.chop.vy >= -DMG_VY_UP_MAX);
+	step((tInput){.dy = 1}, 60);
+	CHECK(g.chop.vy <= DMG_VY_DOWN_MAX);
+	// the sidestep too
+	newGame();
+	flyAt(1000, 120);
+	g.chop.damaged = 1;
+	g.chop.face = g.chop.faceTarget = FACE_FRONT;
+	step((tInput){.dx = 1}, 12);   // (a longer push turns it to face right)
+	CHECK(g.chop.vx == DMG_HO_VX_MAX && g.chop.face == FACE_FRONT);
+}
+
+static void testInvulnerableAfterHitAndBlinks(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	flyAt(1500, 150);
+	shellOnChopper();
+	step(NONE, 1);
+	CHECK(g.chop.damaged);
+	int iHidden = 0, iShown = 0;
+	for(int f = 0; f < INVULN_FRAMES - 2; ++f) {
+		// shells and mines pass through it
+		shellOnChopper();
+		g.pMines[0] = (tMine){.x = g.chop.x, .y = (int16_t)(g.chop.y - 6), .active = 1};
+		g.chop.x = 1500; g.chop.y = 150; g.chop.vx = g.chop.vy = 0;
+		step(NONE, 1);
+		CHECK(g.chop.alive);
+		if(logicChopperVisible(&g)) ++iShown; else ++iHidden;
+	}
+	CHECK(g.chop.alive && g.state == GS_PLAY && g.killed == 0);
+	CHECK(iShown >= 40 && iHidden >= 40);       // it blinks, half and half
+	// after the blink it's visible, and vulnerable again
+	for(int i = 0; i < ESHOT_MAX; ++i) g.pEShots[i].active = 0;
+	g.pMines[0].active = 0;
+	step(NONE, 5);
+	CHECK(g.chop.invuln == 0 && logicChopperVisible(&g));
+}
+
+static void testSecondHitDestroys(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	for(int i = 0; i < 7; ++i) g.pHostages[i].state = HS_ABOARD;
+	g.aboard = 7;
+	flyAt(1500, 150);
+	shellOnChopper();
+	step(NONE, 1);
+	CHECK(g.chop.damaged && g.chop.alive);
+	step(NONE, INVULN_FRAMES + 2);
+	CHECK(g.chop.alive && g.chop.damaged);
+	g.chop.x = 1500; g.chop.y = 150; g.chop.vx = g.chop.vy = 0;
+	shellOnChopper();
+	step(NONE, 1);
+	CHECK(!g.chop.alive);                       // the old loss rules
+	CHECK(g.killed == 7 && g.aboard == 0);
+	CHECK(g.lives == LIVES_START - 1);
+	CHECK(g.state == GS_LOST);
+	step(NONE, LOST_FRAMES + 1);
+	CHECK(g.state == GS_PLAY && g.chop.alive && !g.chop.damaged);   // a new chopper is whole
+}
+
+static void testPadRepairs(void) {
+	newGame();
+	g.spawnTimer = 60000;
+	flyAt(1500, 150);
+	g.chop.damaged = 1;
+	// landing away from the pad does not mend it
+	g.chop.y = GROUND_Y - 4;
+	step((tInput){.dy = 1}, 10);
+	CHECK(g.chop.landed && g.chop.damaged);
+	// landing on the pad does
+	flyAt(2860, 150);
+	g.chop.damaged = 1;
+	step((tInput){.dy = 1}, 60);
+	CHECK(g.chop.landed && g.chop.x >= BASE_PAD_X0 && g.chop.x <= BASE_PAD_X1);
+	CHECK(!g.chop.damaged);
+}
+
+static void testSmokeTrailOnlyWhenDamaged(void) {
+	newGame();
+	flyAt(1500, 120);
+	tDraw d[DRAW_MAX];
+	int iPuffs = 0;
+	for(int f = 0; f < 40; ++f) {
+		g.chop.x = 1500; g.chop.y = 120; g.chop.vx = 0;
+		step(NONE, 1);
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) iPuffs += d[i].bob == BOB_SMOKE;
+	}
+	CHECK(iPuffs == 0);                         // none while whole
+	g.chop.damaged = 1;
+	int iMax = 0;
+	for(int f = 0; f < 60; ++f) {
+		g.chop.x = 1500; g.chop.y = 120; g.chop.vx = 0;
+		step(NONE, 1);
+		uint8_t n = logicDraw(&g, d);
+		int c = 0;
+		for(uint8_t i = 0; i < n; ++i) c += d[i].bob == BOB_SMOKE;
+		if(c > iMax) iMax = c;
+	}
+	CHECK(iMax >= 4 && iMax <= SMOKE_MAX);      // a trail of puffs
+	g.chop.damaged = 0;                         // mended: the trail thins out and ends
+	step(NONE, SMOKE_LIFE + 2);
+	uint8_t n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_SMOKE);
+}
+
+static void testInvincibleIsNeverDamaged(void) {
+	newGame();
+	logicSetDifficulty(&g, DIFFICULTY_INVINCIBLE);
+	g.spawnTimer = 60000;
+	flyAt(1500, 150);
+	shellOnChopper();
+	step(NONE, 1);
+	CHECK(g.chop.alive && !g.chop.damaged && !g.chop.invuln);
+	CHECK(g.events & EV_SHRUG);
+}
+
 int main(void) {
+	testFirstHitDamages();
+	testDamagedFliesSlower();
+	testInvulnerableAfterHitAndBlinks();
+	testSecondHitDestroys();
+	testPadRepairs();
+	testSmokeTrailOnlyWhenDamaged();
+	testInvincibleIsNeverDamaged();
 	testJetTellShowsFlash();
 	testTankShellSpeedAndGap();
 	testNoMissileWithoutTell();

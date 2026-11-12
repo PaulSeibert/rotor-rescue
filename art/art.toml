@@ -62,6 +62,10 @@ kind = "bob"
 source = "flag.txt"
 kind = "bob"
 
+[smoke]                   # 16x8, 3 frames: the damaged chopper's trail
+source = "smoke.txt"
+kind = "bob"
+
 [clouds]                  # PF2 band, camera / 8 (the far sky)
 source = "clouds.txt"
 kind = "bitmap"
