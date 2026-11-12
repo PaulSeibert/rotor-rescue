@@ -64,9 +64,11 @@ two-button pad) makes turning quicker.
 | Stick left / right | Fly. The chopper speeds up and coasts with inertia. |
 | Stick held against the way you face | The chopper turns, through facing the screen |
 | Fire, facing left or right | Cannon: hits jets, mines, tanks and barracks (and people, so careful) |
-| Down + Fire in the air | Turn to face the screen |
+| Fire, facing left or right | The cannon: taps, a held fire, any volley (it never turns into bombs) |
+| Hold Down for a second (no fire), then Fire | Turn to face the screen: the bomb stance |
 | Fire, facing the screen | Drop a bomb: tanks and barracks |
-| Left / right, facing the screen | A quick sidestep: jink between bombs and shells |
+| Up + Fire, facing the screen | Turn back to the cannon |
+| Left / right, facing the screen | A quick sidestep, leaning into the move: jink between bombs and shells |
 | Fire 2 (second button) | Turn: left → front → right → front … |
 | Keyboard | Arrows, Space = fire, X = turn, P = pause, M = music on/off, Esc = quit |
 | Ctrl+L, then 0-5 | Difficulty (see below), on the title screen or during play |
