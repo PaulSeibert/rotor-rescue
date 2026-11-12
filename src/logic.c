@@ -680,7 +680,7 @@ static inline uint8_t chopperHurtable(const tChopper *c) {
 static void chopperDestroy(tGame *g) {
 	tChopper *c = &g->chop;
 	if(!c->alive) return;
-	if(g->difficulty == DIFFICULTY_INVINCIBLE) {
+	if(g->difficulty == DIFFICULTY_INVINCIBLE || g->ghost) {
 		// it would have been: show the hit, carry on
 		boomAt(g, c->x, (int16_t)(c->y - 8));
 		g->events |= EV_SHRUG;
@@ -1230,6 +1230,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 				(ahead >= wRun && ahead < wRun + 24);
 			if(isShot && eshotNew(g)) {
 				j->tell = ubTell;
+				++g->jetAttacks;
 				g->events2 |= EV2_JETTELL;
 			}
 		}

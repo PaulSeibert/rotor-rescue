@@ -196,6 +196,22 @@ static void skillKeys(void) {
 		s_ubSkillKeyWait = 0;
 		return;
 	}
+	if(keyUse(KEY_G)) {
+		// ghost: nothing destroys the chopper, at any difficulty (the pacing run)
+		s_sGame.ghost = !s_sGame.ghost;
+		s_ubSkillKeyWait = 0;
+		agkState("ghost", s_sGame.ghost);
+		agkEnd();
+		return;
+	}
+	if(keyUse(KEY_N)) {
+		// the next trip's schedule at once (the pacing run: jets and mines come with the trips)
+		if(s_sGame.trip < 9) ++s_sGame.trip;
+		s_ubSkillKeyWait = 0;
+		agkState("trip", s_sGame.trip);
+		agkEnd();
+		return;
+	}
 	if(keyUse(KEY_H)) {
 		// the hall of fame read from the disk again, as at boot (tests)
 		s_ubSkillKeyWait = 0;
@@ -1993,6 +2009,32 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 		agkState("aboard", g->aboard);
 		agkState("saved", g->saved);
 		agkState("killed", g->killed);
+		agkEnd();
+	}
+	if(g->state == GS_PLAY && !(g->frame & 15)) {
+		// the pacing sample (tools/pace.py): what threatens the chopper right now
+		UBYTE ubJets = 0, ubShots = 0, ubJetShots = 0, ubTells = 0;
+		for(UBYTE i = 0; i < JET_MAX; ++i) {
+			const tJet *j = &g->pJets[i];
+			if(j->active && j->x > g->cam - 16 && j->x < g->cam + SCREEN_W + 16) ++ubJets;
+			if(j->active && j->tell) ++ubTells;
+		}
+		for(UBYTE i = 0; i < ESHOT_MAX; ++i) {
+			if(!g->pEShots[i].active) continue;
+			++ubShots;
+			if(g->pEShots[i].kind != ESHOT_SHELL) ++ubJetShots;
+		}
+		agkState("pace", g->frame);
+		agkState("pskill", g->difficulty);
+		agkState("pghost", g->ghost);
+		agkState("pmission", g->mission);
+		agkState("ptrip", g->trip);
+		agkState("jets", ubJets);
+		agkState("tells", ubTells);
+		agkState("jatk", g->jetAttacks);
+		agkState("eshots", ubShots);
+		agkState("jshots", ubJetShots);
+		agkState("pland", c->landed);
 		agkEnd();
 	}
 	if(g->state != ubStateBefore || (g->events & EV_TAKEOFF) || !(g->frame & 31) || g->frame <= 3) {

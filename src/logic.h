@@ -205,6 +205,8 @@ typedef struct {
 	uint16_t spawnTimer;
 	uint8_t titleArmed;  // fire must be released before the title accepts it
 	uint8_t difficulty;  // 0 (invincible) .. DIFFICULTY_MAX; kept from game to game
+	uint8_t ghost;       // testing (Ctrl+L, G): nothing destroys the chopper, whatever the difficulty
+	uint16_t jetAttacks; // jet attack runs started (a flash begun), for the pacing report
 	uint16_t wxFall;     // the weather's slide, 1/4 px (wraps)
 	int16_t wxDrift;     // its wind, 1/4 px, 0..4 * SCREEN_W - 1
 	// the attract loop: title -> hall of fame -> a self-playing demo -> title
