@@ -967,7 +967,7 @@ static UBYTE textType(tAgkText *pText, char *pStage, const char *szTarget, UBYTE
 // above it (agkTextNumber always does two), and none once the rest is 0 (the
 // leading zeros). 16 people running into the hangar change three fields and
 // the score in one picture (the heaviest one): 20 DIVUs there, ~6 now.
-static void hudNumber(char *pOut, ULONG ulValue, UBYTE ubDigits) {
+__attribute__((noinline, noclone, optimize("Os"))) static void hudNumber(char *pOut, ULONG ulValue, UBYTE ubDigits) {
 	for(BYTE d = (BYTE)(ubDigits - 1); d >= 0; --d) {
 		if(!ulValue) {
 			pOut[d] = '0';
