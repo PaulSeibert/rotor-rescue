@@ -1,5 +1,5 @@
 # Home base flag, 16x24, waving.
-# (drawn by art/tools/draw.py - edit that, not this)
+# (pilot art: ~/art-pilot/first/build_integration.py - Desert Palms art pilot, approved style)
 colors
   .  transparent
   K  0x111
@@ -10,17 +10,17 @@ colors
   Y  0xFC3
   B  0x36B
 frame
-.YK.............
-.SK.BBBBBB...BB.
-.SKBBBYYYBBBBBB.
-.SKBBBYYYBBBBBB.
-.SKBBBYYYBBBBBB.
-.SKBWWYYYWBBBWW.
-.SKWWWWWWWWWWWW.
-.SKWWWWWWWWWWWW.
-.SKWWW...WWWWWW.
-.SKW......WWW...
-.SK.............
+.YK.KKKKKK...KK.
+.SKKBBBBBBKKKBBK
+.SKBBBYYYBBBBBBK
+.SKBBBYYYBBBBBBK
+.SKBBBYYYBBBBBBK
+.SKBWWYYYWBBBWWK
+.SKWWWWWWWWWWWWK
+.SKWWWWWWWWWWWWK
+.SKWWWKKKWWWWWWK
+.SKWKK...KWWWKK.
+.SKK......KKK...
 .SK.............
 .SK.............
 .SK.............
@@ -35,17 +35,17 @@ frame
 .SK.............
 .SK.............
 frame
-.YK.............
-.SKBBBB...BBBBB.
-.SKBBBBBBBBBBBB.
-.SKBBBYBBBBBBBB.
-.SKWWWYYYBBBWWW.
-.SKWWWYYYBWWWWW.
-.SKWWWYYYWWWWWW.
-.SKWWWWYYWWWWWW.
-.SK...WWWWWW....
-.SK....WWW......
-.SK.............
+.YKKKKK...KKKKK.
+.SKBBBBKKKBBBBBK
+.SKBBBBBBBBBBBBK
+.SKBBBYBBBBBBBBK
+.SKWWWYYYBBBWWWK
+.SKWWWYYYBWWWWWK
+.SKWWWYYYWWWWWWK
+.SKWWWWYYWWWWWWK
+.SKKKKWWWWWWKKK.
+.SK...KWWWKK....
+.SK....KKK......
 .SK.............
 .SK.............
 .SK.............

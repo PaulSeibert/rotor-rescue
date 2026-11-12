@@ -1,5 +1,5 @@
 # The chopper's shadow, 32x4: 4 sizes (low .. high) x 2 dither phases.
-# (drawn by art/tools/draw.py - edit that, not this)
+# (pilot art: ~/art-pilot/first/build_integration.py - Desert Palms art pilot, approved style)
 colors
   .  transparent
   K  0x111

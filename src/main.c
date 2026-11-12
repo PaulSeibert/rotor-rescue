@@ -131,7 +131,7 @@ _Static_assert(TITLE_LOGO8_BYTES >= TITLE_LOGO_BYTES, "its memory holds the OCS 
 static tView *s_pView;
 static tVPort *s_pVPort;
 static tBitMap *s_pFb[2], *s_pHud[2];
-static tBitMap *s_pMountains, *s_pHills, *s_pGround;
+static tBitMap *s_pMountains, *s_pTitleMtn, *s_pHills, *s_pGround;   // (the title's mountains: a strip that fades out at its foot)
 static UBYTE *s_pBlankRow;          // FETCH_BYTES of zeros: PF2 where there's no band
 static tCopBfr *s_pCopBfrA;         // copper buffer 0
 static UWORD s_uwCopUsed, s_uwTitleCopUsed;
@@ -574,7 +574,7 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 				cwPf2Palette(&sW, g_pMissionMtnPal[ubMission]);
 			}
 			if(y == TITLE_MTN_Y - 1) {
-				s_sMtnSlots[1][ubBfr] = cwBand(&sW, TITLE_MTN_Y, s_pMountains);
+				s_sMtnSlots[1][ubBfr] = cwBand(&sW, TITLE_MTN_Y, s_pTitleMtn);
 			}
 		}
 	}
@@ -732,7 +732,8 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 	if(s_isAga) {
 		// the far bands in quarter pixels: no judder at 1/8, 1/4, 1/2 speed
 		if(!isTitle) bandSet4(pList, &s_sCloudSlots[ubBfr], s_pCloudsBm, wCam, 3, ART_CLOUDS_LOOP_W);
-		s_uwMtnCon1 = bandSet4(pList, &s_sMtnSlots[isTitle][ubBfr], s_pMountains, wCam, 2, ART_MOUNTAINS_LOOP_W);
+		s_uwMtnCon1 = isTitle ? bandSet4(pList, &s_sMtnSlots[1][ubBfr], s_pTitleMtn, wCam, 2, ART_TITLE_MTN_LOOP_W) :
+			bandSet4(pList, &s_sMtnSlots[0][ubBfr], s_pMountains, wCam, 2, ART_MOUNTAINS_LOOP_W);
 		s_uwHillCon1 = bandSet4(pList, &s_sHillSlots[isTitle][ubBfr], s_pHills, wCam, 1, ART_HILLS_LOOP_W);
 		s_uwGndX = logicBandOffset(wCam, 0, ART_GROUND_LOOP_W);
 		bandSet(pList, &s_sGndSlots[isTitle][ubBfr], s_pGround, s_uwGndX);
@@ -742,7 +743,7 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 	s_uwMtnX = logicBandOffset(wCam, 2, ART_MOUNTAINS_LOOP_W);
 	s_uwHillX = logicBandOffset(wCam, 1, ART_HILLS_LOOP_W);
 	s_uwGndX = logicBandOffset(wCam, 0, ART_GROUND_LOOP_W);
-	bandSet(pList, &s_sMtnSlots[isTitle][ubBfr], s_pMountains, s_uwMtnX);
+	bandSet(pList, &s_sMtnSlots[isTitle][ubBfr], isTitle ? s_pTitleMtn : s_pMountains, s_uwMtnX);
 	bandSet(pList, &s_sHillSlots[isTitle][ubBfr], s_pHills, s_uwHillX);
 	s_uwMtnCon1 = (UWORD)(logicScrollDelay(s_uwMtnX) << 4);
 	s_uwHillCon1 = (UWORD)(logicScrollDelay(s_uwHillX) << 4);
@@ -1834,6 +1835,7 @@ void genericCreate(void) {
 	joyOpen();
 
 	s_pMountains = artMountainsCreate();   // (first: the copper list's length depends on it)
+	s_pTitleMtn = artTitleMtnCreate();
 	// the mountains' rows with no gap anywhere in their loop: below the first
 	// of them (down to the band's end) the sky never shows
 	for(UBYTE r = ART_MOUNTAINS_H; r--;) {
@@ -2112,6 +2114,7 @@ void genericDestroy(void) {
 	bitmapDestroy(s_pGround);
 	bitmapDestroy(s_pHills);
 	bitmapDestroy(s_pMountains);
+	bitmapDestroy(s_pTitleMtn);
 	bitmapDestroy(s_pCloudsBm);
 	for(UBYTE b = 0; b < 2; ++b) memFree(s_pTitleList[b], s_uwTitleCopCount * sizeof(tCopCmd));
 	if(s_pTitleLogo) memFree(s_pTitleLogo, s_ulTitleLogoBytes);

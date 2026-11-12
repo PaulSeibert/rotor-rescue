@@ -1,5 +1,5 @@
 # The border fence, 16x32.
-# (drawn by art/tools/draw.py - edit that, not this)
+# (pilot art: ~/art-pilot/first/build_integration.py - Desert Palms art pilot, approved style)
 colors
   .  transparent
   K  0x111
@@ -16,29 +16,29 @@ frame
 K..K..K..K..K..K
 .KS..........SK.
 .KS..........SK.
-.KSKKKKKKKKKKSK.
+.KWKKKKKKKKKKSK.
 .KS..........SK.
 .KSK.K.K.K.K.SK.
-.KS..........SK.
+.KW..........SK.
 .KSKKKKKKKKKKSK.
 .KS..........SK.
-.KSKWWRRWWRR.SK.
+.KWKWWRRWWRR.SK.
 .KS.WRRWWRRW.SK.
 .KSKRRWWRRWWKSK.
-.KS.RWWRRWWR.SK.
+.KW.RWWRRWWR.SK.
 .KSKWWRRWWRR.SK.
 .KS.WRRWWRRW.SK.
-.KSKRRWWRRWWKSK.
+.KWKRRWWRRWWKSK.
 .KS.RWWRRWWR.SK.
 .KSK.K.K.K.K.SK.
-.KS..........SK.
+.KW..........SK.
 .KSKKKKKKKKKKSK.
 .KS..........SK.
-.KSK.K.K.K.K.SK.
+.KWK.K.K.K.K.SK.
 .KS..........SK.
 .KSKKKKKKKKKKSK.
-.KS..........SK.
+.KW..........SK.
 .KSK.K.K.K.K.SK.
 .KS..........SK.
-.KS..........SK.
+.KW..........SK.
 .KS..........SK.

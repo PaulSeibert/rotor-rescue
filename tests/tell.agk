@@ -6,7 +6,7 @@ wait-serial "tank tell"
 wait 6
 screenshot tell
 # the raised barrel's glinting tip (level, that pixel is the ground behind)
-expect-color tell 48 226 0xFEC
+expect-color tell 48 228 0xFEC
 wait-serial "AGK sfx tankfire"
 wait 30
 # no shell without a tell before it: not the first, not one after another

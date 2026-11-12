@@ -938,20 +938,7 @@ def palettes():
 
 
 if __name__ == '__main__':
-    chopper()
-    hangar()
-    fence()
-    barracks()
-    tank()
-    hostage()
-    jet()
-    mine()
-    small()
-    boom()
-    shadow()
-    flag()
-    clouds()
-    mountains()
-    hills()
-    ground()
+    # The sprite and band art is now text art in art/*.txt (the art pilot's approved
+    # set, built by build_integration.py): the functions above are the v1 drawing
+    # code, kept for reference and not run. Only the palettes are still generated.
     palettes()

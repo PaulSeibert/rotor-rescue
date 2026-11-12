@@ -1,5 +1,5 @@
 # ROTOR RESCUE art, converted by agk (agk art / agk build). Reference: agk help-art
-# Everything is drawn by art/tools/draw.py (python3 art/tools/draw.py).
+# The art is text art in art/*.txt (the art pilot set; art/tools/draw.py only writes the palette files).
 [art]
 depth = 3                 # playfield 1: BOBs, 7 colours
 
@@ -71,6 +71,13 @@ wrap_x = 320
 
 [mountains]               # PF2 band, camera / 4
 source = "mountains.txt"
+kind = "bitmap"
+depth = 3
+palette = "mtn_pal.txt"
+wrap_x = 320
+
+[title_mtn]               # the title's PF2 mountain strip (lines 162-195), camera / 4
+source = "title_mtn.txt"
 kind = "bitmap"
 depth = 3
 palette = "mtn_pal.txt"
