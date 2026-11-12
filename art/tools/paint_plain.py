@@ -80,8 +80,8 @@ def foot_edge(rng):
     plateau of equal heights, so no row is the edge for more than a few columns."""
     n = 320
     s = [4.0 + v for v in smooth_noise(rng, n, [(2, 1.3), (5, 1.0), (11, 0.7), (23, 0.35)])]
-    for _ in range(9):                                   # scree tongues: long lit slope left, short right
-        x0, wl, wr, ln = rng.randrange(n), rng.randrange(7, 15), rng.randrange(3, 8), rng.uniform(1.8, 3.6)
+    for _ in range(6):                                   # scree tongues: long lit slope left, short right
+        x0, wl, wr, ln = rng.randrange(n), rng.randrange(8, 16), rng.randrange(4, 9), rng.uniform(1.0, 2.0)
         for dx in range(-wl, wr + 1):
             f = 1 - (-dx / wl if dx < 0 else dx / wr)
             s[(x0 + dx) % n] += ln * f ** 1.5 * (0.75 + 0.5 * rng.random())
@@ -92,7 +92,8 @@ def foot_edge(rng):
     for x in range(n):                                   # ragged: a little white noise, so nothing is a plateau
         s[x] += rng.uniform(-0.45, 0.45)
     s = [min(6.6, max(0.0, v)) for v in s]
-    dd = [1.6 + 1.1 * (0.5 + 0.5 * v) for v in smooth_noise(rng, n, [(3, 0.6), (9, 0.5)])]
+    dd = [1.6 + 1.1 * (0.5 + 0.5 * v) + 0.55 * max(0.0, s[x] - 4.0)         # the deeper the foot, the longer it takes to fade
+          for x, v in enumerate(smooth_noise(rng, n, [(3, 0.6), (9, 0.5)]))]
     return s, dd
 
 
@@ -109,14 +110,14 @@ def paint_far():
             if dist < 0:
                 cover = 1.0
             else:
-                cover = max(0.0, 1.0 - dist / dd[x]) ** 1.15 * 0.92
+                cover = max(0.0, 1.0 - dist / dd[x]) ** 1.5 * 0.92
             if y == FAR_ROWS - 2:
                 cover *= 0.3                         # row 8 stays thin
             if bn[y * 320 + x] >= cover:
                 continue
-            haze = min(1.0, max(0.0, (dist + 2.2) / (dd[x] + 2.2)))   # hazier toward the edge, not toward the bottom
-            haze += rng.uniform(-0.18, 0.18)
-            lift = int(round(3.2 * haze))
+            haze = min(1.0, max(0.0, (dist + 1.5) / (dd[x] + 1.5)))   # hazier toward the edge's tip, not toward the bottom
+            haze = min(1.0, max(0.0, haze ** 0.8 + rng.uniform(-0.15, 0.15)))
+            lift = int(round(4.4 * haze))
             bx = int(base[(x + rng.choice((-1, 0, 0, 1))) % 320])      # a column or so off: no hairline streaks
             rows[y][x] = str(min(5, max(1, bx + lift)))
     return rows
@@ -261,7 +262,40 @@ def paint_floor():
     return rows
 
 
+def paint_hills():
+    """hills.txt rows 18-26 (lines 215-223): the foot of the hills dissolves into the ground (pen 6 = C, the
+    backdrop) along a wandering per-column edge with a blue-noise scatter, instead of the old 6/5 line dither
+    and three solid rows. The source is the pilot's hills (tools/hills_orig.txt): rows 0-17 are kept."""
+    rng = random.Random(2231)
+    lines = open(os.path.join(here, 'hills_orig.txt')).read().split(chr(10))
+    head = lines[:lines.index('frame') + 1]
+    src = [list(l) for l in lines[lines.index('frame') + 1:] if l.strip()]
+    s = [19.5 + v for v in smooth_noise(rng, 320, [(3, 0.8), (8, 0.7), (19, 0.45)])]
+    for x in range(320):
+        s[x] += rng.uniform(-0.5, 0.5)
+    dd = [2.0 + 1.2 * (0.5 + 0.5 * v) for v in smooth_noise(rng, 320, [(4, 0.6), (11, 0.5)])]
+    bn = blue_noise(320, 9, 33)
+    out = [r[:] for r in src]
+    for x in range(320):
+        pen = '.'
+        for y in (21, 20, 19, 18):                   # the hill's own pen at the foot, found from its body
+            if src[y][x] not in '.6':
+                pen = src[y][x]
+                break
+        for y in range(18, 27):
+            dist = y - s[x]
+            cover = 1.0 if dist < 0 else max(0.0, 1.0 - dist / dd[x]) ** 1.4 * 0.9
+            if y <= 21 and src[y][x] == '.':
+                continue                             # a crest gap stays a gap
+            if pen == '.' or bn[(y - 18) * 320 + x] >= cover:
+                out[y][x] = '.'
+            else:
+                out[y][x] = pen
+    open(os.path.join(art, 'hills.txt'), 'w').write(chr(10).join(head + [''.join(r) for r in out]) + chr(10))
+
+
 def main():
+    paint_hills()
     write_art('plain_far.txt', [
         "The plain's far strip, 320x10 (game lines 170-179): the mountains' foot fading into the haze,",
         'dissolving along a wandering edge (swells, scree tongues, haze bays) with blue-noise scatter.',

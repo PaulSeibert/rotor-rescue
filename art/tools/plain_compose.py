@@ -112,7 +112,7 @@ def compose(m, cam, A):
                 if ch != '.':
                     p = int(ch)
                     r[x] = pal[p]
-                    t[x] = band * 8 + p
+                    t[x] = 0 if (band in (BAND_HILLS, BAND_GROUND) and p == 6) else band * 8 + p   # pen 6 is C, the backdrop's own colour
         rgb.append(r)
         tag.append(t)
     return rgb, tag

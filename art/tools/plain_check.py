@@ -16,9 +16,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plain_compose as pc
 
-Y0, Y1 = 160, 206
+Y0, Y1 = 160, 227
 ROAD = range(190, 194)      # the road (floor rows 11-12) is a deliberate full-width feature, not a band seam
-EDGES = list(range(165, 183)) + list(range(194, 203))   # lines at the band seams: mountain foot, 179/180 palette switch, floor/hills
+EDGES = list(range(165, 183)) + list(range(194, 203)) + list(range(215, 227))   # lines at the band seams: mountain foot, 179/180 palette switch, floor/hills, hills' foot/ground
 # (the floor's interior, the dry lake and the road, are features Paul approved, not seams)
 CAMS = [i * 36 for i in range(16)]
 STRONG = 5      # sum of the channel steps (4-bit units) that counts as an edge
