@@ -1877,6 +1877,141 @@ static void testRotorSilentWhenDead(void) {
 	CHECK(logicRotorVolume(&g) == 0);
 }
 
+// ---- rotor v3 (Paul's playtest, 2026-11-12: damaged and loaded were irritating) ----
+// A hurt or loaded chopper sounds lower and heavier, never faster: its rotor period is the
+// undamaged-empty one at the same speed plus something, and the take-off spin-up is
+// tamed. The volume only ever steps a little. No effect repeats like a machine gun.
+
+// Cruise at vx (forced) for 200 frames in the given state: the settled period and volume
+static void rotorSettle(int16_t vx, uint8_t ubAboard, uint8_t isDamaged, int *pPer, int *pVol) {
+	newGame();
+	flyAt(1500, 120);
+	g.chop.damaged = isDamaged;
+	g.aboard = ubAboard;
+	for(int i = 0; i < 200; ++i) { g.chop.vx = vx; step(NONE, 1); }
+	*pPer = logicRotorPeriod(&g);
+	*pVol = logicRotorVolume(&g);
+}
+
+static void testRotorApprovedEmptyStaysExactly(void) {
+	int per, vol;
+	rotorSettle(0, 0, 0, &per, &vol);
+	CHECK(per == 591 && vol == 40);      // the approved v2 hover
+	rotorSettle(32, 0, 0, &per, &vol);
+	CHECK(per == 501 && vol == 42);      // the approved v2 cruise (2 px/frame)
+}
+
+static void testRotorLoadedAndDamagedNeverFasterThanEmpty(void) {
+	static const int16_t pSpeed[] = {0, 16, 32, 38, 48};
+	static const struct { uint8_t aboard, damaged; } pState[] = {{8, 0}, {16, 0}, {0, 1}, {8, 1}, {16, 1}};
+	for(int s = 0; s < 5; ++s) {
+		for(int k = 0; k < 5; ++k) {
+			int perE, volE, per, vol;
+			rotorSettle(pSpeed[s], 0, 0, &perE, &volE);
+			rotorSettle(pSpeed[s], pState[k].aboard, pState[k].damaged, &per, &vol);
+			CHECK(per > perE);                       // lower (a heavier thump), never the same or higher
+			CHECK(per <= perE + 90);                 // ... but not a different engine
+			CHECK(vol >= volE && vol <= volE + 5);   // a touch heavier, not louder
+		}
+	}
+	// more aboard is never faster than fewer
+	int p8, p16, v;
+	rotorSettle(32, 8, 0, &p8, &v);
+	rotorSettle(32, 16, 0, &p16, &v);
+	CHECK(p16 > p8);
+}
+
+// The take-off spin-up (11.8 thumps a second at its peak) is for the empty chopper: a loaded
+// or hurt one lifts off with a calm 6.5 at the most
+static void testRotorHeavyLiftoffIsCalm(void) {
+	static const struct { uint8_t aboard, damaged; } pState[] = {{8, 0}, {16, 0}, {0, 1}, {16, 1}};
+	for(int k = 0; k < 4; ++k) {
+		newGame();
+		g.chop.x = 1500;                             // (away from the home pad: it would unload and mend)
+		g.cam = (int16_t)(1500 - SCREEN_W / 2);
+		g.spawnTimer = 60000;
+		g.aboard = pState[k].aboard;
+		g.chop.damaged = pState[k].damaged;
+		step(NONE, 100);
+		CHECK(g.chop.landed && g.aboard == pState[k].aboard && g.chop.damaged == pState[k].damaged);
+		step((tInput){.dy = -1}, 1);
+		int iPeak = 0, iPrevVol = logicRotorVolume(&g);
+		for(int i = 0; i < 200; ++i) {
+			step((tInput){.dx = 1, .dy = i < 20 ? -1 : 0}, 1);
+			if(thumpsX10() > iPeak) iPeak = thumpsX10();
+			int vol = logicRotorVolume(&g);
+			CHECK(absi(vol - iPrevVol) <= 2);        // the volume steps are bounded
+			CHECK(vol <= 62);
+			iPrevVol = vol;
+		}
+		CHECK(iPeak <= 65);
+	}
+}
+
+// Damaged: a slow, laboured wobble in the pitch (never a faster beat, never a jump)
+static void testRotorDamagedWobbleIsGentle(void) {
+	newGame();
+	flyAt(1500, 120);
+	g.chop.damaged = 1;
+	int iMin = 9999, iMax = 0, iPrev = 0;
+	for(int i = 0; i < 600; ++i) {
+		g.chop.vx = 32;
+		step(NONE, 1);
+		int per = logicRotorPeriod(&g);
+		if(i > 150) {
+			if(per < iMin) iMin = per;
+			if(per > iMax) iMax = per;
+			CHECK(absi(per - iPrev) <= 3);           // no jump from one frame to the next
+		}
+		iPrev = per;
+	}
+	CHECK(iMax - iMin >= 6);                         // you can hear it is hurt ...
+	CHECK(iMax - iMin <= 24);                        // ... without a warble
+	CHECK(iMin >= 501 + 32);                         // always lower than the empty cruise
+}
+
+// Effects: none plays twice inside its gap, while damaged or not (the gate main.c uses)
+static void testSfxGapsWhileDamaged(void) {
+	for(int isDmg = 0; isDmg < 2; ++isDmg) {
+		for(int k = 0; k < SFXK_COUNT; ++k) CHECK(logicSfxGap((uint8_t)k) >= 6);
+		// every event every frame: what gets through is spaced by the gap
+		uint16_t pLast[SFXK_COUNT] = {0};
+		uint16_t pPlayed[SFXK_COUNT] = {0};
+		for(uint16_t f = 1; f < 600; ++f) {
+			for(int k = 0; k < SFXK_COUNT; ++k) {
+				if(!logicSfxAllow(pLast, f, (uint8_t)k)) continue;
+				if(pPlayed[k]) CHECK(f - pPlayed[k] >= logicSfxGap((uint8_t)k));
+				pPlayed[k] = f;
+			}
+		}
+		for(int k = 0; k < SFXK_COUNT; ++k) CHECK(pPlayed[k] != 0);
+	}
+	// the real thing: a damaged chopper flown down the field with tanks and jets about
+	newGame();
+	g.chop.damaged = 1;
+	g.aboard = 16;
+	uint16_t pLast[SFXK_COUNT] = {0}, pPlayed[SFXK_COUNT] = {0};
+	for(int f = 0; f < 4000; ++f) {
+		tInput in = {.dx = (f / 700) & 1 ? -1 : 1, .dy = (f & 255) < 40 ? -1 : 0};
+		if(f < 40) in.dy = -1;
+		step(in, 1);
+		g.chop.invuln = 100;   // (stay damaged, not dead)
+		uint8_t pHit[SFXK_COUNT] = {0};
+		pHit[SFXK_BOOM] = !!(g.events & EV_BOOM);
+		pHit[SFXK_JETWARN] = !!(g.events2 & EV2_JETWARN);
+		pHit[SFXK_JET] = !!(g.events & EV_JET);
+		pHit[SFXK_TANKFIRE] = !!(g.events & EV_TANKFIRE);
+		pHit[SFXK_SAVED] = !!(g.events & EV_SAVED);
+		pHit[SFXK_BOARD] = !!(g.events & (EV_BOARD | EV_UNLOAD));
+		pHit[SFXK_LAND] = !!(g.events & EV_LAND);
+		for(int k = 0; k < SFXK_COUNT; ++k) {
+			if(!pHit[k] || !logicSfxAllow(pLast, (uint16_t)(f + 1), (uint8_t)k)) continue;
+			if(pPlayed[k]) CHECK((f + 1) - pPlayed[k] >= logicSfxGap((uint8_t)k));
+			pPlayed[k] = (uint16_t)(f + 1);
+		}
+	}
+}
+
 // ---- jet fairness (Paul's playtest, 2026-11-11; studio tuning, pending Paul's playtest) ----
 // No jet bombs a chopper that has just landed (never on skill 1-2), none starts an
 // attack run in the 2 s after a take-off, one jet at a time on skill 1-3, a pair's
@@ -2208,6 +2343,11 @@ int main(void) {
 	testRotorIdlesSlowAndSoftOnTheGround();
 	testRotorSpinsUpAtTakeoff();
 	testRotorSilentWhenDead();
+	testRotorApprovedEmptyStaysExactly();
+	testRotorLoadedAndDamagedNeverFasterThanEmpty();
+	testRotorHeavyLiftoffIsCalm();
+	testRotorDamagedWobbleIsGentle();
+	testSfxGapsWhileDamaged();
 	testFirstHitDamages();
 	testDamagedFliesSlower();
 	testInvulnerableAfterHitAndBlinks();

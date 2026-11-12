@@ -411,6 +411,13 @@ uint16_t logicRotorPeriod(const tGame *g);   // Paula period
 uint8_t logicRotorVolume(const tGame *g);    // 0-64 (0 when the chopper is gone)
 int logicRotorThumpsX10(uint16_t uwPeriod);  // thumps a second times ten
 
+// Effects that can repeat (SPEC 9, rotor v3): main.c asks logicSfxAllow before it plays one, and
+// the same effect is not played again inside its gap (logicSfxGap frames). pLast: SFXK_COUNT
+// frame stamps (0 = never played), kept by the caller; uwNow: a frame count from 1.
+enum { SFXK_BOOM, SFXK_JETWARN, SFXK_JET, SFXK_TANKFIRE, SFXK_SAVED, SFXK_BOARD, SFXK_LAND, SFXK_COUNT };
+uint8_t logicSfxGap(uint8_t ubKind);
+uint8_t logicSfxAllow(uint16_t *pLast, uint16_t uwNow, uint8_t ubKind);
+
 // The camera follows the chopper with a look-ahead. It is locked to the
 // chopper's pixel, so the chopper only moves on screen when the look-ahead
 // does, and that glides (accelerates, cruises, slows) - never jumps.

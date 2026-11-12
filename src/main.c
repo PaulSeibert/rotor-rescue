@@ -1929,24 +1929,30 @@ static void musicFor(UBYTE ubState) {
 	else soundMusicStart(ubSong);
 }
 
+// (SPEC 9, rotor v3: logicSfxAllow keeps one effect from repeating inside its gap)
+static UWORD s_pSfxLast[SFXK_COUNT];
+
 __attribute__((noinline)) static void playSounds(UBYTE ubStateBefore) {
 	const tGame *g = &s_sGame;
 	UWORD e = g->events;
+	UWORD uwNow = g->frame ? g->frame : 1;
 	if(g->state != ubStateBefore) {
 		musicFor(g->state);
 		if(ubStateBefore == GS_TITLE && g->state == GS_INTRO) soundPlay(SOUND_SFX_START);
 	}
 	if(e & EV_CRASH) soundPlay(SOUND_SFX_CRASH);
 	else if(e & EV_OPEN) soundPlay(SOUND_SFX_OPEN);
-	else if(e & EV_BOOM) soundPlay(SOUND_SFX_BOOM);
-	if(g->events2 & EV2_JETWARN) soundPlay(SOUND_SFX_JETWARN);   // the alert (priority 3: before the jet's scream)
-	if(e & EV_JET) soundPlay(SOUND_SFX_JET);
-	if(e & EV_TANKFIRE) soundPlay(SOUND_SFX_TANKFIRE);
-	if(e & EV_SAVED) soundPlay(SOUND_SFX_SAVED);
-	else if(e & (EV_BOARD | EV_UNLOAD)) soundPlay(SOUND_SFX_BOARD);
+	else if((e & EV_BOOM) && logicSfxAllow(s_pSfxLast, uwNow, SFXK_BOOM)) soundPlay(SOUND_SFX_BOOM);
+	if((g->events2 & EV2_JETWARN) && logicSfxAllow(s_pSfxLast, uwNow, SFXK_JETWARN)) soundPlay(SOUND_SFX_JETWARN);   // the alert (priority 3: before the jet's scream)
+	if((e & EV_JET) && logicSfxAllow(s_pSfxLast, uwNow, SFXK_JET)) soundPlay(SOUND_SFX_JET);
+	if((e & EV_TANKFIRE) && logicSfxAllow(s_pSfxLast, uwNow, SFXK_TANKFIRE)) soundPlay(SOUND_SFX_TANKFIRE);
+	if(e & EV_SAVED) {
+		if(logicSfxAllow(s_pSfxLast, uwNow, SFXK_SAVED)) soundPlay(SOUND_SFX_SAVED);
+	}
+	else if((e & (EV_BOARD | EV_UNLOAD)) && logicSfxAllow(s_pSfxLast, uwNow, SFXK_BOARD)) soundPlay(SOUND_SFX_BOARD);
 	if(e & EV_CANNON) soundPlay(SOUND_SFX_CANNON);
 	if(e & EV_BOMB) soundPlay(SOUND_SFX_BOMB);
-	if(e & EV_LAND) soundPlay(SOUND_SFX_LAND);
+	if((e & EV_LAND) && logicSfxAllow(s_pSfxLast, uwNow, SFXK_LAND)) soundPlay(SOUND_SFX_LAND);
 }
 
 // ---------------------------------------------------------------- setup ---
