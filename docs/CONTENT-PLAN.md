@@ -1,8 +1,8 @@
 # Rotor Rescue: content plan for a commercial-length game
 
-Draft 1, 2026-11-12. For Paul to review. Branch `content-plan`, file `docs/CONTENT-PLAN.md`.
-**This is a proposal. `docs/SPEC.md` is not changed.** Section 11 holds the draft SPEC text; it goes into
-SPEC.md only after Paul signs off the whole plan.
+**Status: approved by Paul, 2026-11-12** ("approved; proceed"), with the answers in section 10. Branch `content-plan`.
+The approved text of sections 11.1-11.3 is now in `docs/SPEC.md` v1.5 (sections 1, 2, 4-7, 9-12). Where this plan and
+SPEC.md differ, SPEC.md wins. Nothing here is built yet.
 
 Every number is labelled: **[M]** measured from the repo, build or latest test logs; **[D]** derived from
 measured numbers; **[E]** estimated (a studio guess, to be checked); **[S]** taken from SPEC.md as written.
@@ -521,30 +521,35 @@ whether the garrison loop is fun). Complaints become tuning tickets, as for jets
 
 ---
 
-## 10. Open questions for Paul (numbers, order and names)
+## 10. Open questions for Paul: answers (2026-11-12)
 
-1. **Twelve missions in four worlds** (3 + 3 + 3 + 3), 64 people each, about 80 minutes: confirm the shape, or ask for fewer (nine) by cutting the city to one mission.
-2. **World order**: Desert, Islands, Highlands, City (the plan), or Highlands before Islands? The plan puts islands first because they are the easier technology and teach pads.
-3. **Lives and continues**: three lives for 80 minutes is very hard. Proposed: lives refill to three at each world start, and a continue file (world, lives, merit, upgrades) so a long game can be resumed. OK?
-4. **Upgrades**: are armour, winch, seats and cannon the right four? What is the currency (merit from people saved plus medals)? Should skill 1 start with level 1 armour?
-5. **No vertical scrolling in the base plan**: mountains and towers up to about 110 px of the 192 px flyable height. If you want taller peaks, the city and mountains need a vertical camera, a large piece of hardware work (about 2 weeks more [E]).
-6. **Field pads**: on the long maps (4608 px) should there be a mid-map field pad that repairs damage (without unloading), so the carry home is not 60 seconds of one-hit-from-loss flight? Proposed: yes, on maps longer than 4000 px.
-7. **Terrain contact**: a wall bump costs speed and a spark but no damage (proposed). Or a small damage on a hard hit?
-8. **Water**: touching the sea is a soft stop and a splash (proposed). Or should a hard dunk be a hit?
-9. **Names**: world and mission names (Border Desert, Coral Islands, Highlands, Harbour City; the mission names in the table) and the rename of today's missions 2 and 3.
-10. **The ending**: three outcomes at 90% / 60% (proposed). The tone of the costly ending. A name for the finale's villain (or none)?
-11. **Music**: our own themes on world cards, the ending and credits (proposed), still none in play. Any third-party music wanted (artist and licence to be recorded)?
-12. **Tunnel**: keep (costs the cloud/tunnel ceiling work, about 3 days [E]) or leave to a later update?
-13. **Memory**: the game stays at 1 MB minimum (proposed), and the AROS profile's test window may be raised. OK?
-14. **Disks**: two disks with one swap (proposed), the hall of fame on disk 1. Is a hard-drive install a wanted feature?
-15. **Scoring**: zone-clear bonus 100 and medals; the tank quota stays at 10 a mission, and trucks, AA and boats pay for the first N kills only (N per mission, proposed 6 each)?
+Paul approved the plan with the studio's recommended answers. **Decided by Paul** means he chose it; **studio default**
+means the plan's own proposal stands until a playtest gate says otherwise.
+
+| # | question | answer | status |
+|---|---|---|---|
+| 1 | twelve missions in four worlds | yes, 12 missions in 4 worlds | decided by Paul |
+| 2 | world order | desert, islands, mountains, city | decided by Paul |
+| 3 | lives and continues | lives refill to 3 at each world start, plus a continue (a save at each world card) | decided by Paul |
+| 4 | upgrades: the four, the currency, skill 1 starting armour | armour, winch, seats, cannon; merit from people saved plus medals; skill 1 starts with armour level 1 | studio default, revisit at a playtest gate |
+| 5 | vertical scrolling | none in the base plan; peaks and towers stay on screen (about 110 px of 192) | decided by Paul |
+| 6 | a mid-map field pad (repairs, no unloading) on maps over 4000 px | yes | studio default, revisit at a playtest gate |
+| 7 | terrain contact | speed loss and a spark only, no damage | decided by Paul |
+| 8 | sea contact | a soft stop and a splash, no damage | decided by Paul |
+| 9 | world and mission names; renaming today's missions 2 and 3 | the names in section 3; Desert Night and Desert Dawn | studio default, revisit at a playtest gate |
+| 10 | ending thresholds, tone, a villain | 90% and 60%; as in 5.2; no named villain | studio default, revisit at a playtest gate |
+| 11 | music | own themes on world cards, ending and credits; none in play; third-party only with artist and licence credited | studio default, revisit at a playtest gate |
+| 12 | the tunnel | kept (world 3) | studio default, revisit at a playtest gate |
+| 13 | memory | stay at 1 MB; raising the AROS test window slightly is allowed if needed | decided by Paul |
+| 14 | disks | two disks with one swap; a hard-drive install as a later extra | decided by Paul |
+| 15 | scoring caps | zone-clear bonus 100; the tank quota stays 10; trucks, AA and boats pay for their first 6 kills a mission | studio default, revisit at a playtest gate |
 
 ---
 
 ## 11. Proposed SPEC text
 
-> **PROPOSAL - pending Paul's final sign-off of the whole plan document.** Not in `docs/SPEC.md`. When approved this
-> replaces sections 4, 6 and 10 in the same commit as the first world's code.
+> **APPROVED by Paul, 2026-11-12; applied to `docs/SPEC.md` v1.5.** This is the draft as written; the SPEC text is the
+> contract and has been adjusted for fit (it keeps the shipped description of world 1 under 4.6).
 
 ### 11.1 Section 4. Structure and content budget (proposed)
 
