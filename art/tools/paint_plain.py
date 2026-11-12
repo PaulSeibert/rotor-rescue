@@ -7,6 +7,7 @@ road and the scrub are placed by number here (deterministic). Run, then make_pla
 The floor is drawn in "world" px (one 576 px period) and projected: world x on row j is
 column x * W_j / 576, so every feature leans toward the vanishing point as the contract says.
 """
+import math
 import os
 import random
 import sys
@@ -40,58 +41,84 @@ def write_art(name, comment, pal_file, rows):
     open(os.path.join(art, name), 'w').write('\n'.join(out) + '\n')
 
 
+# ---------------------------------------------------------------- blue noise
+def blue_noise(w, h, seed, sigma=1.6, rad=5):
+    """A tileable blue-noise rank mask in [0,1): the last phase of void-and-cluster (each new point goes
+    into the biggest void of a gaussian energy field, on a torus). Any threshold of it is an even scatter
+    with no row or column period, so no dither line can form."""
+    rng = random.Random(seed)
+    en = [rng.random() * 1e-6 for _ in range(w * h)]
+    ker = [(dx, dy, math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma)))
+           for dy in range(-rad, rad + 1) for dx in range(-rad, rad + 1)]
+    rank = [0.0] * (w * h)
+    for n in range(w * h):
+        i = en.index(min(en))
+        rank[i] = n / float(w * h)
+        x, y = i % w, i // w
+        for dx, dy, k in ker:
+            en[((y + dy) % h) * w + (x + dx) % w] += k
+        en[i] = 1e9
+    return rank
+
+
 # ---------------------------------------------------------------- far strip
-# (x of the left edge, top-face width, rows tall, talus: widens one px each side every 2 rows
-#  below the cliff, 'butte' keeps vertical walls)
-MESAS = [   # (left edge x, top-face width, top row y, talus skirt?); every one runs down into the haze
-    (8, 26, 2, 1), (46, 9, 1, 0), (62, 17, 4, 1), (104, 6, 1, 0), (116, 30, 2, 1),
-    (160, 12, 3, 1), (186, 5, 1, 0), (196, 4, 3, 0), (212, 28, 3, 1), (254, 14, 2, 1),
-    (284, 18, 4, 1),
-]
+def smooth_noise(rng, period, octaves):
+    """periodic 1-D noise, summed octaves: [(cycles, amplitude)]"""
+    out = [0.0] * period
+    for cyc, amp in octaves:
+        ph = rng.random() * 6.2832
+        ph2 = rng.random() * 6.2832
+        for x in range(period):
+            t = 6.2832 * cyc * x / period
+            out[x] += amp * (0.65 * math.sin(t + ph) + 0.35 * math.sin(2 * t + ph2))
+    return out
+
+
+def foot_edge(rng):
+    """Per column, where the mountain body stops (s, in far rows) and how deep its dissolve runs (d).
+    Low foothill swells, ragged scree tongues pointing down and haze bays where it lifts away; no
+    plateau of equal heights, so no row is the edge for more than a few columns."""
+    n = 320
+    s = [4.0 + v for v in smooth_noise(rng, n, [(2, 1.3), (5, 1.0), (11, 0.7), (23, 0.35)])]
+    for _ in range(9):                                   # scree tongues: long lit slope left, short right
+        x0, wl, wr, ln = rng.randrange(n), rng.randrange(7, 15), rng.randrange(3, 8), rng.uniform(1.8, 3.6)
+        for dx in range(-wl, wr + 1):
+            f = 1 - (-dx / wl if dx < 0 else dx / wr)
+            s[(x0 + dx) % n] += ln * f ** 1.5 * (0.75 + 0.5 * rng.random())
+    for _ in range(6):                                   # haze bays
+        x0, w, dp = rng.randrange(n), rng.randrange(10, 26), rng.uniform(2.5, 4.5)
+        for dx in range(-w, w + 1):
+            s[(x0 + dx) % n] -= dp * (0.5 + 0.5 * math.cos(3.1416 * dx / w)) ** 1.3
+    for x in range(n):                                   # ragged: a little white noise, so nothing is a plateau
+        s[x] += rng.uniform(-0.45, 0.45)
+    s = [min(6.6, max(0.0, v)) for v in s]
+    dd = [1.6 + 1.1 * (0.5 + 0.5 * v) for v in smooth_noise(rng, n, [(3, 0.6), (9, 0.5)])]
+    return s, dd
 
 
 def paint_far():
+    rng = random.Random(4172)
     mtn = read_rows('mountains.txt')
     base = mtn[MTN_ROWS - 1]                       # row 0 continues row 49 x for x
-    lift = [0, 1, 2, 3, 4, 4, 5, 5, 6, 6]          # the foot lightens toward the haze
-    keep = [16, 11, 7, 5, 4, 4, 4, 5, 6, 3]        # Bayer coverage /16 of the mountains' foot (rows 8, 9: the haze rule)
+    s, dd = foot_edge(rng)
+    bn = blue_noise(320, FAR_ROWS, 77)
     rows = [['.'] * 320 for _ in range(FAR_ROWS)]
-    for y in range(FAR_ROWS):
-        for x in range(320):
-            if BAYER[y % 4][x % 4] < keep[y]:
-                rows[y][x] = str(min(5, max(int(base[x]), int(base[x]) + lift[y])))   # pen 5 at most: night's 6-7 are bright
-    cap = {8: 8, 9: 4}                              # rule 3: the foot's coverage cap on rows 8, 9
-    for x0, w, top, talus in MESAS:
-        h = FAR_ROWS - top
-        for r in range(h):
-            y = top + r
-            grow = max(0, r - 3) if talus else 0     # a slope skirt at the base
-            xa, xb = x0 - grow, x0 + w + grow       # [xa, xb)
-            if r == 0:
-                xa, xb = xa + 2, xb - 2             # the top face: corners chipped
-            elif r == 1:
-                xa, xb = xa + 1, xb - 1
-            for x in range(xa, xb):
-                if y in cap and BAYER[y % 4][x % 4] >= cap[y]:
-                    rows[y][x % 320] = '.'          # the foot dissolves
-                    continue
-                lit = x - xa                          # columns from the lit (left) edge
-                shade = xb - 1 - x                    # columns from the shaded (right) edge
-                if r == 0:
-                    c = 6 if shade > 0 else 4
-                elif lit == 0:
-                    c = 5
-                elif shade == 0:
-                    c = 2
-                elif shade <= 2 and w > 5:
-                    c = 3
-                elif w > 14 and (x - x0) % 9 == 4 and r > 1:
-                    c = 3                            # a crevice down the wall
-                else:
-                    c = 4 if (r + x) % 6 else 5     # a few strata flecks
-                if y >= 7:
-                    c = min(5, c + (y - 6))         # lifts into the haze at the foot
-                rows[y][x % 320] = str(c)
+    for x in range(320):
+        for y in range(FAR_ROWS - 1):               # row 9 stays empty: the palette switch falls on haze
+            dist = y - s[x]                          # < 0 inside the body
+            if dist < 0:
+                cover = 1.0
+            else:
+                cover = max(0.0, 1.0 - dist / dd[x]) ** 1.15 * 0.92
+            if y == FAR_ROWS - 2:
+                cover *= 0.3                         # row 8 stays thin
+            if bn[y * 320 + x] >= cover:
+                continue
+            haze = min(1.0, max(0.0, (dist + 2.2) / (dd[x] + 2.2)))   # hazier toward the edge, not toward the bottom
+            haze += rng.uniform(-0.18, 0.18)
+            lift = int(round(3.2 * haze))
+            bx = int(base[(x + rng.choice((-1, 0, 0, 1))) % 320])      # a column or so off: no hairline streaks
+            rows[y][x] = str(min(5, max(1, bx + lift)))
     return rows
 
 
@@ -126,8 +153,10 @@ def paint_floor():
             if tag:
                 owner[j][x % row_w(j)] = tag
 
-    def bay(j, x, k):                                # Bayer test, k/16 coverage
-        return BAYER[j % 4][x % 4] < k
+    fbn = blue_noise(288, FLOOR_LINES, 91)
+
+    def bay(j, x, k):                                # blue-noise test, k/16 coverage (no ordered dither)
+        return fbn[j * 288 + x % 288] < k / 16.0
 
     # --- flats texture: sparse streaks of the slightly darker pen 5 on the near rows, pen 7 glints far
     for j in range(1, FLOOR_LINES - 1):
@@ -217,13 +246,25 @@ def paint_floor():
             # a lit pixel on the left of the bigger tufts (light from the top left)
             if j >= 13 and w >= 3 and not owner[j].get((x - 1) % row_w(j)):
                 rows[j][(x - 1) % row_w(j)] = '5'
+    # --- the near edge: rows 14-17 thin out toward the hills by a blue-noise keep mask whose density wanders
+    # along x (world px), so no row of dots or wash end marks line 198/199 and no feature has a flat foot
+    xn = smooth_noise(random.Random(5), PERIOD, [(3, 0.3), (7, 0.25), (15, 0.2)])
+    keep = {14: 1.0, 15: 0.85, 16: 0.62, 17: 0.4}
+    for j in keep:
+        for x in range(row_w(j)):
+            if rows[j][x] == '.':
+                continue
+            wx = x * PERIOD / row_w(j)
+            k = min(1.0, max(0.05, keep[j] * (0.75 + xn[int(wx) % PERIOD])))
+            if fbn[j * 288 + x] >= k:
+                rows[j][x] = '.'
     return rows
 
 
 def main():
     write_art('plain_far.txt', [
         "The plain's far strip, 320x10 (game lines 170-179): the mountains' foot fading into the haze,",
-        'with small distant mesas and buttes standing in it (lit from the top left, feet dissolving).',
+        'dissolving along a wandering edge (swells, scree tongues, haze bays) with blue-noise scatter.',
         'Mountain palette (PF2 9-15). Loops at 320 with the mountains. Painted by art/tools/paint_plain.py.'],
         'mtn_pal.txt', paint_far())
     write_art('plain_floor_src.txt', [

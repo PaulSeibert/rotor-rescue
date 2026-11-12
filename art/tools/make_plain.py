@@ -148,10 +148,12 @@ def main():
         bad = {c for r in rows for c in r} - set('.1234567')
         if bad:
             problems.append('%s: only . and pens 1-7 (found %s)' % (name, ''.join(sorted(bad))))
-    for y, cap in ((FAR_ROWS - 2, 0.5), (FAR_ROWS - 1, 0.25)):
+    for y, cap in ((FAR_ROWS - 2, 0.15),):
         cover = sum(c != '.' for c in far[y]) / 320.0
         if cover > cap:
             problems.append('plain_far.txt row %d: %.0f%% covered, at most %.0f%% (its foot is haze)' % (y, cover * 100, cap * 100))
+    if any(c != '.' for c in far[FAR_ROWS - 1]):
+        problems.append('plain_far.txt row %d must be empty (line 179: the palette switch falls on haze)' % (FAR_ROWS - 1))
     for j in (0, FLOOR_LINES - 1):
         if any(c != '.' for c in floor[j]):
             problems.append('plain_floor_src.txt row %d must be empty (%s)' % (j, 'the haze; the land palette loads on it' if j == 0 else 'C, the seam with the hills'))

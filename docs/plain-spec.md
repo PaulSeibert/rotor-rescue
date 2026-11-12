@@ -6,7 +6,7 @@ two source files below, run the tool, and the game shows them. Anything that cha
 a palette slot is engine work: ask amiga-hw.
 
 Paul's brief: "as if there was a plain of some sort between the hills and the more distant mountains".
-Content he picked: **scrub and flats, distant mesas, a dry lake or riverbed, a road or rail line.**
+Content he picked: **scrub and flats, a dry lake or riverbed, a road or rail line.** (Revised 2026-11-12 after review: **no mesas or buttes**, and no band may show as a line: rules 3, 5 and 6 below.)
 
 ## 1. Where it is (game lines, in play)
 
@@ -93,9 +93,13 @@ whole range on the near rows.
    checks).
 2. **Floor row 18 is empty.** It is C, and so is everything the hills don't cover below it: the
    floor's near edge meets the hills in one colour (the tool checks).
-3. **The far strip's foot is haze:** row 8 at most 50 % covered, row 9 at most 25 %, ordered (Bayer)
-   dither, no run longer than 4 px on row 9 (the tool checks the coverage). Below it, row 0 of the
-   floor is the haze, so the strip has no bottom edge.
+3. **The far strip's foot is haze, and wanders:** the mountains dissolve into the plain along an irregular
+   edge that differs per column (low foothill swells, scree tongues, haze bays), so no row is the edge across
+   the screen and no shape has a flat top or foot. **Row 9 is empty** (line 179, the last before the palette
+   switch, is bare sky/haze in every column), row 8 at most 15 % covered. The dissolve is a **blue-noise**
+   scatter whose density changes along x as well as y: never an ordered (Bayer, period 2 or 4) dither, which
+   draws a dotted line across the screen. Below it, row 0 of the floor is the haze, so the strip has no
+   bottom edge. `art/tools/plain_check.py` scans for runs and periodic rows.
 4. **The far strip continues the mountains:** its row 0 is directly under `mountains.txt` row 49, x
    for x (same band, same speed, same palette), so paint the two as one picture: the mountains' foot
    fades into the haze inside the strip (the placeholder fades rows 50-59 of the old foot with a 4x4
@@ -103,14 +107,18 @@ whole range on the near rows.
 5. **The far rows fade in:** rows 1-3 sparse (a few light flecks), density and contrast rising toward
    the viewer. No solid horizontal line anywhere: a row filled edge to edge with one pen looks still
    when it scrolls and reads as a stripe.
-6. **Line dither:** COLOR00 is line-dithered on OCS, like the sky. Don't fight it with a horizontal
+6. **No full-width line anywhere in the background:** the near rows of the floor (14-17) thin out toward the
+   hills with a blue-noise keep mask whose density wanders along x, so neither a row of dots nor the foot of a
+   feature marks line 198/199. `plain_check.py` fails any run, period-2/4 pattern or hard colour step over
+   64 px on the seam lines at 16 camera offsets in all three missions.
+7. **Line dither:** COLOR00 is line-dithered on OCS, like the sky. Don't fight it with a horizontal
    pattern of the same 2-line period.
 
 ## 6. What goes where
 
 | | far strip (rows 0-9, one speed) | floor rows 1-15 | floor rows 16-17 |
 |---|---|---|---|
-| mesas, buttes, anything taller than one line | **yes** (up to ~8 px, feet in haze, rule 3) | **no**: it shears | no |
+| mesas, buttes, flat-topped shapes | **no** (Paul, 2026-11-12) | no | no |
 | scrub, rocks, tufts | yes | yes: one line high (1 x 2 px or so), the plain's texture | yes, one line high |
 | dry lake, riverbed, salt flat | no | **yes**, drawn in perspective (section 3) | no |
 | road or rail line | no | **yes**: along a row (constant depth), 1-2 rows; give it marks (dashes, sleepers, posts every few px) or it won't be seen to move | no |

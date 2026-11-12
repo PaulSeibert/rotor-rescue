@@ -12,7 +12,7 @@ H = (Y1 - Y0) * SCALE
 LABEL = 150
 img = Image.new('RGB', (W + LABEL, 24 + 12 * (H + 4)), (16, 16, 24))
 d = ImageDraw.Draw(img)
-d.text((8, 6), 'Rotor Rescue perspective floor (placeholder art), a500, camera 3 px/frame, 4 frames apart', fill=(230, 230, 230))
+d.text((8, 6), 'Rotor Rescue perspective floor (painted art), a500, camera 3 px/frame, 4 frames apart', fill=(230, 230, 230))
 for i, s in enumerate(shots):
     y = 24 + i * (H + 4)
     img.paste(s.crop((0, Y0, 320, Y1)).resize((W, H), Image.NEAREST), (0, y))
