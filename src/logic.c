@@ -1678,9 +1678,22 @@ uint8_t logicChopperFrame(const tGame *g) {
 #define ROTOR_PER_MIN 455
 #define ROTOR_PER_MIN_BOOST 300
 #define ROTOR_BOOST_FRAMES 100
+#define ROTOR_HEAVY_PER_HEAD 2   // v3: period units a person aboard adds (16 aboard: 32, 6 %: lower, never higher)
+#define ROTOR_HURT_BASE 32       // v3: a damaged chopper's rotor is this much lower, plus the wobble
+
+// v3: the hurt engine labours: a slow, small wobble in the pitch (0-15 period units, two
+// triangles of 64 and 21 frames), so it is not a steady tone and not a siren
+static int16_t rotorWobble(uint16_t uwFrame) {
+	int16_t a = (int16_t)(uwFrame & 63);
+	if(a > 31) a = (int16_t)(63 - a);
+	int16_t b = (int16_t)((uwFrame * 3) & 63);
+	if(b > 31) b = (int16_t)(63 - b);
+	return (int16_t)((a + b) >> 2);
+}
 
 static void rotorTick(tGame *g) {
 	const tChopper *c = &g->chop;
+	uint8_t ubLoad = g->aboard > CABIN_MAX ? CABIN_MAX : g->aboard;
 	if(g->events & EV_TAKEOFF) g->rotorBoost = ROTOR_BOOST_FRAMES;
 	else if(g->rotorBoost) --g->rotorBoost;
 	int16_t wPer = ROTOR_PER_IDLE;
@@ -1695,11 +1708,17 @@ static void rotorTick(tGame *g) {
 			int16_t wClimb = c->vy < 0 ? (int16_t)-c->vy : 0;
 			wPer = (int16_t)(ROTOR_PER_HOVER - ((wSpeed * 45) >> 4) - wClimb * 4);
 			wVol = (int16_t)(40 + ((wSpeed * 11) >> 7) + (wClimb ? 3 : 0));   // (speed/3 rose to 56 flat out)
+			// v3: a load or a hurt engine only ever sounds lower and heavier, never faster
+			int16_t wHeavy = (int16_t)(ubLoad * ROTOR_HEAVY_PER_HEAD);
+			if(c->damaged) wHeavy = (int16_t)(wHeavy + ROTOR_HURT_BASE + rotorWobble(g->frame));
+			wPer = (int16_t)(wPer + wHeavy);
+			wVol = (int16_t)(wVol + (ubLoad >> 2));
 			if(g->rotorBoost) {
-				wPer = (int16_t)(wPer - g->rotorBoost * 3);
-				wVol = (int16_t)(wVol + g->rotorBoost / 10);
+				// the spin-up: the empty chopper's is the lively one; a heavy one lifts off calmly
+				wPer = (int16_t)(wPer - g->rotorBoost * (wHeavy ? 1 : 3));
+				wVol = (int16_t)(wVol + (wHeavy ? g->rotorBoost / 20 : g->rotorBoost / 10));
 			}
-			int16_t wMin = g->rotorBoost ? ROTOR_PER_MIN_BOOST : ROTOR_PER_MIN;
+			int16_t wMin = g->rotorBoost && !wHeavy ? ROTOR_PER_MIN_BOOST : ROTOR_PER_MIN;
 			if(wPer < wMin) wPer = wMin;
 			if(wVol > 62) wVol = 62;
 		}
@@ -1722,6 +1741,28 @@ uint16_t logicRotorPeriod(const tGame *g) { return g->rotorPer; }
 uint8_t logicRotorVolume(const tGame *g) { return g->rotorVol; }
 int logicRotorThumpsX10(uint16_t uwPeriod) {
 	return (int)((ROTOR_CLOCK * 10) / ((int32_t)uwPeriod * ROTOR_PASS));
+}
+
+// The least frames between two plays of one effect. Explosions and landings can come in
+// clusters, a tank or a jet twice at once; none should machine-gun the two effect channels.
+uint8_t logicSfxGap(uint8_t ubKind) {
+	static const uint8_t pGap[SFXK_COUNT] = {
+		8,    // boom
+		50,   // jetwarn
+		50,   // jet
+		12,   // tankfire
+		6,    // saved
+		6,    // board
+		12    // land
+	};
+	return ubKind < SFXK_COUNT ? pGap[ubKind] : 0;
+}
+
+uint8_t logicSfxAllow(uint16_t *pLast, uint16_t uwNow, uint8_t ubKind) {
+	if(ubKind >= SFXK_COUNT) return 1;
+	if(pLast[ubKind] && uwNow >= pLast[ubKind] && (uint16_t)(uwNow - pLast[ubKind]) < logicSfxGap(ubKind)) return 0;
+	pLast[ubKind] = uwNow ? uwNow : 1;
+	return 1;
 }
 
 uint8_t logicRotorPhase(const tGame *g) {

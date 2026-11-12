@@ -469,6 +469,35 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   26 %). The take-off spin-up (3 less per frame for 100 frames, up to 300, and +10 volume) is unchanged. Unit tests
   `testRotorRateFollowsSpeedAndClimb` (6-6.5 flat out, 5.5-6 at cruise, no more than 6.5 climbing flat out, volume at most hover + 5). Previews:
   `sound-preview/rotor-v2/` (hover, cruise, full, take-off; `v1-previous-*` is the 2026-11-12 morning version).
+- **Rotor v3 (Paul's playtest, 2026-11-12, later: "when damaged, the sound is very annoying when flying, and the sound when
+  cruising with passengers is not good and irritating as well"; studio tuning, pending Paul's playtest).** What the code and
+  the emulator showed (a500, scripted trip, serial `rotorPer`/`rotorVol` and every `AGK sfx`): the rotor did **not** know about
+  damage or passengers at all. Empty and 16 aboard cruise at the same period 456 and volume 44 flat out, and damage only
+  caps the speed at 2.4 px/frame (period ~485), so the cruise itself was the approved v2. What was left that is
+  irritating: (1) **the take-off spin-up** (`rotorBoost`, unchanged in v2): 100 frames of 3 less period a frame down to 300
+  = **11.8 thumps a second** at volume +10 (measured 9.8-11.3 a second, volume 48-50, for the first 2 s of every flight),
+  and every loaded trip, every repair on the pad and every barracks leaves with it, so the cruise "with passengers" opens
+  with a buzz; (2) the damaged state had no sound of its own beyond the single hit boom, and the sfx channels let one
+  effect repeat as fast as its events (boarding 16 people is 16 `board` blips 8-10 frames apart, jets and explosions in
+  clusters). Now (`logicRotorTick`, logic.c; previews `sound-preview/rotor-v3/`):
+  - **The approved empty hover and cruise are bit for bit unchanged** (periods and volumes identical for hover, cruise, full and
+    take-off with nothing aboard and no damage; the empty chopper's lively take-off is untouched).
+  - **Loaded: lower and heavier, never higher.** Period + 2 per person aboard (16: +32, 6 %), volume + aboard/4 (16: +4); the spin-up for
+    a loaded or hurt chopper is 1 per frame, not 3 (and +boost/20, not /10) and never below period 455, so it lifts off at 6.5 thumps a second
+    at the most (was 11.8), no buzz.
+  - **Damaged: a laboured, lower rotor, not an alarm.** Period + 32 plus a slow wobble of 0-15 (two triangles of 64 and 21 frames, so it is irregular
+    and slow, at most 3 units a frame), volume as for the load. Cruise 5.0-5.6 thumps a second instead of 5.6-6.5; it is easy to tell
+    from the healthy one, with no repeating cue. The "hurt" cue at the moment of the hit stays the single boom, plus the smoke and
+    the DAMAGED HUD slot.
+  - **No effect repeats like a machine gun:** `logicSfxAllow` (main.c `playSounds`) holds back an effect that played less than `logicSfxGap`
+    frames ago: boom 8, jetwarn 50, jet 50, tankfire 12, saved 6, board 6, land 12 (crash, open, cannon, bomb, start are not gated: priority and
+    the fire rate decide those).
+  - Unit tests `testRotorApprovedEmptyStaysExactly` (591/40 hover, 501/42 cruise), `testRotorLoadedAndDamagedNeverFasterThanEmpty` (at 0,
+    16, 32, 38, 48 sixteenths of a pixel: loaded 8/16, damaged, both: period above the empty one, at most 90 above, volume 0-5 above),
+    `testRotorHeavyLiftoffIsCalm` (at most 6.5 a second, volume steps at most 2 a frame, at most 62), `testRotorDamagedWobbleIsGentle`
+    (6-24 units of wobble, steps at most 3, never below the empty cruise + 32), `testSfxGapsWhileDamaged`.
+  - Not decided by ear yet: Paul listens in WinUAE. If the empty take-off's 9.8-11.8 a second is also too much, the same
+    fix applies to it (`ROTOR_PER_MIN_BOOST` 455 and the 3 per frame); left alone because Paul approved hover and cruise only.
 - **Rotor (decided by Paul, 2026-11-12: a deep blade thump; numbers below are v1, see v2 above):** a low, heavy whop-whop-whop like a Huey, made
   from scratch (`sound/tools/make_rotor.py`, mirrored bit for bit by `rotorSynth` in `main.c`; no samples). Why the
   loop of 6ab2ff8 was still tinny: its blade pass was 752 samples at 8287 Hz, so **11 thumps a second**, a
