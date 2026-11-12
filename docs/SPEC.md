@@ -19,8 +19,8 @@ You fly a rescue chopper along one long, flat battlefield, 3072 px wide (about t
 Four barracks, spread out between the enemy border fence and your base on the far right, hold 16
 hostages each. Blow a barracks open with the cannon (two shots) or a bomb (one), land beside it so
 the people can run aboard, then fly the cabin full (16) home through tank shells, jets and air
-mines, and land on the pad so they run into the hangar. One hit and the chopper is gone with
-everyone aboard. 64 people, three missions (Desert Dusk, Mountain Night, Coastal Dawn), three
+mines, and land on the pad so they run into the hangar. The first hit only damages the chopper (smoke,
+slower, everyone aboard kept); a second hit while damaged destroys it with everyone aboard. 64 people, three missions (Desert Dusk, Mountain Night, Coastal Dawn), three
 choppers for the whole game. A side-view rescue shooter in the 8-bit helicopter-rescue tradition,
 built from scratch: our own code, art, music and sound.
 
@@ -39,7 +39,7 @@ routes (there is one battlefield, repeated three times with harder numbers).
 | machine | what it gets |
 |---|---|
 | **A500 OCS, PAL 50 Hz, Kickstart 1.3** | the whole game. README and `agk.toml` state **1 MB (512K chip + 512K slow)**: the 425.6 KB program lives in slow RAM. 50 fps, worst frame 81% (section 11). |
-| 512K chip, no expansion | **not supported** (see Gap). Not tested here. |
+| 512K chip, no expansion | **to be measured** (decision E, "decided by Paul, 2026-11-11": measure only, shrink nothing). Result below in this table once run. |
 | **A1200 AGA** (found at boot: Lisa's DENISEID low byte `$F8`, `agaDetect` in `main.c`) | a 24-bit copper sky on all 172 sky lines (4 MOVEs a line via BPLCON3 LOCT), a 224-colour title logo (8 planes, `titlelogo8.bin`), quarter-pixel parallax (BPLCON1 35 ns bits) for the clouds, mountains and hills. The game itself is the OCS game. |
 | Kickstart 3.1, AROS ROM | tested profiles `a500-ks31`, `a500-aros`. AROS loads the program at about 10 frames a KB; the first picture arrives by frame ~2990 against the harness's 3000-frame boot window (`b9d5987`). |
 
@@ -90,8 +90,15 @@ RAM. Moving data to the floppy (as Rotor Raider does) is the route; not planned.
   about 3 px less each side, 53% of the sprite area. **Gap vs playbook** (25-50%): slightly large.
 - Enemy shots are 4 x 4, mines 12 x 12 (a 14 x 12 target for the cannon), the jet 28 x 10 for a ram
   and 32 x 12 for the cannon. The cannon's box is 6 x 3.
-- **No shield and no invulnerability frames:** one hit destroys the chopper and everyone aboard. Then
-  70 frames of crash, 150 frames of the LOST state (3 s), respawn on the pad.
+- **Damage instead of instant loss** (decided by Paul, 2026-11-11; the hero device). The first hit **damages** the
+  chopper: it trails smoke, flies about 20 % slower (`VX_MAX` 48 to 38, the sidestep 40 to 32, climb
+  28 to 22, descent 32 to 26), everyone aboard is kept, and the HUD's right slot reads DAMAGED in
+  place of the skill. The hit is followed by `INVULN_FRAMES` = 100 frames (2 s) in which nothing
+  hurts the chopper (shots and mines pass through, a ram does nothing) and it blinks (4 frames
+  visible, 4 hidden). A **second hit while damaged destroys it** with the old loss rules: everyone
+  aboard is lost, 70 frames of crash, 150 frames of the LOST state (3 s), respawn on the pad.
+  **Landing on the home pad (x 2800-2940) repairs it**; so does a respawn. GODMODE ignores hits as
+  before and is never damaged.
 
 **Fun at three scales**
 - 10 s: land under a tank's tell and lift off as the barrel flashes; shoot a jet you heard coming.
@@ -103,14 +110,14 @@ RAM. Moving data to the floppy (as Rotor Raider does) is the route; not planned.
 |---|---|
 | a person reaches the hangar | 100 (max 6400 a mission) |
 | barracks opened | 25 |
-| tank | 50 |
+| tank | 50 for the first `TANK_QUOTA` (10) kills of a mission, then 0 (decided by Paul, 2026-11-11); the HUD's left slot shows QUOTA 10 for 4 s when the quota is reached |
 | jet | 100 |
 | air mine | 75 |
 | mission cleared | +10 per person saved |
 
 Rank from people saved over the game (`logicRank`): under 40 ROOKIE, 40 PILOT, 90 CAPTAIN, 140 HERO,
 180 LEGEND (of 192). Kept on death: score, saved count, the opened barracks and who is still free.
-Lost on death: everyone aboard. No extra lives by score (**Gap vs playbook**, see 7).
+Lost on death (the second hit): everyone aboard. No extra lives by score (**Gap vs playbook**, see 7).
 
 ## 4. Structure and content budget
 
@@ -158,7 +165,7 @@ GODMODE, as Rotor Raider's `tools/pacing.agk`) is open work (open question 3).
 | time to first threat 3-6 s | the first tank 14 s / 11 s / 8 s after the card; mission 1's jets need one trip home first | **gap**: slow start by design, "a quiet start" (`logic.c:414`) |
 | rest beats, 4-8 s per zone | the base, the flight home, and the whole mission-start are quiet; nothing scripted | unknown |
 | set piece at ~50%, quiet before it | none | **gap** (see 6) |
-| fire ramp ~30/min first zone to ~100/min late | per tank in range: a shell every 110-141 frames on normal (24 a minute) at mission 1 trip 0; `-20` frames a mission and `-8` a trip, floor 40-71 frames (54 a minute per tank). Up to 5 tanks, 6 shells live | plausible, **not measured** |
+| fire ramp ~30/min first zone to ~100/min late | per tank in range: a shell every 85-116 frames on normal (31 a minute) at mission 1 trip 0 (base gap 85, was 110: slower shells are paid for in fire rate); `-20` frames a mission and `-8` a trip, floor 40-71 frames (54 a minute per tank). Up to 5 tanks, 6 shells live | plausible, **not measured** |
 | next level +50% enemies | tank cap +1 a mission, spawn gap -40 frames, shell gap -20, jet rest -30 | yes by tables |
 
 **Length:** a bot-assisted trip to the nearest barracks and home takes 1452 frames (29 s,
@@ -173,21 +180,24 @@ do not call the pacing "tuned".
 
 | enemy | HP | movement | fire / threat | tell | score |
 |---|---|---|---|---|---|
-| tank | 2 (cannon 1 each; a bomb within 22 px kills) | spawns off screen (cam -40 or +screen +40), drives at the chopper 0.5 px/frame, stays between x 16 and 2536 | a shell when the chopper is low (skids y > 150) and within 200 px: aimed with the chopper's half velocity, error +- (mask+1)/2 px, 2-4 px/frame, life 100 frames; first shell 150 frames after spawning | stops, barrel up, flash blinks every 4 frames, 12-22 frames by skill (16 normal) | 50 |
-| jet | 1 (cannon only) | from 130-255 px off screen (lead by skill), mostly ahead of where you fly (3 of 4), 4 px/frame, follows your height at 0.5 px/frame | a missile (5 px/frame, life 60 frames) only if on screen 18-40 frames (by skill; 24 on normal), you are airborne, 56-200 px ahead and within 14 px of its height; a bomb if you are landed within 24 px; ram kills | heard (a sound on spawn), on the radar, minimum 56 px ahead (`JET_AHEAD_MIN`), then the on-screen delay. No flash. | 100 |
+| tank | 2 (cannon 1 each; a bomb within 22 px kills) | spawns off screen (cam -40 or +screen +40), drives at the chopper 0.5 px/frame, stays between x 16 and 2536 | a shell when the chopper is low (skids y > 150) and within 200 px: aimed with the chopper's half velocity, error +- (mask+1)/2 px, 1.5 px/frame (24/16, was 2-4), life 140 frames; first shell 150 frames after spawning | stops, barrel up, flash blinks every 4 frames, 12-22 frames by skill (16 normal) | 50 |
+| jet | 1 (cannon only) | from 130-255 px off screen (lead by skill), mostly ahead of where you fly (3 of 4), 4 px/frame, follows your height at 0.5 px/frame | a missile (2.5 px/frame, was 5; life 80 frames; the repeat is 35 frames, was 50) only if the jet is **fully on screen**, on screen 18-40 frames (by skill; 24 on normal), you are airborne, 56-200 px ahead and within 14 px of its height; a bomb if you are landed within 24 px (also fully on screen); a ram hurts you | heard (a sound on spawn), on the radar, then a **flash** (the jet's nose and engine glow, blinking) for the tell, 12-22 frames by skill (16 on normal, the tank's table), part of the on-screen delay, so the first shot comes as late as before. Aborted (no missile) if at the end of the tell the jet is not fully on screen, you are landed or climbed out of its height, or you are closer than 56 px | 100 |
 | air mine | 1 (cannon only) | spawns off screen at y 54-117, homes at 0.5 px/frame in x and 0.25 in y when within 300 px, never below y 200 | contact | none (it is visible and slow) | 75 |
 | barracks | 2 (cannon 1 each; a bomb within 30 px does 2) | static; releases 1 person per 8 frames after a 20-frame delay | none; roofs stop bombs and the chopper | burning frames | 25 |
 
-- **Tell units:** tanks, section 7 table. A unit test (`testNoShellWithoutTell`) and a scenario
-  (`tests/tell.agk`: no `AGK sfx tankfire` without a `tank tell` before it) enforce it for every
-  shell.
-- **Shell and missile speed. Gap vs playbook** (1-1.5 px/frame): shells 2-4 px/frame, the jet
-  missile 5 px/frame (6 before `e46d2a1`). Long tells and the 56 px minimum make them readable; a
-  slower shell is a tuning ticket.
-- **No fire from off screen, no point-blank:** a tank fires only inside 200 px and low; a jet needs
-  18-40 on-screen frames and 56 px of room. **Gap:** the jet's "ahead < 200 px" gate can place it
-  up to ~40 px beyond the screen edge once it has been seen (the chopper is 104-216 px from the
-  screen's left edge), which the on-screen test (`seen`) does not recheck; no unit test covers it.
+- **Tell units:** tanks and jets, section 7 table. A unit test (`testNoShellWithoutTell`) and a
+  scenario (`tests/tell.agk`: no `AGK sfx tankfire` without a `tank tell` before it) enforce it for
+  every shell; `testNoMissileWithoutTell` does the same for every jet missile (decided by Paul, 2026-11-11).
+- **Shell and missile speed** (decided by Paul, 2026-11-11): shells 1.5 px/frame on the larger axis (a slanted shot up to
+  2.1 on the diagonal; was 2-4), the jet missile 2.5 px/frame (was 5). The playbook asks 1-1.5.
+  Because slower shots are easier to dodge, the difficulty is paid back in fire timing, not speed:
+  the tank's base shell gap is 85 frames (was 110) and the jet's repeat 35 (was 50). **Not
+  measured** with a person; a tuning ticket if it plays too hard or too soft.
+- **No fire from off screen, no point-blank:** a tank fires only inside 200 px and low; a jet fires
+  only while fully on screen (`jetFullyOnScreen`, its 32 px box inside the screen, at the start
+  and at the end of its tell; unit-tested, `testJetNeverFiresOffScreen`), 18-40 on-screen frames
+  in, with 56 px of room. (Before, "ahead < 200 px" could place a jet up to ~40 px beyond the screen
+  edge once it had been seen, `logic.c:1154` at 17ece43.)
 - **Sight no longer than weapon range:** tanks drive at the chopper from any distance but shoot
   only inside 200 px; mines see 300 px and have no weapon.
 - **Path scripts:** none. Movement is per-unit code in `logic.c` (no `wavescript`).
@@ -198,7 +208,10 @@ do not call the pacing "tuned".
 ## 7. Difficulty
 
 Ctrl+L then a key, within two seconds; it stays until changed. Shown at the right of the score
-bar. Tables in `logic.c:454-468`. Index 0 is GODMODE.
+bar. Tables in `logic.c` (`s_p*[DIFFICULTY_MAX + 1]`). Index 0 is GODMODE and **equals index 3 in
+every table** (decided by Paul, 2026-11-11; before, its jets used the easiest lead 255 px and delay 40). A unit test
+(`testGodmodeTablesEqualNormal`) walks every per-difficulty table (the registry `logicDiffTables`)
+and fails on any difference.
 
 | | 1 easiest | 2 easy | **3 normal** | 4 hard | 5 hardest |
 |---|---|---|---|---|---|
@@ -212,15 +225,16 @@ bar. Tables in `logic.c:454-468`. Index 0 is GODMODE.
 | jet rest between passes (`160 - 30*mission +`; floored at 40) | +80 | +40 | 0 | -30 | -50 |
 | jet starts this far off screen (px) | 255 | 220 | 180 | 150 | 130 |
 | jet on screen before its first shot (frames) | 40 | 30 | 24 | 20 | 18 |
+| jet tell, the flash before a missile (frames; part of the line above) | 22 | 18 | 16 | 14 | 12 |
 
 - **Never changes:** the battlefield, barracks positions and hit points, people, cabin 16, 3 lives,
-  the chopper's handling and hitbox, every tell existing, one-hit death.
+  the chopper's handling and hitbox, every tell existing, the second hit's death (the first only damages).
 - **The ramp:** within a mission by trip (tanks +1, shell gap -8, jets after the first trip, mines
   after the second); across missions by mission (tanks +1, spawn gap -40, shell gap -20, jet rest -30,
   quiet start 700 / 550 / 400 frames).
-- **Hero devices: none.** No shield, no smart bomb, no extra lives by score, no power-ups.
-  **Gap vs playbook:** one hit ends a chopper and every rescue in progress; the only forgiveness is
-  the long tells and the safe base. The playbook asks for at least one hero device.
+- **Hero device: damage** (decided by Paul, 2026-11-11, section 3): the first hit costs smoke, 20 % speed and the rest
+  of the trip until the pad, not the cabin; 2 s of blinking invulnerability follow. No shield,
+  no smart bomb, no extra lives by score, no power-ups.
 - **Respawn:** in place at the pad, landed, after a crash (70 frames) and a 150-frame LOST screen.
   Enemy shots, jets and mines are cleared; jets cool 150 frames; tanks stay. The camera pans back.
   Lives (3) are for the whole game and are not refilled between missions. People still free stay
@@ -230,10 +244,15 @@ bar. Tables in `logic.c:454-468`. Index 0 is GODMODE.
   - The base is safe: no tank spawns while the chopper is at x 2760 or more, tanks cannot pass
     x 2536, and a tank shoots only within 200 px, so the pad (x 2800+) cannot be shot.
   - Flying high is safe from tanks (they need skids y > 150), but not from jets and mines.
-  - **Open:** tanks respawn on a timer while you are left of x 2760, 50 points each; a tank-farming
-    loop (and mines at 75) is possible for score. It makes no progress and is not closed.
-- **Testing aids:** GODMODE (key 0: plays like normal, nothing destroys the chopper, no hi-score;
-  its jets use the easiest lead and delay, see open question 5), Ctrl+L 1-5, the serial heartbeat
+  - **Closed** (decided by Paul, 2026-11-11): tanks respawn on a timer while you are left of x 2760, and used to pay 50
+    points each without end. Now only the first `TANK_QUOTA` (10) tank kills of a mission score
+    (`tankKills`, reset at each mission start, not at a respawn; cannon and bomb alike); later tanks
+    still die and still threaten, for 0. At the quota the HUD's left slot reads QUOTA 10 for 200
+    frames. 10 is about what a fair mission kills (about 2-3 a trip over four trips; derived, not
+    measured). **Open:** mines still pay 75 each, endlessly (3 at once, a 1 in 2 roll per spawn): a
+    smaller loop, not closed here.
+- **Testing aids:** GODMODE (key 0: plays like normal, nothing damages or destroys the chopper, no
+  hi-score), Ctrl+L 1-5, the serial heartbeat
   (`state`, `x`, `landed`, `aboard`, `saved`, `trip`, `lives`), and the scenario checkpoints
   `boarding` and `rescued`.
 
@@ -411,22 +430,21 @@ writable disk.)
 | new rotor whop by ear | listened to on speakers: deep thump and slap, no tinny hiss, no clicks at the loop | Paul | unproven (agk records it; nobody has judged it by ear) |
 | attract loop and demo | left alone 12 s + 8 s: the hall of fame, then the demo plays the same trip and ends with 16 aboard; fire returns to the title | Paul in WinUAE | scenario-tested in vAmiga only |
 | boot time from a real floppy | fire-to-play measured with a stopwatch on a real A500 or WinUAE at floppy speed | Paul | **not measured** |
+| damage and its blink (decided by Paul, 2026-11-11) | WinUAE, play: take one hit and see the smoke, the slower flight, DAMAGED in the HUD and 2 s of blinking; take a second hit during the blink (nothing happens) and after it (the chopper is lost); land on the pad and see it repaired | Paul | unproven by a person (scenarios check state, the first picture and the HUD pixels) |
+| the jet's tell | WinUAE, play at normal: the nose-and-engine flash is noticed before the missile; the missile never comes from beyond the screen edge | Paul | unproven by a person |
+| shell and missile speeds | WinUAE, play: shells (1.5 px/frame) and missiles (2.5) read as dodgeable but still threatening; the tank gap 85 and jet repeat 35 keep the game hard enough | Paul | unproven; the compensation is a guess |
+| the tank quota | WinUAE, GODMODE 5 or normal: after 10 kills in a mission QUOTA 10 shows on the HUD and further tanks score nothing | Paul | scenario-tested in vAmiga only |
 | the approved new art (landed 567e6c5) | the scrolled bands show no seam at 1x on a real display; the palette reads on all three missions | Paul after the art merge | pending: Paul on WinUAE/real display |
 
 ## Open questions for Paul
 
+(Numbers are kept from before. Questions 2, 4, 5 and 7 are decided, decided by Paul, 2026-11-11: see v1.2.)
+
 1. Fire-to-play time from a real floppy is not measured (425.6 KB executable plus logos). What is
    the budget, and does a 1 MB requirement stand?
-2. Should the game get a hero device (a shield, a respawn blink, or a hit that doesn't take the
-   cabin)? The playbook asks for one; today one hit loses everything aboard.
 3. Is a pacing run wanted (a scripted GODMODE trip, as Rotor Raider's `tools/pacing.agk`)? Section 5
    is derived only.
-4. Slow the tank shell and jet missile toward 1-1.5 px/frame? (2-4 and 5 today.)
-5. GODMODE (key 0) is documented as "plays like normal", but its jets use the easiest lead (255 px)
-   and on-screen delay (40 frames) because the tables' index 0 differs from index 3 (`logic.c:464-465`).
-   Intended?
 6. Add `docs/STYLE.md` (a copy of the pilot's) after the art lands?
-7. Close the tank-farming loop (a score exploit), or leave it?
 8. Add a credits screen and an animated ending, as the playbook's presentation list asks?
 
 ## Version history
@@ -435,3 +453,4 @@ writable disk.)
 |---|---|---|
 | v1.0 | 2026-11-11 | retroactive: the game as it is at `main` 2c0c4f9, with the approved new art noted as landing |
 | v1.1 | 2026-11-11 | the pilot art landed on `main` (567e6c5, 065a44d): section 8 and the milestones updated |
+| v1.2 | 2026-11-11 | decided by Paul, 2026-11-11: A damage instead of instant loss; B shell 1.5 and missile 2.5 px/frame, a jet tell, no off-screen fire; C a tank score quota of 10 a mission; D GODMODE's tables equal normal's, unit-tested; E the 512K test (measurement only, result in section 2). Open questions 2, 4, 5, 7 removed |
