@@ -96,7 +96,7 @@ whole range on the near rows.
 3. **The far strip's foot is haze, and wanders:** the mountains dissolve into the plain along an irregular
    edge that differs per column (low foothill swells, scree tongues, haze bays), so no row is the edge across
    the screen and no shape has a flat top or foot. **Row 9 is empty** (line 179, the last before the palette
-   switch, is bare sky/haze in every column), row 8 at most 15 % covered. The dissolve is a **blue-noise**
+   switch, is bare sky/haze in every column), row 8 at most 25 % covered (flecks of foothill dust, pens 4-6). The dissolve is a **blue-noise**
    scatter whose density changes along x as well as y: never an ordered (Bayer, period 2 or 4) dither, which
    draws a dotted line across the screen. Below it, row 0 of the floor is the haze, so the strip has no
    bottom edge. `art/tools/plain_check.py` scans for runs and periodic rows.
@@ -126,12 +126,17 @@ whole range on the near rows.
 
 A lake or road may span rows only if drawn with the section 3 formula; then it shears like ground.
 
-## 7. Optional: the plain behind the hill crests
+## 7. The plain behind and in front of the hills (Paul, 2026-11-12, v4)
 
-Between the hill crests (lines 199-218) COLOR00 shows C, flat. The hills scroll at 1/2, the floor's
-near speed, so near-plain texture (land pens, flat, one line high) may be painted into `hills.txt`'s
-transparent pixels on rows 2-21. It scrolls with the hills; keep it sparse next to row 2 (the seam with
-floor row 18, which is C).
+Between the hill crests (lines 199-218) and under the hills' scattered foot (lines 219-223) the bare backdrop
+(C) would be a flat band across the screen. `hills.txt`'s transparent pixels on rows 2-26 therefore carry
+near-plain texture in land pens (never pen 6, which is C): small flecks (pens 5/4, the odd pale 7) in the
+top rows, larger scrub tufts with a lit left pixel and a shadow, small stones and pale/dark patches lower,
+density wandering along x, **every row at least ~17-22 % drawn**. It scrolls with the hills (1/2, the floor's
+near speed). `ground.txt` rows 0, 1, 2 and 4 (lines 224-228, 1:1 with the playfield, formerly solid) carry
+sparse one-pixel dust in pens near C (5/7, rarely 4/3) so the foreground does not start with a flat band; keep it
+small, it sits under the tanks and people. `plain_check.py` fails any row over 85 % one colour on lines 165-229,
+except 179, 180 and 198 (the palette switch and floor row 18, bare by contract, one line each).
 
 ## 8. Budget (don't grow it without amiga-hw)
 

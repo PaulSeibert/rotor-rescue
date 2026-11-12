@@ -148,7 +148,7 @@ def main():
         bad = {c for r in rows for c in r} - set('.1234567')
         if bad:
             problems.append('%s: only . and pens 1-7 (found %s)' % (name, ''.join(sorted(bad))))
-    for y, cap in ((FAR_ROWS - 2, 0.15),):
+    for y, cap in ((FAR_ROWS - 2, 0.25),):
         cover = sum(c != '.' for c in far[y]) / 320.0
         if cover > cap:
             problems.append('plain_far.txt row %d: %.0f%% covered, at most %.0f%% (its foot is haze)' % (y, cover * 100, cap * 100))

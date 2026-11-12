@@ -8,7 +8,9 @@ lines 160-205 (the far strip, the 179/180 palette switch, the floor, the 198/199
   3. edge    on each pair of adjacent lines, the longest run of columns whose colours differ strongly
              (what the eye reads as a hard horizontal edge); the smooth sky and ground gradients
              are below the threshold.
-Anything over LIMIT px fails. Exit 1 on a failure.
+  4. solid   (lines 165-229, not the palette-switch lines 179/180) no row more than 85 % one colour over the
+             320 px, the backdrop counted: no band of flat colour across the screen.
+Anything over LIMIT px (or 85 %) fails. Exit 1 on a failure.
     python3 art/tools/plain_check.py [--limit 64] [--verbose]      (PLAIN_ART_DIR=... checks another set)
 """
 import os
@@ -21,6 +23,9 @@ ROAD = range(190, 194)      # the road (floor rows 11-12) is a deliberate full-w
 EDGES = list(range(165, 183)) + list(range(194, 203)) + list(range(215, 227))   # lines at the band seams: mountain foot, 179/180 palette switch, floor/hills, hills' foot/ground
 # (the floor's interior, the dry lake and the road, are features Paul approved, not seams)
 CAMS = [i * 36 for i in range(16)]
+SOLID = range(165, 230)      # the plain, from the mountains' foot down to where the playfield's ground texture starts
+SOLID_EXEMPT = (179, 180, 198)   # bare by contract: far row 9 and floor row 0 (the palette switch), floor row 18 (C): one line each
+SOLID_LIMIT = 0.85          # no row more than 85 % one colour over 320 px, the backdrop counted
 STRONG = 5      # sum of the channel steps (4-bit units) that counts as an edge
 
 
@@ -81,10 +86,25 @@ def main():
                     v = strong_run(rgb[line - pc.PLAY_TOP], rgb[line + 1 - pc.PLAY_TOP])
                     if v > worst['edge'][0]:
                         worst['edge'] = (v, line, cam)
-        bad = [k for k, v in worst.items() if v[0] > limit]
+        solid = {}                      # line -> worst fraction over the camera offsets
+        for cam in CAMS:
+            rgb, tag = pc.compose(m, cam, A)
+            for line in SOLID:
+                if line in SOLID_EXEMPT:
+                    continue
+                row = rgb[line - pc.PLAY_TOP]
+                f = max(row.count(c) for c in set(row)) / 320.0
+                if f > solid.get(line, (0, 0))[0]:
+                    solid[line] = (f, cam)
+        sl = max(solid, key=lambda l: solid[l][0])
+        failing = sorted(l for l in solid if solid[l][0] > SOLID_LIMIT)
+        if verbose and failing:
+            print('   solid rows over %d %%: %s' % (SOLID_LIMIT * 100, ', '.join('%d(%d%%)' % (l, solid[l][0] * 100) for l in failing)))
+        worst['solid'] = (int(solid[sl][0] * 100), sl, solid[sl][1])
+        bad = [k for k, v in worst.items() if v[0] > (limit if k != 'solid' else SOLID_LIMIT * 100)]
         fails += len(bad)
-        print('%-15s %s' % (m['name'], '  '.join('%s %d px (line %d, cam %d)' % ((k,) + v) for k, v in worst.items())),
-              '-> FAIL ' + ','.join(bad) if bad else '-> ok (all <= %d px)' % limit)
+        print('%-15s %s' % (m['name'], '  '.join(('%s %d%% (line %d, cam %d)' if k == 'solid' else '%s %d px (line %d, cam %d)') % ((k,) + v) for k, v in worst.items())),
+              '-> FAIL ' + ','.join(bad) if bad else '-> ok (all <= %d px, solid <= 85%%)' % limit)
     print('checked %d camera offsets x %d lines x 3 missions, limit %d px' % (len(CAMS), Y1 - Y0, limit))
     sys.exit(1 if fails else 0)
 
