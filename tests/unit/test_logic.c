@@ -1414,7 +1414,87 @@ static void testInvincibleIsNeverDamaged(void) {
 	CHECK(g.events & EV_SHRUG);
 }
 
+// ---- the rotor: a deep blade thump whose rate follows speed and climb ----
+static int thumpsX10(void) { return logicRotorThumpsX10(logicRotorPeriod(&g)); }
+
+static void testRotorRateFollowsSpeedAndClimb(void) {
+	newGame();
+	flyAt(1500, 120);
+	step(NONE, 150);
+	int iHover = thumpsX10();
+	int iHoverVol = logicRotorVolume(&g);
+	CHECK(iHover >= 45 && iHover <= 55);                  // 4.5-5.5 thumps a second at hover
+	step((tInput){.dx = 1}, 120);
+	int iFast = thumpsX10();
+	CHECK(iFast >= 80 && iFast <= 90);                    // 8-9 at full speed
+	CHECK(logicRotorVolume(&g) > iHoverVol);              // and louder
+	newGame();
+	flyAt(1500, 150);
+	step(NONE, 150);
+	step((tInput){.dy = -1}, 20);
+	CHECK(thumpsX10() > iHover + 8);                      // climbing quickens it
+	newGame();
+	flyAt(1500, 60);
+	step(NONE, 150);
+	step((tInput){.dy = 1}, 20);
+	CHECK(thumpsX10() <= iHover);                         // descending doesn't
+}
+
+static void testRotorIdlesSlowAndSoftOnTheGround(void) {
+	newGame();
+	step(NONE, 100);
+	CHECK(g.chop.landed);
+	CHECK(thumpsX10() >= 30 && thumpsX10() <= 40);        // a slow idle, 3-4 a second
+	int iIdleVol = logicRotorVolume(&g);
+	newGame();
+	flyAt(1500, 120);
+	step(NONE, 150);
+	CHECK(iIdleVol < logicRotorVolume(&g));
+}
+
+static void testRotorSpinsUpAtTakeoff(void) {
+	newGame();
+	flyAt(1500, 120);
+	step(NONE, 300);
+	int iHover = thumpsX10(), iHoverVol = logicRotorVolume(&g);
+	newGame();
+	step(NONE, 100);
+	int iPrev = thumpsX10();
+	step((tInput){.dy = -1}, 1);
+	CHECK(!g.chop.landed);
+	int iPeak = iPrev, iPeakVol = 0;
+	for(int i = 0; i < 90; ++i) {
+		step(NONE, 1);
+		int n = thumpsX10();
+		CHECK(n >= iPrev - 1);                            // spinning up, never a dip, until it peaks
+		if(n < iPrev) break;
+		iPrev = n;
+		if(logicRotorVolume(&g) > iPeakVol) iPeakVol = logicRotorVolume(&g);
+		if(n > iPeak) iPeak = n;
+	}
+	CHECK(iPeak >= 70);                                   // clearly faster than the hover's 5
+	CHECK(iPeak > iHover + 20);
+	CHECK(iPeakVol >= iHoverVol + 6);                     // louder at take-off
+	// it settles to the hover on its own
+	g.chop.vx = g.chop.vy = 0;
+	g.chop.y = 120;
+	step(NONE, 400);
+	CHECK(thumpsX10() >= iHover - 2 && thumpsX10() <= iHover + 2);
+	CHECK(logicRotorVolume(&g) <= iHoverVol + 1);
+}
+
+static void testRotorSilentWhenDead(void) {
+	newGame();
+	g.chop.alive = 0;
+	step(NONE, 5);
+	CHECK(logicRotorVolume(&g) == 0);
+}
+
 int main(void) {
+	testRotorRateFollowsSpeedAndClimb();
+	testRotorIdlesSlowAndSoftOnTheGround();
+	testRotorSpinsUpAtTakeoff();
+	testRotorSilentWhenDead();
 	testFirstHitDamages();
 	testDamagedFliesSlower();
 	testInvulnerableAfterHitAndBlinks();

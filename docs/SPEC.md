@@ -346,13 +346,28 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 
 | channel | in play | title, card, hall of fame, jingles |
 |---|---|---|
-| 2 | the rotor loop, always (a 3008-byte looped chop at period 428, 8287 Hz) | silent |
+| 2 | the rotor loop, always (a 4800-byte looped blade thump; period 591 = 6 kHz at hover) | silent |
 | 0, 1, 3 | effects: `sfx_channels = [1, 3]`; **no music in play** | music |
 
 - Music plays on 0, 1, 3 only (the player's mask excludes 2). Effects borrow 1 and 3.
-- **Rotor:** period 428 minus speed/4 in 1/16 px units (416 at top speed: about 3% higher in pitch than the hover); volume 38
-  plus speed/4 (50 at top speed, +4 climbing); landed 24 (16 on the card); 0 when paused or dead. The loop is
-  synthesised at startup after the splash (it pushed AROS past its boot window when done earlier).
+- **Rotor (decided by Paul, 2026-11-12: a deep blade thump):** a low, heavy whop-whop-whop like a Huey, made
+  from scratch (`sound/tools/make_rotor.py`, mirrored bit for bit by `rotorSynth` in `main.c`; no samples). Why the
+  loop of 6ab2ff8 was still tinny: its blade pass was 752 samples at 8287 Hz, so **11 thumps a second**, a
+  buzz, not a whop; its 75 Hz thump was 40 ms long and its noise slap was louder (raw peak 229 against 190) and
+  sits at 300 Hz-1 kHz where the ear and small speakers are most sensitive, so the slap, not the thump, was what
+  you heard; and it played at volume 38 of 64. Now: the loop is 4 blade passes of `ROTOR_PASS` = 1200 samples
+  (4800 bytes of chip RAM, was 3008), each a thump of three resonators (55 Hz 70 ms, 130 Hz 35 ms, 230 Hz 20 ms:
+  the body that small speakers reproduce) plus a slap a quarter of its level, peak 124 of 127. Energy: 65 % at
+  40-100 Hz, 26 % at 100-250 Hz, under 3 % above 250 Hz. The Paula period sets the thump rate
+  (`logicRotorPeriod`, logic.c, unit tested): 5 a second at hover (period 591), 3.5 idling on the skids (845),
+  8.4 at top speed (5 less per 1/16 px: 351), climbing quickens it (4 per climb unit, floor 330 = 8.95 a
+  second), descending does not. Volume (`logicRotorVolume`): 40 at hover plus speed/3 (56 at top speed) and 4
+  climbing; landed 26 (16 on the preview card); 0 when paused or dead. **Take-off:** for 100 frames after lift-off
+  the period is 3 less per frame left (up to 300) and the volume up to 10 more, so it spins up from the idle to
+  about 7.8 thumps a second and +8 louder in half a second, then settles to the hover over 2 s; the period
+  slews (16 a frame down, 3 up) and the volume (2 up, 1 down), so neither jumps. The loop is synthesised at
+  startup after the splash (it pushed AROS past its boot window when done earlier); same work as before
+  (12000 steps).
 - **Priorities** (higher wins): crash 5; open 4; boom 3, start 3; tankfire 2, board 2, saved 2, jet
   2; cannon 1, bomb 1, land 1. Explosions and the crash beat weapons; important effects are short
   (0.08-0.8 s). `soundPlay` order in `playSounds` takes crash/open/boom as one choice per frame.
@@ -445,7 +460,7 @@ writable disk.)
 | 24-bit sky and 224-colour title on a real A1200 | by eye on real hardware or WinUAE AGA: smooth sky, no steps; `tools/checkaga.py` already checks vAmiga screenshots pixel by pixel | Paul | README: "hasn't been tried on real hardware yet" |
 | line-dithered OCS sky | by eye on a CRT and an LCD: half steps read as a smooth gradient, no visible flicker or lines | Paul | unproven (`tools/checksky.py` checks the table, not the look) |
 | tank tell (16 frames) readable in play | played: the barrel-up flash is noticed before the shell on a real display | Paul playtest | unproven by a person |
-| new rotor whop by ear | listened to on speakers: deep thump and slap, no tinny hiss, no clicks at the loop | Paul | unproven (agk records it; nobody has judged it by ear) |
+| deep rotor thump by ear | listened to on speakers and on headphones in WinUAE: a heavy whop-whop at 5 a second, faster with speed and climb, a louder spin-up at lift-off, full not thin, no clicks at the loop; with the A500's LED filter on and off | Paul | unproven (agk records it; previews in `sound-preview/rotor`; nobody has judged it by ear) |
 | attract loop and demo | left alone 12 s + 8 s: the hall of fame, then the demo plays the same trip and ends with 16 aboard; fire returns to the title | Paul in WinUAE | scenario-tested in vAmiga only |
 | boot time from a real floppy | fire-to-play measured with a stopwatch on a real A500 or WinUAE at floppy speed | Paul | **not measured** |
 | damage and its blink (decided by Paul, 2026-11-11) | WinUAE, play: take one hit and see the smoke, the slower flight, DAMAGED in the HUD and 2 s of blinking; take a second hit during the blink (nothing happens) and after it (the chopper is lost); land on the pad and see it repaired | Paul | unproven by a person (scenarios check state, the first picture and the HUD pixels) |

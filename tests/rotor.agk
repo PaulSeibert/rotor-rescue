@@ -1,0 +1,23 @@
+# The rotor in the game (SPEC section 9): idling on the skids, then lift-off
+# spins it up (faster and louder), then it settles to the hover.
+# The rotor's period is printed with the state lines (every 32 frames).
+wait-serial "AGK t0"
+press fire 2
+wait 125
+mark idle
+wait 50
+mark idle_end
+expect-sound idle idle_end
+expect-serial "rotorPer=845"
+press up 6
+mark takeoff
+wait 90
+mark takeoff_end
+expect-sound takeoff takeoff_end
+expect-serial "rotorPer=[34][0-9][0-9] "
+wait 250
+mark hover
+wait 50
+mark hover_end
+expect-sound hover hover_end
+expect-serial "rotorPer=591 "

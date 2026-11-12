@@ -155,8 +155,8 @@ red open), people, tanks, jets, mines, the base and you (yellow).
 - **Sprites.** The chopper is a 32-pixel-wide, 15-colour attached hardware
   sprite (four channels), with tilt, turn, front and wreck poses and an
   animated rotor.
-- **Paula.** One channel plays a looped rotor chop whose pitch follows your
-  airspeed. Sound effects use two more. The title theme, the
+- **Paula.** One channel plays a deep blade thump, a looped whop-whop-whop whose rate
+  follows your speed and climb and spins up at take-off. Sound effects use two more. The title theme, the
   mission-complete fanfare and the game-over tune use synthesized sampled
   instruments (`sound/tools/make_samples.py`).
 

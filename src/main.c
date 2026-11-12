@@ -21,8 +21,8 @@
 //   The title: a second copper list per buffer (the game's list jumps to it):
 //        the ROTOR RESCUE logo as a 4-plane, 16-colour picture over the sky
 //        with 8 of its colours reloaded line by line, the land bands below.
-//   Paula channel 2: the rotor, a looped chop whose pitch follows the
-//        airspeed (driven here); music on 0, 1, 3; effects on 1 and 3.
+//   Paula channel 2: the rotor, a looped blade thump whose rate follows the
+//        speed and climb (logic.c's rules, driven here); music on 0, 1, 3; effects on 1 and 3.
 //   On an A1200 (AGA, found at startup): a 24-bit sky and an 8-plane,
 //        224-colour title logo (see "AGA" below).
 //   The attract loop (logic.c): the title, the hall of fame (saved to the
@@ -1670,50 +1670,60 @@ __attribute__((noinline)) static void weatherUpdate(void) {
 
 // ------------------------------------------------------------------ rotor ---
 // Paula channel 2: the rotor, a loop made at startup (sound/tools/make_rotor.py
-// previews it with the same integer arithmetic: keep the two in step). A
-// two-blade rotor: on every blade pass a low damped thump (the "whop", a
-// resonator at ~75 Hz) and the slap (band-passed noise, ~300-1200 Hz, fast
-// attack); a quiet rumble between. Four passes a loop, each a little different,
-// so it doesn't buzz; ~11 a second at period 428. In flight the pitch moves
-// only a little (rotor RPM is nearly constant): the loudness carries the effort.
+// previews it with the same integer arithmetic: keep the two in step). A deep
+// blade thump, like a Huey's whop-whop-whop: on every blade pass three damped
+// resonators (~55, ~130 and ~230 Hz: the weight and the body small speakers
+// still play), a short band-passed noise slap (~250 Hz-1.2 kHz, a quarter of
+// the thump), a quiet rumble between. Four passes of ROTOR_PASS samples a loop,
+// each a little different. The rate is the Paula period (logicRotorPeriod):
+// 5 thumps a second at hover, 8-9 flat out, a louder, faster spin-up at
+// lift-off. SPEC section 9.
 
 #define ROTOR_CHANNEL 2
-#define ROTOR_PASS 752
 #define ROTOR_PASSES 4
-#define ROTOR_SAMPLES (ROTOR_PASS * ROTOR_PASSES)   // 3008 bytes of chip RAM
-#define ROTOR_PERIOD 428                            // 8287 Hz
+#define ROTOR_SAMPLES (ROTOR_PASS * ROTOR_PASSES)   // 4800 bytes of chip RAM
 static BYTE *s_pRotorWave;   // chip RAM
 
-// One run of the loop's synthesis: twice through (the second kept, with the
-// resonator's tail from the first: it loops seamlessly). wScale 0: returns the
-// peak; else writes the samples times wScale / 256.
+// One run of the loop's synthesis: a warm-up pass (the last pass again, so the
+// resonators' tails are in the first one: it loops seamlessly), then the loop.
+// wScale 0: returns the peak; else writes the samples times wScale / 256.
 static LONG rotorSynth(WORD wScale) {
-	static const UBYTE pStrength[ROTOR_PASSES] = {128, 112, 124, 104};
+	// resonators, Q14 (a1 = 2 r cos w, a2 = r^2), and their kicks
+	static const WORD pA1[3] = {32636, 32311, 31559};
+	static const WORD pA2[3] = {16306, 16229, 16113};
+	static const WORD pKick[3] = {1100, 2300, 2800};
+	static const UBYTE pStrength[ROTOR_PASSES] = {128, 112, 122, 104};
 	UWORD uwLfsr = 0x1D2B;
-	LONG lY1 = 0, lY2 = 0, lLp1 = 0, lLp2 = 0, lRum = 0, lMax = 0;
-	for(UWORD n = 0; n < 2 * ROTOR_SAMPLES; ++n) {
-		UWORD i = n < ROTOR_SAMPLES ? n : (UWORD)(n - ROTOR_SAMPLES);
+	LONG pY1[3] = {0, 0, 0}, pY2[3] = {0, 0, 0};
+	LONG lLp1 = 0, lLp2 = 0, lRum = 0, lMax = 0;
+	for(UWORD n = 0; n < ROTOR_PASS + ROTOR_SAMPLES; ++n) {
+		UWORD i = n < ROTOR_PASS ? (UWORD)(ROTOR_SAMPLES - ROTOR_PASS + n) : (UWORD)(n - ROTOR_PASS);
 		UBYTE k = (UBYTE)(i / ROTOR_PASS);
 		UWORD t = (UWORD)(i - k * ROTOR_PASS);
 		UWORD uwLsb = uwLfsr & 1;
 		uwLfsr >>= 1;
 		if(uwLsb) uwLfsr ^= 0xB400;
 		LONG lNoise = (LONG)(uwLfsr & 0xFF) - 128;
-		// the thump: the resonator (Q14: 75 Hz, ~40 ms), kicked at the pass start;
-		// 16 x 16 multiplies (MULS.W): its state fits a WORD
-		LONG lY = (((LONG)(WORD)32617 * (WORD)lY1 - (LONG)(WORD)16285 * (WORD)lY2) >> 14) + (t == 0 ? 750 : 0);
-		lY2 = lY1;
-		lY1 = lY;
+		// the thump: three resonators kicked at the pass start (16 x 16 multiplies: MULS.W)
+		LONG lThump = 0;
+		for(UBYTE j = 0; j < 3; ++j) {
+			LONG lY = ((((LONG)pA1[j] * (WORD)pY1[j]) - ((LONG)pA2[j] * (WORD)pY2[j])) >> 14) + (t == 0 ? pKick[j] : 0);
+			pY2[j] = pY1[j];
+			pY1[j] = lY;
+			lThump += lY;
+		}
+		lThump >>= 4;
 		// the slap: noise band-passed (a fast low-pass minus a slow one), enveloped
 		lLp1 += (lNoise * 16 - lLp1) >> 1;
-		lLp2 += (lLp1 - lLp2) >> 4;
-		LONG lBand = (lLp1 - lLp2) >> 4;
-		LONG lEnv = t < 16 ? (LONG)t * 16 : t < 528 ? 256 - ((LONG)(t - 16) >> 1) : 0;
+		lLp2 += (lLp1 - lLp2) >> 2;
+		LONG lBand = (lLp1 - lLp2) >> 2;
+		WORD wTs = (WORD)t - 10;
+		LONG lEnv = wTs < 0 || wTs >= 150 ? 0 : wTs < 8 ? (LONG)wTs * 32 : 256 - (((LONG)(WORD)(wTs - 8) * (WORD)461) >> 8);
 		LONG lSlap = (((LONG)(WORD)lBand * (WORD)lEnv >> 7) * (WORD)pStrength[k]) >> 7;
 		// the rumble: noise low-passed hard, quiet
-		lRum += (lNoise * 16 - lRum) >> 5;
-		LONG v = (lY >> 6) + lSlap + (lRum >> 5);
-		if(n < ROTOR_SAMPLES) continue;
+		lRum += (lNoise * 16 - lRum) >> 6;
+		LONG v = lThump + lSlap + (lRum >> 4);
+		if(n < ROTOR_PASS) continue;
 		if(!wScale) {
 			LONG lAbs = v < 0 ? -v : v;
 			if(lAbs > lMax) lMax = lAbs;
@@ -1732,7 +1742,7 @@ static UBYTE s_isRotorPending;
 static void rotorSetup(void) {
 	s_isRotorPending = 0;
 	LONG lPeak = rotorSynth(0);
-	rotorSynth((WORD)((118L << 8) / (lPeak ? lPeak : 1)));   // peak at ~118
+	rotorSynth((WORD)((126L << 8) / (lPeak ? lPeak : 1)));   // peak at ~124
 	agkPerfSkip();                                    // (more than a frame of work, on purpose)
 }
 
@@ -1744,36 +1754,22 @@ static void rotorCreate(void) {
 	pAud->ac_ptr = (UWORD *)s_pRotorWave;
 	pAud->ac_len = ROTOR_SAMPLES / 2;
 	pAud->ac_vol = 0;
-	pAud->ac_per = ROTOR_PERIOD;
+	pAud->ac_per = 591;   // (the hover; rotorUpdate takes over from the first frame)
 	g_pCustom->dmacon = DMAF_SETCLR | (DMAF_AUD0 << ROTOR_CHANNEL);
 }
 
+// The rules (period, volume, the spin-up) are logic.c's, unit tested
 __attribute__((noinline)) static void rotorUpdate(void) {
 	const tGame *g = &s_sGame;
-	const tChopper *c = &g->chop;
-	UBYTE ubVol = 0;
-	UWORD uwPer = ROTOR_PERIOD;
-	if(c->alive && (g->state == GS_PLAY || g->state == GS_INTRO)) {
-		WORD wSpeed = c->vx < 0 ? (WORD)-c->vx : c->vx;
-		if(c->landed) {                               // idling on the skids: slower, softer
-			uwPer = ROTOR_PERIOD + 24;
-			ubVol = g->state == GS_INTRO ? 16 : 24;
-		}
-		else {                                        // in the air: the blades bite harder with speed and climbing
-			uwPer = (UWORD)(ROTOR_PERIOD - (wSpeed >> 2));
-			ubVol = (UBYTE)(38 + (wSpeed >> 2) + (c->vy < 0 ? 4 : 0));
-		}
-	}
-	if(s_isPaused) ubVol = 0;
 	volatile struct AudChannel *pAud = &g_pCustom->aud[ROTOR_CHANNEL];
-	pAud->ac_per = uwPer;
-	pAud->ac_vol = ubVol;
+	pAud->ac_per = logicRotorPeriod(g);
+	pAud->ac_vol = s_isPaused ? 0 : logicRotorVolume(g);
 }
 
 static void rotorDestroy(void) {
 	g_pCustom->dmacon = DMAF_AUD0 << ROTOR_CHANNEL;
 	g_pCustom->aud[ROTOR_CHANNEL].ac_vol = 0;
-	memFree(s_pRotorWave, ROTOR_SAMPLES);   // (ROTOR_SAMPLES: the new size)
+	memFree(s_pRotorWave, ROTOR_SAMPLES);
 }
 
 // ---------------------------------------------------------------- sound ---
@@ -2010,6 +2006,8 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 		agkState("lives", g->lives);
 		agkState("trip", g->trip);
 		agkState("score", (LONG)g->score);
+		agkState("rotorPer", logicRotorPeriod(g));
+		agkState("rotorVol", logicRotorVolume(g));
 		agkEnd();
 		if(g->demo && g->state != ubStateBefore) agkPrint("AGK demo\n");
 	}

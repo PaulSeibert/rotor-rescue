@@ -109,6 +109,7 @@ uint8_t logicWeather(const tGame *g, tWeatherFrame *pW) {
 // ------------------------------------------------------------- helpers ---
 
 static inline int16_t absw(int16_t v) { return v < 0 ? (int16_t)-v : v; }
+static void rotorTick(tGame *g);
 
 static int16_t skyX(int16_t wX, int16_t wCam, uint8_t ubShift, uint16_t uwDrift) {
 	// (x - cam >> shift - drift) mod SKY_LOOP, then the left edge's overhang
@@ -1504,6 +1505,7 @@ COLD static uint8_t demoStep(tGame *g, const tInput *pIn, tInput *pDemoIn) {
 void logicUpdate(tGame *g, const tInput *pIn) {
 	++g->frame;
 	weatherUpdate(g);
+	rotorTick(g);   // (before the events are cleared: it sees last frame's lift-off)
 	g->events = 0;
 	g->events2 = 0;
 	g->evBarracks = 0;
@@ -1602,6 +1604,60 @@ uint8_t logicChopperFrame(const tGame *g) {
 	int16_t fwd = c->face == FACE_RIGHT ? c->vx : (int16_t)-c->vx;
 	uint8_t pose = fwd >= 32 ? CHOP_SIDE2 : fwd >= 12 ? CHOP_SIDE1 : CHOP_SIDE0;
 	return pose | (c->face == FACE_LEFT ? CHOP_LEFT : 0);
+}
+
+// ---- the rotor's sound. Periods: 845 idle (3.5 thumps/s), 591 hover (5), 5 less
+// per 1/16 px of speed (351 at 48: 8.4), 4 less per climb unit; the spin-up
+// takes 3 per boosted frame off (up to 300). Never below 300 (9.9/s).
+#define ROTOR_PER_IDLE 845
+#define ROTOR_PER_HOVER 591
+#define ROTOR_PER_MIN 330
+#define ROTOR_PER_MIN_BOOST 300
+#define ROTOR_BOOST_FRAMES 100
+
+static void rotorTick(tGame *g) {
+	const tChopper *c = &g->chop;
+	if(g->events & EV_TAKEOFF) g->rotorBoost = ROTOR_BOOST_FRAMES;
+	else if(g->rotorBoost) --g->rotorBoost;
+	int16_t wPer = ROTOR_PER_IDLE;
+	int16_t wVol = 0;
+	if(c->alive && (g->state == GS_PLAY || g->state == GS_INTRO)) {
+		if(c->landed) {
+			g->rotorBoost = 0;
+			wVol = g->state == GS_INTRO ? 16 : 26;
+		}
+		else {
+			int16_t wSpeed = absw(c->vx);
+			int16_t wClimb = c->vy < 0 ? (int16_t)-c->vy : 0;
+			wPer = (int16_t)(ROTOR_PER_HOVER - wSpeed * 5 - wClimb * 4);
+			wVol = (int16_t)(40 + wSpeed / 3 + (wClimb ? 4 : 0));
+			if(g->rotorBoost) {
+				wPer = (int16_t)(wPer - g->rotorBoost * 3);
+				wVol = (int16_t)(wVol + g->rotorBoost / 10);
+			}
+			int16_t wMin = g->rotorBoost ? ROTOR_PER_MIN_BOOST : ROTOR_PER_MIN;
+			if(wPer < wMin) wPer = wMin;
+			if(wVol > 62) wVol = 62;
+		}
+	}
+	else if(g->rotorPer) wPer = (int16_t)g->rotorPer;   // (paused on a menu: hold the pitch)
+	if(!g->rotorPer) g->rotorPer = (uint16_t)wPer;
+	// slew: the pitch rises fast (the blades spin up), falls slowly; the volume likewise
+	int16_t wCur = (int16_t)g->rotorPer;
+	if(wPer < wCur) wCur = (int16_t)(wCur - wPer > 16 ? wCur - 16 : wPer);
+	else if(wPer > wCur) wCur = (int16_t)(wPer - wCur > 3 ? wCur + 3 : wPer);
+	g->rotorPer = (uint16_t)wCur;
+	int16_t wV = g->rotorVol;
+	if(wVol > wV) wV = (int16_t)(wVol - wV > 2 ? wV + 2 : wVol);
+	else if(wVol < wV) wV = (int16_t)(wV - wVol > 1 ? wV - 1 : wVol);
+	if(!wVol && !c->alive) wV = 0;
+	g->rotorVol = (uint8_t)wV;
+}
+
+uint16_t logicRotorPeriod(const tGame *g) { return g->rotorPer; }
+uint8_t logicRotorVolume(const tGame *g) { return g->rotorVol; }
+int logicRotorThumpsX10(uint16_t uwPeriod) {
+	return (int)((ROTOR_CLOCK * 10) / ((int32_t)uwPeriod * ROTOR_PASS));
 }
 
 uint8_t logicRotorPhase(const tGame *g) {

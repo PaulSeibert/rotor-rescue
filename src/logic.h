@@ -234,6 +234,10 @@ typedef struct {
 	tBoom pBooms[BOOM_MAX];
 	tSmoke pSmoke[SMOKE_MAX];
 	uint8_t smokeTimer;  // frames to the next puff
+	// the rotor's sound (logicRotorTick): Paula period, volume, and the take-off spin-up left
+	uint16_t rotorPer;
+	uint8_t rotorVol;
+	uint8_t rotorBoost;  // frames of spin-up left after lift-off
 	// events of the latest frame (sound, serial): bit flags
 	uint16_t events;
 	uint8_t events2;     // more event bits (EV2_*)
@@ -356,6 +360,17 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut);
 uint8_t logicChopperFrame(const tGame *g);   // CHOP_*, + 0x80 if facing left
 uint8_t logicChopperVisible(const tGame *g);
 uint8_t logicRotorPhase(const tGame *g);
+
+// The rotor's sound: a loop of ROTOR_PASS-sample blade passes, one deep thump
+// each, so the Paula period sets the thump rate: 5 a second at hover, 3.5 idling
+// on the skids, 8-9 at full speed or climbing, and a louder, faster spin-up for
+// two seconds after lift-off. logicUpdate slews both toward their targets
+// (the pitch never jumps); main.c writes them to channel 2.
+#define ROTOR_PASS 1200          // samples a blade pass in the loop
+#define ROTOR_CLOCK 3546895L     // Paula's PAL clock: rate = clock / period
+uint16_t logicRotorPeriod(const tGame *g);   // Paula period
+uint8_t logicRotorVolume(const tGame *g);    // 0-64 (0 when the chopper is gone)
+int logicRotorThumpsX10(uint16_t uwPeriod);  // thumps a second times ten
 
 // The camera follows the chopper with a look-ahead. It is locked to the
 // chopper's pixel, so the chopper only moves on screen when the look-ahead
