@@ -204,7 +204,7 @@ hard still." Rules (section 6 has the mechanics, section 7 the tables):
   so that skill 1 stays the easiest: studio decision, pending Paul's playtest.)
 - **A warning, then time to switch weapons.** Every jet is announced the moment it appears: its radar blip flashes white and a
   short two-beep alert plays (effect `jetwarn`, priority 3, on the effect channels 1/3 like the others). No attack run starts
-  until 2 s after that (it appears 384 px off screen, 100 frames of flight from being whole on screen), and the jet's flash (tell)
+  until 2 s after that (it appears 384 px off screen, 100 frames of flight from being whole on screen; **a jet from behind** 576 px off screen and 3 s, see "Jets from behind"), and the jet's flash (tell)
   is longer on the low skills (24 / 20 / 16 / 14 / 12). The flash may begin up to three quarters of its length before the whole jet is on
   screen (else a long tell leaves a jet from the front only about 12 frames to begin one); the missile or bomb still needs the whole jet on screen at its end.
 - **Jet pacing, measured** (`tools/pace.py`, ghost mode, 2.4 min of play, 39-40 % of it landed; before = `main` 71e762b plus the
@@ -224,6 +224,46 @@ hard still." Rules (section 6 has the mechanics, section 7 the tables):
   immortal chopper; three cycles of 24 s landed and about 18 s airborne at the first jets-on trip): see the table in "Jet pacing,
   measured" below. Not measured with a person: that is the playtest.
 
+**Jets from behind and the last barracks** (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest). Paul: "the jets still come in from
+behind too quickly" and "on the last barracks, the far one, about to clear a level, the jets are brutal, even on difficulty level 1."
+
+- **From behind, measured** (`tools/jetbehind.c`, ghost mode, a jet forced to appear behind a right-facing chopper; frames from its appearing). A jet comes
+  from behind in 1 of 4 (`r & 3` in `jetsUpdate`), flying 4 px/frame. Before: 384 px lead, 100-frame warning. A **hovering** chopper was
+  rammed after 130 frames (2.6 s) and, on skill 3-5, had a missile at 119; one that **stopped** after 1.2 s had a missile at 181-183; one that
+  **turned round** to face it at 1.2 s had its first attack run at 103-120 and its missile at 132-140 (2.6-2.8 s), with 0.4 s to see it,
+  decide and turn (a turn is 17 frames). A chopper cruising on at 3 px/frame is overtaken at 1 px/frame: first run after 383 frames,
+  ram after 525 (skill 1-3), no problem. After: `JET_LEAD_BEHIND` 576 px and `JET_WARN_BEHIND` 150 frames (3 s) for a
+  from-behind jet (from ahead stays 384 px and 100 frames). Hover: ram at 178 frames, no missile; stop at 1.2 s: first run at 207-213, missile 229-231;
+  turn round at 1.2 s: first run at 150, missile at 166 or none, contact at 173; cruise: first run after 559-565. The blip and chirp are as
+  before (the moment it appears, 576 px off screen: the radar holds it at the edge). Unit test `testJetFromBehindHasTime`: over skills 1, 3 and 5 and
+  hover / cruise / stop / turn round, no attack run and no ram within 150 frames of a from-behind jet's appearing.
+- **The last barracks, reproduced** (`tools/jetsim.c`: a bot flies whole trips on the real rules in ghost mode, base - barracks - land, open, board - base,
+  nearest barracks first, 300 seeds; fast on the host, so the numbers are the bot's, not a person's: compare trips, not absolutes). **Cause, three parts:**
+  (1) **Jets come by time in the air, and the far trip is the longest**: the nearest barracks is a 21 s trip, the far one 45 s; jets appear about one every 5 s of flight
+  whatever the position (a jet rests only 40-103 frames between passes), so jets a trip rose with the trip: 4.6 / 7.5 / 10.5 (skill 3, mission 1), 4.0 / 9.0 / 13.5 / 17.9
+  (skill 3, mission 3). No table or timer is indexed by barracks; position matters only through distance. (2) **A long straight cruise lines the jet up**: attack runs a
+  minute in the air are 0.3-1 near the base and 2-4.6 over the far half of the map (a jet follows your height at 0.5 px/frame and shoots when level; short, busy
+  hops never line it up). (3) **On skill 1 in mission 1 the first jet of the game arrives on the last trip**: `jetsFrom` is 3, so with the nearest
+  barracks first the far one is the debut and the climax at once, 8.9 jets and 1.45 attack runs in that one trip (skill 1, mission 1: 0 / 0 / 0 / 8.9). Not the cause: the tanks
+  (they grow by trip too, and are near the chopper 20-58 % of a trip, but the bot took at most 4.4 shell hits a minute and none at the far barracks on skill 1; not changed here), the mission timers (none), anti-stall (none), the time airborne (the same share per minute).
+- **The fix: a jet budget per trip** (`s_pJetsTrip`, `logicJetsTripMax`, `g->jetsTrip`): at most 2 / 3 / 5 / 6 / 6 jets appear between one landing on the home pad and the next
+  (skill 1-5; GODMODE 5 = normal), then none until the next trip. A budget, not a rest, so the first jets of a trip are as the fairness pass left them and a long
+  flight stops adding. Each is about 1.4 x the early trip's own count (skill 3, mission 3: 4.0 early, 6 cap), so far / early is at most 1.5.
+- **Before and after** (bot, 300 seeds each; trip 0 is the nearest barracks, trip 3 the far one; jets a trip / attack runs a trip):
+
+  | | before: jets a trip | after | before: attack runs | after |
+  |---|---|---|---|---|
+  | skill 1, mission 1 | 0 / 0 / 0 / **8.9** | 0 / 0 / 0 / **2.0** | 0 / 0 / 0 / 1.45 | 0 / 0 / 0 / 0.41 |
+  | skill 1, mission 3 | 0 / 4.8 / 7.2 / **9.8** | 0 / 2.0 / 2.0 / **2.0** | 0 / 0.09 / 0.81 / 1.49 | 0 / 0.09 / 0 / 0.37 |
+  | skill 3, mission 1 | 0 / 4.6 / 7.5 / **10.5** | 0 / 4.1 / 4.9 / **4.9** | 0 / 0.11 / 0.81 / 1.35 | 0 / 0.39 / 0.09 / 0.62 |
+  | skill 3, mission 3 | 4.0 / 9.0 / 13.5 / **17.9** | 4.1 / 4.8 / 4.6 / **4.4** | 0.28 / 0.63 / 1.28 / 2.44 | 0.26 / 0.28 / 0.12 / 0.66 |
+  | skill 5, mission 3 | 4.7 / 9.5 / 14.5 / **19.7** | 4.7 / 5.7 / 5.7 / **5.5** | 1.18 / 0.52 / 1.79 / 2.75 | 1.14 / 0.24 / 0.02 / 0.85 |
+
+  Far trip against the earliest trip that has jets: skill 3, mission 3 from 4.4 x to 1.07 x; skill 3, mission 1 from 2.3 x to 1.2 x; skill 1, mission 3 from 2.0 x to 1.0 x (skill 1, mission 1 has
+  no early jets: the far trip is the debut, at 2 jets instead of 8.9). Skill 1 is the calmest at every trip (2 jets a trip, jets from trip + mission 3 as before). The
+  budget is the part Paul's playtest should judge: it makes the far barracks a trip of the same size as the others, and the flight home after the budget is used up is clear of jets.
+  `testJetTripBudget` (the budget is used up and no more, the pad refills it, skill 1 the smallest, GODMODE = normal).
+
 **Length:** a bot-assisted trip to the nearest barracks and home takes 1452 frames (29 s,
 `tests/rescue.agk`). Pure flight for four round trips is at least 12,160 px / 3 px a frame = 4053
 frames (81 s); with unloading (10 frames a person) a clean mission is about 2 minutes (derived).
@@ -237,7 +277,7 @@ do not call the pacing "tuned".
 | enemy | HP | movement | fire / threat | tell | score |
 |---|---|---|---|---|---|
 | tank | 2 (cannon 1 each; a bomb within 22 px kills) | spawns off screen (cam -40 or +screen +40), drives at the chopper 0.5 px/frame, stays between x 16 and 2536 | a shell when the chopper is low (skids y > 150) and within 200 px: aimed with the chopper's half velocity, error +- (mask+1)/2 px, 1.5 px/frame (24/16, was 2-4), life 140 frames; first shell 150 frames after spawning | stops, barrel up, flash blinks every 4 frames, 12-22 frames by skill (16 normal) | 50 |
-| jet | 1 (cannon only) | from 384 px off screen (100 frames of flight from being whole on screen), mostly ahead of where you fly (3 of 4), 4 px/frame, follows your height at 0.5 px/frame | **An attack run starts** when its flash (tell) begins; a missile follows only if the jet is **fully on screen**, you are airborne, 56-200 px ahead and within 14 px of its height; a bomb if you are landed within 24 px (also fully on screen). **Never before** its warning is 2 s old (`JET_WARN_FRAMES` 100), never within 2 s after a take-off (`JET_TAKEOFF_GRACE`), never at a landed chopper on skill 1-2 and not before the dwell time on 3-5 (section 7), on skill 1-3 not while another jet is out, and a second jet's run never within 3 s (`JET_PAIR_GAP` 150) of the first's. The gap between one jet's missiles is 40 frames with the tell inside it; a ram hurts you | **warned** (a flashing white radar blip, a two-beep alert, the jet's scream) the moment it appears, then a **flash** (nose and engine glow, blinking) for the tell, 12-24 frames by skill (section 7); aborted (no missile or bomb) if at the end of the tell the jet is not fully on screen, you have landed, climbed out of its height, are closer than 56 px, or (a bomb) have not been landed long enough | 100 |
+| jet | 1 (cannon only) | from 384 px off screen (100 frames of flight from being whole on screen; 576 px and 150 frames when from behind), mostly ahead of where you fly (3 of 4), at most `s_pJetsTrip` (section 7) a trip, 4 px/frame, follows your height at 0.5 px/frame | **An attack run starts** when its flash (tell) begins; a missile follows only if the jet is **fully on screen**, you are airborne, 56-200 px ahead and within 14 px of its height; a bomb if you are landed within 24 px (also fully on screen). **Never before** its warning is 2 s old (`JET_WARN_FRAMES` 100), never within 2 s after a take-off (`JET_TAKEOFF_GRACE`), never at a landed chopper on skill 1-2 and not before the dwell time on 3-5 (section 7), on skill 1-3 not while another jet is out, and a second jet's run never within 3 s (`JET_PAIR_GAP` 150) of the first's. The gap between one jet's missiles is 40 frames with the tell inside it; a ram hurts you | **warned** (a flashing white radar blip, a two-beep alert, the jet's scream) the moment it appears, then a **flash** (nose and engine glow, blinking) for the tell, 12-24 frames by skill (section 7); aborted (no missile or bomb) if at the end of the tell the jet is not fully on screen, you have landed, climbed out of its height, are closer than 56 px, or (a bomb) have not been landed long enough | 100 |
 | air mine | 1 (cannon only) | spawns off screen at y 54-117, homes at 0.5 px/frame in x and 0.25 in y when within 300 px, never below y 200 | contact | none (it is visible and slow) | 75 |
 | barracks | 2 (cannon 1 each; a bomb within 30 px does 2) | static; releases 1 person per 8 frames after a 20-frame delay | none; roofs stop bombs and the chopper | burning frames | 25 |
 
@@ -284,6 +324,8 @@ and fails on any difference.
 | jet tell, the flash before a missile or bomb (frames; was 22 / 18 / 16 / 14 / 12; its own table now, the tank's is unchanged) | 24 | 20 | 16 | 14 | 12 |
 | landed this long before a jet may bomb the chopper | never | never | 6 s (300 frames) | 4 s (200) | 3 s (150) |
 | jets out at once (missions 1-2 / mission 3) | 1 / 1 | 1 / 1 | 1 / 2 | 2 / 2 | 2 / 2 |
+| jets that may appear in one trip (base pad to base pad; Paul's playtest, 2026-11-12, section 5) | 2 | 3 | 5 | 6 | 6 |
+| a jet from behind: lead (px) and warning (frames) | 576, 150 on every skill (from ahead 384, 100) |||||
 
 - **Jet fairness** (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest): the jet rows above, and section 5's rules. Also by the way, a jet's cool-down was
   8 bits and wrapped for skill 1's rest of 240-303 frames (it was often 0-47 instead); it is 16 bits now. `testNoBombOnLandedChopper`,
@@ -416,7 +458,18 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 | 0, 1, 3 | effects: `sfx_channels = [1, 3]`; **no music in play** | music |
 
 - Music plays on 0, 1, 3 only (the player's mask excludes 2). Effects borrow 1 and 3.
-- **Rotor (decided by Paul, 2026-11-12: a deep blade thump):** a low, heavy whop-whop-whop like a Huey, made
+- **Rotor, v2 (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest):** "especially when cruising, still too annoying
+  and irritating; a low, satisfying chopper thump, like an arcade Huey." Cruise and top speed were the problem (8.4 thumps a second at
+  top speed, volume up to 56), so: the thump rate is capped at **6.5 a second flat out** (period 455;
+  was 351: 8.4) and rises 45/16 (2.8) of a period unit per 1/16 px of speed (shifts: a divide would pull in the 68000 maths library) (5.6 a second at 1.5 px/frame, 5.9 at 2, 6.5 at 3; was 5 per
+  unit), climbing still 4 per unit but never below 455; the pitch follows the rate on Paula, so it now rises 30 % hover to top speed
+  (was 68 %). The **volume stays near the hover level**: 40 plus speed * 11 / 128 (44 flat out, was speed/3: 56), climbing +3. The loop has more low body and
+  a softer crack: the 55 Hz resonator is kicked harder (1500, was 1100) and rings 85 ms (was 70), the 230 Hz one is softer (2000, was
+  2800), the slap is a quarter less (strength 96/84/92/78, was 128/112/122/104); energy 82 % at 40-100 Hz (was 65 %), 12 % at 100-250 Hz (was
+  26 %). The take-off spin-up (3 less per frame for 100 frames, up to 300, and +10 volume) is unchanged. Unit tests
+  `testRotorRateFollowsSpeedAndClimb` (6-6.5 flat out, 5.5-6 at cruise, no more than 6.5 climbing flat out, volume at most hover + 5). Previews:
+  `sound-preview/rotor-v2/` (hover, cruise, full, take-off; `v1-previous-*` is the 2026-11-12 morning version).
+- **Rotor (decided by Paul, 2026-11-12: a deep blade thump; numbers below are v1, see v2 above):** a low, heavy whop-whop-whop like a Huey, made
   from scratch (`sound/tools/make_rotor.py`, mirrored bit for bit by `rotorSynth` in `main.c`; no samples). Why the
   loop of 6ab2ff8 was still tinny: its blade pass was 752 samples at 8287 Hz, so **11 thumps a second**, a
   buzz, not a whop; its 75 Hz thump was 40 ms long and its noise slap was louder (raw peak 229 against 190) and
