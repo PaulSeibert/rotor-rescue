@@ -98,6 +98,10 @@ the route; not planned.
   for 5 and the side: left to right = 16 frames, side, 3/4, lean right, 3/4, side. Leaning left is
   the mirror. Every pose of the sequence is shown, in order. The stick must push against the facing 5
   frames to start a turn, 20 frames from the front (so you can strafe while bombing).
+- Head-on strafe (Paul's playtest, 2026-11-12; studio proposal): the sidestep keeps its speed (2.5 px/frame,
+  5 frames to full: unchanged, e46d2a1) and gains an eased lean into the travel: front, slight lean (from 0.75
+  px/frame), full lean (from 1.75), one pose every 3 frames (`LEAN_STEP_FRAMES`) and back the same way, so a
+  5-frame ramp shows every pose and never snaps; a reversal passes the upright pose, never lean to lean.
 - Front-facing hover sways gently (front 24 frames, slight lean one way 24, front 24, slight lean the other 24: 96
   frames); a sidestep leans into the move (slight at 0.75 px/frame, full at 1.75).
 - Bomb stance times out: a stance entered by the stick (down, then fire) turns back to the side 75 frames

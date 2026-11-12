@@ -497,10 +497,67 @@ static void testSidestepLeansIntoTheMove(void) {
 	CHECK(g.chop.face == FACE_FRONT);
 	uint8_t fr = logicChopperFrame(&g);
 	CHECK(fr == CHOP_LEAN2 || fr == CHOP_LEAN1);        // right
-	step((tInput){.dx = -1}, 14);
+	step((tInput){.dx = -1}, 16);
 	g.chop.y = 120; g.chop.vy = 0;
 	fr = logicChopperFrame(&g);
 	CHECK((fr & CHOP_LEFT) && ((fr & 0x7F) == CHOP_LEAN2 || (fr & 0x7F) == CHOP_LEAN1));   // left
+}
+
+// The head-on strafe, eased: the lean steps front, slight, full (and back) a pose at a time, each held
+// at least LEAN_STEP_FRAMES, banking the way it travels; the speed itself is still the snappy one
+static void testStrafeLeanIsEasedAndMatchesTheDirection(void) {
+	for(int dir = -1; dir <= 1; dir += 2) {
+		newGame();
+		flyAt(2000, 120);
+		step((tInput){.fire2 = 1}, 1);
+		step(NONE, LEAN_FRAMES + TURN_STEP_FRAMES + 2);
+		int rank = 0, peak = 0, jump = 0, wrong = 0, run = 0, shortRun = 0;
+		uint8_t last = logicChopperFrame(&g);
+		for(int i = 0; i < 90; ++i) {
+			tInput in = {.dx = (int8_t)(i < 24 ? dir : 0)};   // 24 frames: under the 20+ turn push? no: 24 > 20, see below
+			if(i >= 16) in.dx = 0;                             // (16 frames strafing, then let go)
+			logicUpdate(&g, &in);
+			g.chop.y = 120; g.chop.vy = 0;
+			uint8_t fr = logicChopperFrame(&g);
+			uint8_t pose = fr & 0x7F;
+			int left = (fr & CHOP_LEFT) != 0;
+			rank = pose == CHOP_LEAN2 ? 2 : pose == CHOP_LEAN1 ? 1 : 0;
+			if(rank && ((dir < 0) != left) && g.chop.vx * dir > 0) ++wrong;   // leaning against its travel
+			if(rank > peak) peak = rank;
+			if(fr == last) ++run;
+			else {
+				if(run < LEAN_STEP_FRAMES && i > 1) ++shortRun;
+				run = 1;
+				int lr = (last & 0x7F) == CHOP_LEAN2 ? 2 : (last & 0x7F) == CHOP_LEAN1 ? 1 : 0;
+				int d = rank > lr ? rank - lr : lr - rank;
+				if(d > jump) jump = d;
+				if(lr && rank && ((last & CHOP_LEFT) != 0) != left) jump = 9;   // lean to lean the other way: a snap
+			}
+			last = fr;
+			CHECK(g.chop.face == FACE_FRONT);
+		}
+		CHECK(peak == 2);
+		CHECK(jump <= 1);
+		CHECK(wrong == 0);
+		CHECK(shortRun == 0);
+		CHECK(logicChopperFrame(&g) == CHOP_FRONT || (logicChopperFrame(&g) & 0x7F) == CHOP_LEAN1);   // settled back toward upright
+	}
+	// reversing: the lean passes the upright pose
+	newGame();
+	flyAt(2000, 120);
+	step((tInput){.fire2 = 1}, 1);
+	step(NONE, LEAN_FRAMES + TURN_STEP_FRAMES + 2);
+	uint8_t last = logicChopperFrame(&g);
+	int snaps = 0;
+	for(int i = 0; i < 60; ++i) {
+		tInput in = {.dx = (int8_t)((i / 12) & 1 ? -1 : 1)};
+		logicUpdate(&g, &in);
+		g.chop.y = 120; g.chop.vy = 0;
+		uint8_t fr = logicChopperFrame(&g);
+		if((last & 0x7F) >= CHOP_LEAN1 && (fr & 0x7F) >= CHOP_LEAN1 && (last & CHOP_LEFT) != (fr & CHOP_LEFT)) ++snaps;
+		last = fr;
+	}
+	CHECK(snaps == 0);
 }
 
 static void testFire2Cycles(void) {
@@ -2091,6 +2148,7 @@ int main(void) {
 	testLeanFollowsTheTurn();
 	testFrontHoverSways();
 	testSidestepLeansIntoTheMove();
+	testStrafeLeanIsEasedAndMatchesTheDirection();
 	testDownFireFacesFrontThenBombs();
 	testCannonFiresForwardAndRepeats();
 	testCannonOpensBarracks();
