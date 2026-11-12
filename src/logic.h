@@ -213,6 +213,7 @@ typedef struct {
 	uint8_t airGrace;    // frames left of the grace after a take-off: no jet attack run starts
 	uint8_t jetWait;     // frames until another jet may start its attack run (pairs)
 	uint8_t jetLast;     // the jet that started the latest attack run
+	uint8_t jetsTrip;    // jets that have appeared since the chopper last sat on the home pad (the trip's jet budget)
 	uint16_t wxFall;     // the weather's slide, 1/4 px (wraps)
 	int16_t wxDrift;     // its wind, 1/4 px, 0..4 * SCREEN_W - 1
 	// the attract loop: title -> hall of fame -> a self-playing demo -> title
@@ -298,6 +299,8 @@ typedef struct {
 // Jet fairness (Paul's playtest, 2026-11-11 - studio tuning, pending Paul's playtest; SPEC 5-7)
 #define JET_WARN_FRAMES 100  // 2 s: from the jet's appearance (its warning) to the first moment it may start an attack run
 #define JET_LEAD 384         // px off screen it appears: 100 frames at 4 px/frame later it is whole on screen
+#define JET_LEAD_BEHIND 576  // px off screen a jet appears when it comes up BEHIND the chopper (flying the way it flies): 178 frames to a hovering chopper
+#define JET_WARN_BEHIND 150  // 3 s: its warning, frames before it may start an attack run (time to turn and face it)
 #define JET_TAKEOFF_GRACE 100  // 2 s after take-off before any jet may start an attack run
 #define JET_PAIR_GAP 150     // 3 s between one jet's attack run starting and the next jet's
 #define GROUND_NEVER 0xFFFF
@@ -369,6 +372,7 @@ uint8_t logicJetTell(const tGame *g);
 uint16_t logicGroundDwell(const tGame *g);
 // How many jets may be out at once: 1 on skill 1-2, and on 3 until mission 3; 2 above
 uint8_t logicJetsMax(const tGame *g);
+uint8_t logicJetsTripMax(const tGame *g);   // most jets that may appear in one trip (base to base)
 
 // Drawing: what's on screen, back to front, in screen coordinates (top-left)
 typedef struct {

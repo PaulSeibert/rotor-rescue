@@ -446,7 +446,7 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->outCount = 0;
 	for(uint8_t i = 0; i < TANK_MAX; ++i) g->pTanks[i].active = 0;
 	for(uint8_t i = 0; i < JET_MAX; ++i) { g->pJets[i].active = 0; g->pJets[i].cool = (uint16_t)(100 + i * 120); }
-	g->landFrames = 0; g->airGrace = 0; g->jetWait = 0;
+	g->landFrames = 0; g->airGrace = 0; g->jetWait = 0; g->jetsTrip = 0;
 	for(uint8_t i = 0; i < MINE_MAX; ++i) g->pMines[i].active = 0;
 	for(uint8_t i = 0; i < SHOT_MAX; ++i) g->pShots[i].active = 0;
 	for(uint8_t i = 0; i < ESHOT_MAX; ++i) g->pEShots[i].active = 0;
@@ -484,6 +484,8 @@ static const uint16_t s_pLandDwell[DIFFICULTY_MAX + 1] = {300, GROUND_NEVER, GRO
 // How many jets may be out at once: missions 1-2, and mission 3
 static const uint8_t s_pJetsMax[DIFFICULTY_MAX + 1] = {1, 1, 1, 1, 2, 2};
 static const uint8_t s_pJetsMaxM3[DIFFICULTY_MAX + 1] = {2, 1, 1, 2, 2, 2};
+// Jets that may appear in one trip, base pad to base pad (Paul's playtest, 2026-11-12: the far barracks)
+static const uint8_t s_pJetsTrip[DIFFICULTY_MAX + 1] = {5, 2, 3, 5, 6, 6};
 
 // Every per-difficulty table, for the unit test that index 0 (GODMODE) equals
 // index 3 (normal) in each. A new table goes in this list.
@@ -501,6 +503,7 @@ static const tDiffTable s_pDiffTables[] = {
 	{"landDwell", s_pLandDwell, sizeof(s_pLandDwell[0])},
 	{"jetsMax", s_pJetsMax, sizeof(s_pJetsMax[0])},
 	{"jetsMaxM3", s_pJetsMaxM3, sizeof(s_pJetsMaxM3[0])},
+	{"jetsTrip", s_pJetsTrip, sizeof(s_pJetsTrip[0])},
 };
 
 const tDiffTable *logicDiffTables(uint8_t *pCount) {
@@ -535,6 +538,10 @@ uint8_t logicJetTell(const tGame *g) {
 
 uint16_t logicGroundDwell(const tGame *g) {
 	return s_pLandDwell[g->difficulty];
+}
+
+uint8_t logicJetsTripMax(const tGame *g) {
+	return s_pJetsTrip[g->difficulty];
 }
 
 uint8_t logicJetsMax(const tGame *g) {
@@ -1191,6 +1198,8 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 	}
 	else if(g->airGrace) --g->airGrace;
 	if(g->jetWait) --g->jetWait;
+	// the jet budget starts afresh on the home pad
+	if(c->landed && c->x >= BASE_PAD_X0 && c->x <= BASE_PAD_X1) g->jetsTrip = 0;
 	uint8_t ubMax = logicJetsMax(g);
 	uint16_t uwDwell = logicGroundDwell(g);
 	uint8_t isBombOk = c->landed && uwDwell != GROUND_NEVER && g->landFrames >= uwDwell;
@@ -1199,6 +1208,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 		tJet *j = &g->pJets[i];
 		if(!j->active) {
 			if(!logicJetsOn(g) || !c->alive || c->x > BORDER_X + 120 || i >= ubMax) continue;
+			if(g->jetsTrip >= logicJetsTripMax(g)) continue;   // this trip's jets are all out
 			if(j->cool) { --j->cool; continue; }
 			// mostly from ahead (where the chopper is heading: you see it coming),
 			// 1 in 4 from behind; well off screen, so its sound and its radar dot
@@ -1206,11 +1216,15 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 			j->active = 1;
 			uint16_t r = logicRandom(g);
 			int8_t ahead = c->vx > 0 ? -1 : c->vx < 0 ? 1 : (c->face == FACE_RIGHT ? -1 : 1);
-			j->dir = (r & 3) ? ahead : (int8_t)-ahead;
-			j->x = (int16_t)(j->dir > 0 ? g->cam - JET_LEAD : g->cam + SCREEN_W + JET_LEAD);
+			uint8_t isBehind = !(r & 3);
+			j->dir = isBehind ? (int8_t)-ahead : ahead;
+			// (from behind: further off and a longer warning, time to turn and face it)
+			int16_t wLead = isBehind ? JET_LEAD_BEHIND : JET_LEAD;
+			j->x = (int16_t)(j->dir > 0 ? g->cam - wLead : g->cam + SCREEN_W + wLead);
 			j->seen = 0;
 			j->tell = 0;
-			j->warn = JET_WARN_FRAMES;
+			j->warn = isBehind ? JET_WARN_BEHIND : JET_WARN_FRAMES;
+			++g->jetsTrip;
 			j->y = clampw((int16_t)(c->y - 20), PLAY_TOP + 16, 180);
 			j->hp = 1;
 			j->pass = 0;

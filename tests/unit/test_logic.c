@@ -1062,6 +1062,7 @@ static void testJetsGiveWarning(void) {
 	// (the roll may send it from behind, where it can't get a shot: put it ahead of the left-facing chopper)
 	j->dir = 1;
 	j->x = (int16_t)(g.cam - JET_LEAD);
+	j->warn = JET_WARN_FRAMES;                    // (and the from-ahead warning, not the longer one from behind)
 	// no missile while it's off screen, nor in its first frames on screen
 	int firstShotSeen = -1;
 	for(int f = 0; f < 450 && firstShotSeen < 0; ++f) {
@@ -1612,6 +1613,7 @@ static void testOneJetAtATime(void) {
 		for(int f = 0; f < 9000; ++f) {
 			g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
 			g.spawnTimer = 60000;
+			g.jetsTrip = 0;                      // (no trip budget here: testJetTripBudget)
 			step(NONE, 1);
 			int n = g.pJets[0].active + g.pJets[1].active;
 			if(n > iMax) iMax = n;
@@ -1685,6 +1687,7 @@ static void testWarningBeforeAttack(void) {
 		for(int f = 0; f < 12000; ++f) {
 			g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
 			g.spawnTimer = 60000;
+			g.jetsTrip = 0;                      // (no trip budget here: testJetTripBudget)
 			uint8_t pWas[JET_MAX] = {g.pJets[0].active, g.pJets[1].active};
 			uint8_t pTell[JET_MAX] = {g.pJets[0].tell, g.pJets[1].tell};
 			step(NONE, 1);
@@ -1702,6 +1705,88 @@ static void testWarningBeforeAttack(void) {
 		CHECK(iSpawns >= 3 && iWarns == iSpawns);          // each one warned
 	}
 	CHECK(iAttacks >= 5);
+}
+
+// A jet that comes up BEHIND the chopper (flying the way the chopper faces) gets time to be
+// turned on: no attack run and no ram within JET_WARN_BEHIND frames (3 s) of its appearing,
+// whether the chopper hovers, stops dead, turns round to face it or cruises on (Paul's
+// playtest, 2026-11-12: "the jets still come in from behind too quickly")
+static void testJetFromBehindHasTime(void) {
+	int iTested = 0;
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; d += 2) {
+		for(int beh = 0; beh < 4; ++beh) {               // hover, cruise, stop at 1.2 s, turn round at 1.2 s
+			for(int seed = 1; seed <= 60; ++seed) {
+				newGame();
+				logicSetDifficulty(&g, d);
+				g.ghost = 1;
+				g.trip = 10;
+				g.lfsr = (uint16_t)(seed * 40503u + 7);
+				flyAt(1200, 120);
+				g.chop.face = g.chop.faceTarget = FACE_RIGHT;
+				g.chop.vx = beh == 0 ? 0 : 48;
+				g.cam = 1200 - 160;
+				g.pJets[0].cool = 1; g.pJets[1].active = 0; g.pJets[1].cool = 255;
+				int iBorn = -1;
+				uint16_t uwAtk0 = g.jetAttacks;
+				for(int f = 0; f < 700; ++f) {
+					g.spawnTimer = 60000;
+					tInput in = {0};
+					if(beh == 1 || (beh >= 2 && f < 60)) in.dx = 1;
+					if(beh == 3 && f >= 60) in.dx = -1;
+					uint8_t isWas = g.pJets[0].active;
+					step(in, 1);
+					if(beh == 0) g.chop.vx = 0;
+					if(iBorn < 0 && g.pJets[0].active && !isWas) {
+						iBorn = f;
+						if(g.pJets[0].dir < 0) break;      // from ahead: not this test
+					}
+					if(iBorn < 0) continue;
+					if(g.jetAttacks != uwAtk0 || (g.events & EV_SHRUG)) {
+						CHECK(f - iBorn >= 150);                // 3 s, not JET_WARN_FRAMES' 2 s
+						++iTested;
+						break;
+					}
+					if(!g.pJets[0].active) break;
+				}
+			}
+		}
+	}
+	CHECK(iTested >= 40);
+	CHECK(JET_WARN_BEHIND >= 150);
+}
+
+// The trip's jet budget: only so many jets appear between one visit to the home pad and the
+// next, and landing on the pad gives the next trip its own (Paul's playtest, 2026-11-12:
+// the far barracks, the longest flight, was the worst; section 5, "Last barracks")
+static void testJetTripBudget(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newGame();
+		logicSetDifficulty(&g, d);
+		g.ghost = 1;
+		g.trip = 10;
+		flyAt(1500, 120);
+		int iSpawns = 0;
+		for(int f = 0; f < 9000; ++f) {
+			g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+			g.spawnTimer = 60000;
+			step(NONE, 1);
+			iSpawns += (g.events & EV_JET) != 0;
+		}
+		CHECK(iSpawns == logicJetsTripMax(&g));        // the budget is used up, and not more
+		CHECK(logicJetsTripMax(&g) >= 2);
+		// back on the pad: a new trip, a new budget
+		g.chop.x = 2900; g.chop.y = GROUND_Y; g.chop.landed = 1;
+		step(NONE, 2);
+		CHECK(g.jetsTrip == 0);
+	}
+	// the budgets: skill 1 smallest, none above 1.5 x the smallest trip's own jets is a measured
+	// property (tools/jetsim.c); here only the order and GODMODE = normal
+	newGame();
+	uint8_t pMax[DIFFICULTY_MAX + 1];
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) { logicSetDifficulty(&g, d); pMax[d] = logicJetsTripMax(&g); }
+	CHECK(pMax[0] == pMax[3]);
+	for(uint8_t d = 2; d <= DIFFICULTY_MAX; ++d) CHECK(pMax[d] >= pMax[d - 1]);
+	CHECK(pMax[1] < pMax[3]);
 }
 
 // The jet's tell: longer on the low skills, 12 frames at least everywhere
@@ -1827,6 +1912,8 @@ int main(void) {
 	testOneJetAtATime();
 	testPairOffset();
 	testWarningBeforeAttack();
+	testJetFromBehindHasTime();
+	testJetTripBudget();
 	testJetTellTable();
 	testSkillOneEasier();
 	testHarderTanksFireSooner();
