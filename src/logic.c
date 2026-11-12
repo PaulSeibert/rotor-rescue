@@ -472,7 +472,7 @@ static const uint8_t s_pAimMask[DIFFICULTY_MAX + 1] = {31, 63, 63, 31, 15, 7};  
 static const uint8_t s_pJetsFrom[DIFFICULTY_MAX + 1] = {1, 3, 2, 1, 1, 0};       // trips + missions before jets
 static const uint8_t s_pMinesFrom[DIFFICULTY_MAX + 1] = {2, 4, 3, 2, 1, 1};      // ... and mines
 static const int16_t s_pSpawnExtra[DIFFICULTY_MAX + 1] = {0, 120, 60, 0, -40, -70};
-static const int16_t s_pJetRest[DIFFICULTY_MAX + 1] = {0, 260, 100, 0, -30, -50};  // frames between jet passes (jet cool-down is 16 bits: it was 8, and skill 1's 240-303 wrapped)
+static const int16_t s_pJetRest[DIFFICULTY_MAX + 1] = {0, 100, 60, 0, -30, -50};  // frames between jet passes (jet cool-down is 16 bits: it was 8, and skill 1's 240-303 wrapped)
 // a tank's wind-up before each shell (it comes out of the time between shells:
 // the rate of fire is the same, the shell is announced)
 static const uint8_t s_pTankTell[DIFFICULTY_MAX + 1] = {16, 22, 18, 16, 14, 12};
@@ -1163,6 +1163,14 @@ static inline uint8_t jetFullyOnScreen(const tGame *g, const tJet *j) {
 	return j->x - 16 >= g->cam && j->x + 16 <= g->cam + SCREEN_W;
 }
 
+// The flash may begin up to three quarters of its length before the whole jet is on screen (it is
+// still whole on screen to shoot at its end): a tell-independent window, else the
+// long tells of the low skills leave a jet no time to start one
+static inline uint8_t jetNearlyOnScreen(const tGame *g, const tJet *j, uint8_t ubTell) {
+	int16_t wSlack = (int16_t)(ubTell * 3);
+	return j->x - 16 >= g->cam - wSlack && j->x + 16 <= g->cam + SCREEN_W + wSlack;
+}
+
 // An earlier jet is still out (alive): where only one may attack, the later one waits
 static uint8_t jetEarlierOut(const tGame *g, uint8_t ubSelf) {
 	for(uint8_t k = 0; k < ubSelf; ++k) if(g->pJets[k].active) return 1;
@@ -1256,7 +1264,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 				j->cool = isFired ? (uint8_t)(JET_GAP - ubTell) : 20;
 			}
 		}
-		else if(c->alive && !j->cool && !j->warn && isFull && (c->landed ? isBombOk : isMissileOk) &&
+		else if(c->alive && !j->cool && !j->warn && jetNearlyOnScreen(g, j, ubTell) && (c->landed ? isBombOk : isMissileOk) &&
 			(!g->jetWait || g->jetLast == i) && (ubMax > 1 || !jetEarlierOut(g, i))) {
 			// start the flash if a shot is on, allowing for how far the jet flies meanwhile
 			// (4 px a frame): a missile needs JET_AHEAD_MIN left at the end, a bomb the chopper under it
@@ -1281,7 +1289,8 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 		}
 		if((j->dir > 0 && j->x > g->cam + SCREEN_W + 64 && j->seen) || (j->dir < 0 && j->x < g->cam - 64 && j->seen)) {
 			j->active = 0;
-			int16_t wRest = (int16_t)(160 - g->mission * 30 + s_pJetRest[g->difficulty]);
+			// (one jet at a time: 140 frames shorter, the warning flight is time the jet is no threat)
+			int16_t wRest = (int16_t)((ubMax > 1 ? 160 : 20) - g->mission * 30 + s_pJetRest[g->difficulty]);
 			j->cool = (uint16_t)((wRest < 40 ? 40 : wRest) + (logicRandom(g) & 63));
 		}
 	}

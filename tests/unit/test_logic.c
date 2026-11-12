@@ -1217,7 +1217,7 @@ static void testNoMissileWithoutTell(void) {
 	}
 }
 
-// A jet that is only partly on screen (or beyond the edge) never fires: it used
+// A jet that is only partly on screen (or beyond the edge) never fires (nor flashes more than 3/4 of a tell early): it used
 // to, up to ~40 px past the edge, once it had been seen for a few frames
 static void testJetNeverFiresOffScreen(void) {
 	for(int side = 0; side < 2; ++side) {
@@ -1236,7 +1236,9 @@ static void testJetNeverFiresOffScreen(void) {
 			// one frame: it must not fire, nor start a flash
 			step(NONE, 1);
 			for(int s = 0; s < ESHOT_MAX; ++s) CHECK(!(g.pEShots[s].active && g.pEShots[s].kind == ESHOT_MISSILE));
-			CHECK(g.pJets[0].tell == 0 || jetOnScreenFully(&g.pJets[0]));
+			// (the flash may begin up to three quarters of its length early, but never further out, and no shot)
+				{ int w = logicJetTell(&g) * 3 + 4; /* (+4: the camera moves a little after the jet decided) */ const tJet *p = &g.pJets[0];
+				CHECK(p->tell == 0 || (p->x - 16 >= g.cam - w && p->x + 16 <= g.cam + SCREEN_W + w)); }
 		}
 	}
 }

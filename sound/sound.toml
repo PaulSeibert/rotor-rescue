@@ -92,10 +92,10 @@ decay = 5
 volume = 44
 priority = 3
 
-[sfx.jetwarn]             # incoming jet (the radar blip flashes with it): two quick beeps, short
+[sfx.jetwarn]             # incoming jet (the radar blip flashes with it): a short rising chirp (small: chip RAM)
 wave = "square"
-steps = [[1760, 0.07], [1175, 0.07], [1760, 0.07], [1175, 0.07]]
-decay = 6
+steps = [[1760, 0.035], [2349, 0.035]]
+decay = 4
 volume = 40
 priority = 3
 

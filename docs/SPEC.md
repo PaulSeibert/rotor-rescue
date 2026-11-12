@@ -201,8 +201,22 @@ hard still." Rules (section 6 has the mechanics, section 7 the tables):
 - **A warning, then time to switch weapons.** Every jet is announced the moment it appears: its radar blip flashes white and a
   short two-beep alert plays (effect `jetwarn`, priority 3, on the effect channels 1/3 like the others). No attack run starts
   until 2 s after that (it appears 384 px off screen, 100 frames of flight from being whole on screen), and the jet's flash (tell)
-  is longer on the low skills (24 / 20 / 16 / 14 / 12).
-- **Measured** with `tools/pacing1.agk`, `tools/pacing3.agk` and `tools/pace.py` (ghost mode: the difficulty's tables, an
+  is longer on the low skills (24 / 20 / 16 / 14 / 12). The flash may begin up to three quarters of its length before the whole jet is on
+  screen (else a long tell leaves a jet from the front only about 12 frames to begin one); the missile or bomb still needs the whole jet on screen at its end.
+- **Jet pacing, measured** (`tools/pace.py`, ghost mode, 2.4 min of play, 39-40 % of it landed; before = `main` 71e762b plus the
+  instrumentation, after = this branch; skill 1 at trip 3, skill 3 at trip 1):
+
+  | | attack runs a minute | jets on screen (mean, share of time) | landed, a jet flash or shot up | first attack after touching down | runs under 3 s after another |
+  |---|---|---|---|---|---|
+  | skill 3 before | 26.8 | 0.61, 46 % | 13.7 % | 9.3 s, 1.0 s | 48 of 64 |
+  | skill 3 after | 9.2 | 0.26, 26 % | 8.0 % | 10.2 s, 6.1 s (6 s dwell) | 8 of 22 (one jet's follow-up shots; two jets never closer than 2.9 s) |
+  | skill 1 before | 14.1 | 0.65, 55 % | 18.3 % | 13.4 s, 0.3 s | 22 of 34 |
+  | skill 1 after | 3.3 | 0.24, 24 % | 0.0 % (never, by design) | none | 0 of 8 |
+
+  The coordinator's target was about half of before (12-15 and 6-8 a minute). Two tuning passes reached 9.2 and 3.3: one jet at a time
+  gives at most about 11 passes a minute (3.8 s of flight, 40-70 frames of rest), and skill 1's jets cannot attack the 40 % of the run
+  spent landed. Per minute airborne skill 1 is about 5.5 and skill 3 about 15. Left for Paul's playtest to say if it is toothless.
+- Original wording of the measurement setup: `tools/pacing1.agk`, `tools/pacing3.agk` and `tools/pace.py` (ghost mode: the difficulty's tables, an
   immortal chopper; three cycles of 24 s landed and about 18 s airborne at the first jets-on trip): see the table in "Jet pacing,
   measured" below. Not measured with a person: that is the playtest.
 
@@ -260,7 +274,7 @@ and fails on any difference.
 | jets from (trip + mission >=) | 3 | 2 | 1 | 1 | 0 |
 | mines from | 4 | 3 | 2 | 1 | 1 |
 | spawn gap (`220 - 40*mission +`; every skill floored at 60) | +120 | +60 | 0 | -40 | -70 |
-| jet rest between passes (`160 - 30*mission +`; floored at 40; plus 0-63 frames) | +260 | +100 | 0 | -30 | -50 |
+| jet rest between passes (`20 - 30*mission +` with one jet at a time, `160 - 30*mission +` with pairs; floored at 40; plus 0-63 frames) | +100 (was +80) | +60 (was +40) | 0 | -30 | -50 |
 | jet starts this far off screen (px) | 384 on every skill (it was 255 / 220 / 180 / 150 / 130) |||||
 | jet on screen before its first shot | replaced by the 2 s warning (100 frames from appearing) on every skill (was 40 / 30 / 24 / 20 / 18 frames) |||||
 | jet tell, the flash before a missile or bomb (frames; was 22 / 18 / 16 / 14 / 12; its own table now, the tank's is unchanged) | 24 | 20 | 16 | 14 | 12 |
