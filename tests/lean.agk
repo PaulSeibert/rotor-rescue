@@ -14,19 +14,21 @@ wait 2
 screenshot turn34
 wait 5
 screenshot leanR
-expect-color leanR 220 111 0x778   # the rotor's right end is low: a lean right
+expect-color leanR 220 112 0x778   # the rotor's right end is low: a lean right
 wait 20
 screenshot front
 wait 30
 screenshot sway
 press fire2 1
-wait 8
-screenshot leanR2
+wait 3
+screenshot windupR
+wait 6
+screenshot turnR
 wait 20
 press fire2 1
 wait 8
 screenshot leanL
-expect-color leanL 120 111 0x778   # the rotor's left end is low: a lean left
+expect-color leanL 120 112 0x778   # the rotor's left end is low: a lean left
 wait 20
 expect-serial "face=1"
 # a volley while diving: the stick down and fire tapped, never the bombs

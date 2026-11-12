@@ -31,7 +31,7 @@ def lean(src, drop, shift, lift):
     drop: rows the rotor's right end sits below its left; shift: px the mast moves right
     (the body moves half of that); lift: rows the left skid is raised and the right lowered."""
     out = [['.'] * W for _ in range(H)]
-    dyb = 1                      # the whole view sits one row lower: room for the raised end
+    dyb = int(drop)              # the whole view sits lower by the tilt: room for the raised end
     dxb = shift // 2
     cx = 15.5
     # rotor (row 0): tilted by column shear
