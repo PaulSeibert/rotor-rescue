@@ -1,5 +1,6 @@
 // Host-side tests for src/logic.c (ROTOR RESCUE). Run with: agk unit
 #include <stdio.h>
+#include <string.h>
 #include "logic.h"
 
 static int s_failures;
@@ -1066,7 +1067,23 @@ static void testJetsGiveWarning(void) {
 	printf("jets: first missile after %d frames on screen\n", firstShotSeen);
 }
 
+// GODMODE plays like normal: in every per-difficulty table, entry 0 is entry 3
+// (decided by Paul, 2026-11-11; before, the jets' lead and delay differed)
+static void testGodmodeTablesEqualNormal(void) {
+	uint8_t n = 0;
+	const tDiffTable *p = logicDiffTables(&n);
+	CHECK(n >= 11);
+	for(uint8_t t = 0; t < n; ++t) {
+		const uint8_t *pB = (const uint8_t *)p[t].p;
+		uint8_t e = p[t].elem;
+		int isSame = memcmp(pB + 0 * e, pB + DIFFICULTY_NORMAL * e, e) == 0;
+		if(!isSame) printf("table %s: index 0 differs from index 3\n", p[t].name);
+		CHECK(isSame);
+	}
+}
+
 int main(void) {
+	testGodmodeTablesEqualNormal();
 	testHeadOnStrafeIsSnappy();
 	testJetsGiveWarning();
 	testTitleNeedsFire();

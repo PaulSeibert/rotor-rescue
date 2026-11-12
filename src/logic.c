@@ -461,11 +461,32 @@ static const int16_t s_pSpawnExtra[DIFFICULTY_MAX + 1] = {0, 120, 60, 0, -40, -7
 static const int16_t s_pJetRest[DIFFICULTY_MAX + 1] = {0, 80, 40, 0, -30, -50};  // frames between jet passes
 // how far off screen a jet starts (its sound and radar dot are the warning) and
 // how long it's on screen before its first shot
-static const uint8_t s_pJetLead[DIFFICULTY_MAX + 1] = {255, 255, 220, 180, 150, 130};
-static const uint8_t s_pJetAim[DIFFICULTY_MAX + 1] = {40, 40, 30, 24, 20, 18};
+static const uint8_t s_pJetLead[DIFFICULTY_MAX + 1] = {180, 255, 220, 180, 150, 130};
+static const uint8_t s_pJetAim[DIFFICULTY_MAX + 1] = {24, 40, 30, 24, 20, 18};
 // a tank's wind-up before each shell (it comes out of the time between shells:
 // the rate of fire is the same, the shell is announced)
 static const uint8_t s_pTankTell[DIFFICULTY_MAX + 1] = {16, 22, 18, 16, 14, 12};
+
+// Every per-difficulty table, for the unit test that index 0 (GODMODE) equals
+// index 3 (normal) in each. A new table goes in this list.
+static const tDiffTable s_pDiffTables[] = {
+	{"tankExtra", s_pTankExtra, sizeof(s_pTankExtra[0])},
+	{"tankCool", s_pTankCool, sizeof(s_pTankCool[0])},
+	{"tankCoolMin", s_pTankCoolMin, sizeof(s_pTankCoolMin[0])},
+	{"aimMask", s_pAimMask, sizeof(s_pAimMask[0])},
+	{"jetsFrom", s_pJetsFrom, sizeof(s_pJetsFrom[0])},
+	{"minesFrom", s_pMinesFrom, sizeof(s_pMinesFrom[0])},
+	{"spawnExtra", s_pSpawnExtra, sizeof(s_pSpawnExtra[0])},
+	{"jetRest", s_pJetRest, sizeof(s_pJetRest[0])},
+	{"jetLead", s_pJetLead, sizeof(s_pJetLead[0])},
+	{"jetAim", s_pJetAim, sizeof(s_pJetAim[0])},
+	{"tankTell", s_pTankTell, sizeof(s_pTankTell[0])},
+};
+
+const tDiffTable *logicDiffTables(uint8_t *pCount) {
+	*pCount = (uint8_t)(sizeof(s_pDiffTables) / sizeof(s_pDiffTables[0]));
+	return s_pDiffTables;
+}
 
 void logicSetDifficulty(tGame *g, uint8_t ubLevel) {
 	if(ubLevel <= DIFFICULTY_MAX) g->difficulty = ubLevel;

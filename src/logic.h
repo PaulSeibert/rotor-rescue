@@ -290,6 +290,10 @@ void logicHostageOut(tGame *g, uint8_t i, uint8_t ubState, int16_t x);
 #define DIFFICULTY_NORMAL 3
 #define DIFFICULTY_MAX 5
 void logicSetDifficulty(tGame *g, uint8_t ubLevel);   // above DIFFICULTY_MAX: ignored
+// The per-difficulty tables (DIFFICULTY_MAX + 1 entries of elem bytes each):
+// for the unit test that GODMODE (0) plays like normal (3), table by table
+typedef struct { const char *name; const void *p; uint8_t elem; } tDiffTable;
+const tDiffTable *logicDiffTables(uint8_t *pCount);
 
 // The enemy schedule for the current difficulty, mission and trip
 uint8_t logicTankLimit(const tGame *g);
