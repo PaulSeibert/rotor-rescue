@@ -11,14 +11,15 @@ plays on Paula in the game.
 A deep blade thump, like a Huey's whop-whop-whop. A loop of PASSES blade
 passes, PASS samples each. On every pass:
   - the thump: a low pressure pulse, three damped resonators kicked together:
-    ~55 Hz (the weight, ~70 ms), ~130 Hz (~35 ms) and ~230 Hz (~20 ms, the body
-    that small speakers still reproduce). Their impulse responses start with a
+    ~55 Hz (the weight, ~85 ms), ~130 Hz (~35 ms) and ~230 Hz (~20 ms, the body
+    that small speakers still reproduce). (v2, Paul's playtest of 2026-11-12: more
+    low body, a softer slap; the rate now tops out at 6.5 a second.) Their impulse responses start with a
     sharp edge and swell: a thud, not a click.
   - the slap: a short burst of band-passed noise (~250 Hz-1.2 kHz), a quarter
     of the thump's level, 25 ms: the "crack" of the blade tip.
   - a very quiet low rumble between the thumps.
 The pass is ROTOR_PASS (logic.h) samples, so the Paula period sets the thump
-rate: period 591 (6001 Hz) = 5 a second (hover), 351 = 8.4 (full speed).
+rate: period 591 (6001 Hz) = 5 a second (hover), 455 = 6.5 (full speed).
 Four passes a loop, each a little different, so it doesn't repeat every beat.
 """
 import math
@@ -33,7 +34,7 @@ PASS = 1200                  # samples a blade pass (logic.h ROTOR_PASS)
 PASSES = 4
 N = PASS * PASSES            # 4800 bytes of chip RAM
 HOVER_PERIOD = 591           # 6001 Hz: 5 thumps a second
-STRENGTH = (128, 112, 122, 104)   # each pass's slap, /128
+STRENGTH = (96, 84, 92, 78)   # each pass's slap, /128 (a quarter less than v1: the crack was the irritating part)
 SLAP_AT = 10                 # samples after the kick the slap starts
 PEAK = 126                   # the loop's peak, of 127
 
@@ -47,9 +48,9 @@ def q14(f0, tau, fs):
 
 FS = CLOCK / HOVER_PERIOD
 RES = (  # (A1, A2, kick): the kicks give each a similar share of the peak
-    q14(55, 0.070, FS) + (1100,),
+    q14(55, 0.085, FS) + (1500,),     # (v2: longer and harder, the low body)
     q14(130, 0.035, FS) + (2300,),
-    q14(230, 0.020, FS) + (2800,),
+    q14(230, 0.020, FS) + (2000,),
 )
 
 
@@ -212,7 +213,7 @@ def main():
     if np:
         describe("old", old, 428, np)
         describe("new (hover)", new, HOVER_PERIOD, np)
-        describe("new (full speed)", new, 351, np)
+        describe("new (full speed)", new, 455, np)
     print("loop ends:", new[-3:], "starts:", new[:3])
     with open(os.path.join(outdir, "rotor_loop.bin"), "wb") as f:
         f.write(bytes((v & 0xFF) for v in new))

@@ -1434,8 +1434,19 @@ static void testRotorRateFollowsSpeedAndClimb(void) {
 	CHECK(iHover >= 45 && iHover <= 55);                  // 4.5-5.5 thumps a second at hover
 	step((tInput){.dx = 1}, 120);
 	int iFast = thumpsX10();
-	CHECK(iFast >= 80 && iFast <= 90);                    // 8-9 at full speed
-	CHECK(logicRotorVolume(&g) > iHoverVol);              // and louder
+	CHECK(iFast >= 60 && iFast <= 65);                    // 6-6.5 at full speed (Paul, 2026-11-12: 8-9 was irritating)
+	CHECK(logicRotorVolume(&g) >= iHoverVol);             // a touch louder at most: the hover level, not 56 (+16)
+	CHECK(logicRotorVolume(&g) <= iHoverVol + 5);
+	// cruise (2 px/frame): 5.5-6 a second
+	newGame();
+	flyAt(1500, 120);
+	for(int i = 0; i < 200; ++i) { g.chop.vx = 32; step(NONE, 1); }
+	CHECK(thumpsX10() >= 55 && thumpsX10() <= 60);
+	// the hardest case, flat out and climbing: still no more than 6.5
+	newGame();
+	flyAt(1500, 150);
+	for(int i = 0; i < 120; ++i) step((tInput){.dx = 1, .dy = -1}, 1);
+	CHECK(thumpsX10() <= 65);
 	newGame();
 	flyAt(1500, 150);
 	step(NONE, 150);

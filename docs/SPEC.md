@@ -391,7 +391,18 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 | 0, 1, 3 | effects: `sfx_channels = [1, 3]`; **no music in play** | music |
 
 - Music plays on 0, 1, 3 only (the player's mask excludes 2). Effects borrow 1 and 3.
-- **Rotor (decided by Paul, 2026-11-12: a deep blade thump):** a low, heavy whop-whop-whop like a Huey, made
+- **Rotor, v2 (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest):** "especially when cruising, still too annoying
+  and irritating; a low, satisfying chopper thump, like an arcade Huey." Cruise and top speed were the problem (8.4 thumps a second at
+  top speed, volume up to 56), so: the thump rate is capped at **6.5 a second flat out** (period 455;
+  was 351: 8.4) and rises 17/6 of a period unit per 1/16 px of speed (5.6 a second at 1.5 px/frame, 5.9 at 2, 6.5 at 3; was 5 per
+  unit), climbing still 4 per unit but never below 455; the pitch follows the rate on Paula, so it now rises 30 % hover to top speed
+  (was 68 %). The **volume stays near the hover level**: 40 plus speed/12 (44 flat out, was speed/3: 56), climbing +3. The loop has more low body and
+  a softer crack: the 55 Hz resonator is kicked harder (1500, was 1100) and rings 85 ms (was 70), the 230 Hz one is softer (2000, was
+  2800), the slap is a quarter less (strength 96/84/92/78, was 128/112/122/104); energy 82 % at 40-100 Hz (was 65 %), 12 % at 100-250 Hz (was
+  26 %). The take-off spin-up (3 less per frame for 100 frames, up to 300, and +10 volume) is unchanged. Unit tests
+  `testRotorRateFollowsSpeedAndClimb` (6-6.5 flat out, 5.5-6 at cruise, no more than 6.5 climbing flat out, volume at most hover + 5). Previews:
+  `sound-preview/rotor-v2/` (hover, cruise, full, take-off; `v1-previous-*` is the 2026-11-12 morning version).
+- **Rotor (decided by Paul, 2026-11-12: a deep blade thump; numbers below are v1, see v2 above):** a low, heavy whop-whop-whop like a Huey, made
   from scratch (`sound/tools/make_rotor.py`, mirrored bit for bit by `rotorSynth` in `main.c`; no samples). Why the
   loop of 6ab2ff8 was still tinny: its blade pass was 752 samples at 8287 Hz, so **11 thumps a second**, a
   buzz, not a whop; its 75 Hz thump was 40 ms long and its noise slap was louder (raw peak 229 against 190) and

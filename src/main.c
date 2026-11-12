@@ -1737,10 +1737,10 @@ __attribute__((noinline)) static void weatherUpdate(void) {
 // previews it with the same integer arithmetic: keep the two in step). A deep
 // blade thump, like a Huey's whop-whop-whop: on every blade pass three damped
 // resonators (~55, ~130 and ~230 Hz: the weight and the body small speakers
-// still play), a short band-passed noise slap (~250 Hz-1.2 kHz, a quarter of
+// still play), a short band-passed noise slap (~250 Hz-1.2 kHz, under a fifth of
 // the thump), a quiet rumble between. Four passes of ROTOR_PASS samples a loop,
 // each a little different. The rate is the Paula period (logicRotorPeriod):
-// 5 thumps a second at hover, 8-9 flat out, a louder, faster spin-up at
+// 5 thumps a second at hover, 6.5 flat out, a louder, faster spin-up at
 // lift-off. SPEC section 9.
 
 #define ROTOR_CHANNEL 2
@@ -1753,10 +1753,10 @@ static BYTE *s_pRotorWave;   // chip RAM
 // wScale 0: returns the peak; else writes the samples times wScale / 256.
 static LONG rotorSynth(WORD wScale) {
 	// resonators, Q14 (a1 = 2 r cos w, a2 = r^2), and their kicks
-	static const WORD pA1[3] = {32636, 32311, 31559};
-	static const WORD pA2[3] = {16306, 16229, 16113};
-	static const WORD pKick[3] = {1100, 2300, 2800};
-	static const UBYTE pStrength[ROTOR_PASSES] = {128, 112, 122, 104};
+	static const WORD pA1[3] = {32650, 32311, 31559};
+	static const WORD pA2[3] = {16320, 16229, 16113};
+	static const WORD pKick[3] = {1500, 2300, 2000};
+	static const UBYTE pStrength[ROTOR_PASSES] = {96, 84, 92, 78};
 	UWORD uwLfsr = 0x1D2B;
 	LONG pY1[3] = {0, 0, 0}, pY2[3] = {0, 0, 0};
 	LONG lLp1 = 0, lLp2 = 0, lRum = 0, lMax = 0;
