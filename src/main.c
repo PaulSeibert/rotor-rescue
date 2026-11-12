@@ -962,6 +962,39 @@ static UBYTE textType(tAgkText *pText, char *pStage, const char *szTarget, UBYTE
 }
 
 
+// The HUD's numbers, right to left: agkTextNumber's digits for less. One DIVU
+// a digit while the rest of the value fits a 16-bit quotient (< 655360), two
+// above it (agkTextNumber always does two), and none once the rest is 0 (the
+// leading zeros). 16 people running into the hangar change three fields and
+// the score in one picture (the heaviest one): 20 DIVUs there, ~6 now.
+static void hudNumber(char *pOut, ULONG ulValue, UBYTE ubDigits) {
+	for(BYTE d = (BYTE)(ubDigits - 1); d >= 0; --d) {
+		if(!ulValue) {
+			pOut[d] = '0';
+			continue;
+		}
+#if defined(__mc68000__)
+		if(ulValue < 655360UL) {
+			ULONG ul = ulValue;
+			__asm__("divu.w #10,%0" : "+d"(ul));   // quotient low, remainder high
+			pOut[d] = (char)('0' + (char)(ul >> 16));
+			ulValue = ul & 0xFFFF;
+		}
+		else {
+			ULONG ulHi = ulValue >> 16, ulLo = ulValue & 0xFFFF;
+			__asm__("divu.w #10,%0" : "+d"(ulHi));
+			ulLo |= ulHi & 0xFFFF0000;
+			__asm__("divu.w #10,%0" : "+d"(ulLo));
+			pOut[d] = (char)('0' + (char)(ulLo >> 16));
+			ulValue = (ulHi << 16) | (ulLo & 0xFFFF);
+		}
+#else
+		pOut[d] = (char)('0' + (char)(ulValue % 10));
+		ulValue /= 10;
+#endif
+	}
+}
+
 __attribute__((noinline, noclone)) static void hudUpdate(UBYTE ubBfr) {
 	static UBYTE pSaved[2] = {0xFF, 0xFF}, pAboard[2] = {0xFF, 0xFF}, pKilled[2] = {0xFF, 0xFF};
 	static UBYTE pLives[2] = {0xFF, 0xFF}, pTitle[2] = {0xFF, 0xFF}, pSkill[2] = {0xFF, 0xFF};
@@ -986,11 +1019,11 @@ __attribute__((noinline, noclone)) static void hudUpdate(UBYTE ubBfr) {
 		s_pHudPending[ubBfr] = 1;
 	}
 	if(!isTitle) {
-		if(g->saved != pSaved[ubBfr]) { pSaved[ubBfr] = g->saved; agkTextNumber(&szLine[6], g->saved, 2); s_pHudPending[ubBfr] = 1; }
-		if(g->aboard != pAboard[ubBfr]) { pAboard[ubBfr] = g->aboard; agkTextNumber(&szLine[16], g->aboard, 2); s_pHudPending[ubBfr] = 1; }
-		if(g->killed != pKilled[ubBfr]) { pKilled[ubBfr] = g->killed; agkTextNumber(&szLine[24], g->killed, 2); s_pHudPending[ubBfr] = 1; }
+		if(g->saved != pSaved[ubBfr]) { pSaved[ubBfr] = g->saved; hudNumber(&szLine[6], g->saved, 2); s_pHudPending[ubBfr] = 1; }
+		if(g->aboard != pAboard[ubBfr]) { pAboard[ubBfr] = g->aboard; hudNumber(&szLine[16], g->aboard, 2); s_pHudPending[ubBfr] = 1; }
+		if(g->killed != pKilled[ubBfr]) { pKilled[ubBfr] = g->killed; hudNumber(&szLine[24], g->killed, 2); s_pHudPending[ubBfr] = 1; }
 	}
-	if(ulScore != pScore[ubBfr]) { pScore[ubBfr] = ulScore; agkTextNumber(&szLine[33], ulScore, 6); s_pHudPending[ubBfr] = 1; }
+	if(ulScore != pScore[ubBfr]) { pScore[ubBfr] = ulScore; hudNumber(&szLine[33], ulScore, 6); s_pHudPending[ubBfr] = 1; }
 	if(s_pHudPending[ubBfr]) {
 		s_pHudPending[ubBfr] = !textType(&s_pHudText[ubBfr], s_pHudStage[ubBfr], szLine,
 			s_ubLastDrawn >= HUD_BUSY_BOBS ? HUD_TYPE_BUSY : HUD_TYPE_PER_FRAME);
