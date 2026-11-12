@@ -1735,6 +1735,58 @@ int16_t logicScrollByteOffset4(uint16_t uwX4) {
 	return (int16_t)((((int16_t)uwX4 - 1) >> 6) * 2);
 }
 
+// The plain's perspective floor (logic.h). Row j at camera c: (c mod 576) *
+// (18 + j) / 18 quarters = c + c j / 18, its loop 32 (18 + j) quarters.
+_Static_assert(FLOOR_PERIOD == 32 * (FLOOR_LINES - 1), "every floor row's loop is whole pixels");
+
+#ifndef __m68k__   // (the host tests' reference: not in the Amiga build, whose slow RAM is full)
+uint16_t logicFloorRowW(uint8_t j) {
+	return (uint16_t)(8 * (FLOOR_LINES - 1 + j));
+}
+
+uint16_t logicFloorX4(int16_t wCam, uint8_t j) {
+	uint16_t c = (uint16_t)wCam % FLOOR_PERIOD;
+	return (uint16_t)(c + (uint16_t)(c * j) / (FLOOR_LINES - 1));
+}
+#endif
+
+// BPLCON1 (PF2) for a left edge at x4 % 64 quarters: logicScrollCon1Pf2Aga()
+#define CON1Q(i) ((uint16_t)((((((64 - (i)) & 63) >> 2) << 4)) | ((((64 - (i)) & 63) & 3) << 12)))
+#define CON1Q8(i) CON1Q(i), CON1Q(i + 1), CON1Q(i + 2), CON1Q(i + 3), CON1Q(i + 4), CON1Q(i + 5), CON1Q(i + 6), CON1Q(i + 7)
+static const uint16_t s_pFloorCon1[64] = {
+	CON1Q8(0), CON1Q8(8), CON1Q8(16), CON1Q8(24), CON1Q8(32), CON1Q8(40), CON1Q8(48), CON1Q8(56),
+};
+// 65536 / 18 rounded up: (c << 16) + j c K, >> 16, is exactly c + floor(c j / 18)
+// for every c < 576 and j <= 18 (the error, under 2 c j / 2^20, never reaches the
+// next whole: unit-tested against logicFloorX4)
+#define FLOOR_STEP_K 3641u
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("Os")))   // (a short loop either way: small, for the A500's full slow RAM)
+#endif
+int16_t logicFloorScroll(int16_t wCam, uint16_t uwX4Mask, uint16_t uwModBase, uint16_t *pOut, uint8_t ubStride) {
+	uint16_t c = (uint16_t)wCam;
+	while(c >= FLOOR_PERIOD) c = (uint16_t)(c - FLOOR_PERIOD);
+	uint32_t ulAcc = (uint32_t)c << 16;
+	uint32_t ulStep = (uint32_t)c * (uint16_t)FLOOR_STEP_K;   // (16 x 16: mulu.w)
+	// row 0: its offset goes to its bitplane pointers, row j's into line j - 1's modulo
+	uint16_t x4 = (uint16_t)(ulAcc >> 16) & uwX4Mask;
+	int16_t wOff0 = (int16_t)((((int16_t)x4 - 1) >> 5) & ~1), wPrev = wOff0;   // ((x4 - 1) >> 6) * 2
+	pOut[0] = s_pFloorCon1[x4 & 63];
+	uint16_t *pMod = pOut + 2;
+	for(uint8_t j = 1; j < FLOOR_LINES; ++j) {
+		pOut += ubStride;
+		ulAcc += ulStep;
+		x4 = (uint16_t)(ulAcc >> 16) & uwX4Mask;
+		int16_t wOff = (int16_t)((((int16_t)x4 - 1) >> 5) & ~1);
+		pOut[0] = s_pFloorCon1[x4 & 63];
+		*pMod = (uint16_t)(uwModBase + wOff - wPrev);
+		pMod = pOut + 2;
+		wPrev = wOff;
+	}
+	return wOff0;
+}
+
 // ----------------------------------------------------------------- colours ---
 
 static uint16_t mix(uint16_t a, uint16_t b, uint16_t t, uint16_t n) {
@@ -1772,24 +1824,52 @@ uint16_t logicSkyColorDither(uint8_t ubMission, uint8_t ubLine) {
 	return out;
 }
 
-COLD void logicSkyFillDither(uint8_t ubMission, uint16_t *pOut) {
-	// logicSkyColorDither line by line: per channel the half steps
-	// 2a + round(2 (b - a) line / n), kept as a quotient and a remainder
-	const int16_t n = SKY_LINES - 1;
-	for(uint8_t y = 0; y < SKY_LINES; ++y) pOut[y] = 0;
+// A line-dithered gradient from colour uwA (line 0) to uwB (line ubLines - 1):
+// per channel the half steps 2a + round(2 (b - a) line / n), kept as a quotient
+// and a remainder; an odd half step shows the upper value on odd lines
+COLD static void ditherFill(uint16_t uwA, uint16_t uwB, uint8_t ubLines, uint16_t *pOut) {
+	const int16_t n = (int16_t)(ubLines - 1);
+	for(uint8_t y = 0; y < ubLines; ++y) pOut[y] = 0;
 	for(uint8_t s = 0; s < 12; s = (uint8_t)(s + 4)) {
-		int16_t a = (int16_t)((s_pSkyTop[ubMission] >> s) & 15);
-		int16_t b = (int16_t)((s_pSkyLow[ubMission] >> s) & 15);
+		int16_t a = (int16_t)((uwA >> s) & 15);
+		int16_t b = (int16_t)((uwB >> s) & 15);
 		int16_t d = (int16_t)(2 * (b - a)), sgn = 1;
 		if(d < 0) { d = (int16_t)-d; sgn = -1; }
 		int16_t q = 0, r = n / 2;      // (|num| + n/2) = q n + r
-		for(uint8_t y = 0; y < SKY_LINES; ++y) {
+		for(uint8_t y = 0; y < ubLines; ++y) {
 			int16_t h = (int16_t)(2 * a + sgn * q);
 			pOut[y] |= (uint16_t)(((h >> 1) + ((h & 1) & (y & 1))) << s);
 			r = (int16_t)(r + d);
 			while(r >= n) { r = (int16_t)(r - n); ++q; }
 		}
 	}
+}
+
+COLD void logicSkyFillDither(uint8_t ubMission, uint16_t *pOut) {
+	// logicSkyColorDither line by line
+	ditherFill(s_pSkyTop[ubMission], s_pSkyLow[ubMission], SKY_LINES, pOut);
+}
+
+// The plain's ground: the haze (the sky's own colour on the floor's first line,
+// so it continues the sky above) to C. (FLOOR_Y - PLAY_TOP is even: the dither's
+// odd lines are the screen's, as the sky's.)
+_Static_assert(((FLOOR_Y - PLAY_TOP) & 1) == 0, "the floor's dither in step with the sky's");
+COLD void logicFloorFillGround(uint8_t ubMission, uint16_t *pOut) {
+	ditherFill(logicSkyColor(ubMission, FLOOR_Y - PLAY_TOP), g_pMissionLandPal[ubMission][6], FLOOR_LINES, pOut);
+}
+
+COLD uint32_t logicFloorGround24(uint8_t ubMission, uint8_t j) {
+	// (A1200 startup only: 32-bit maths) the 24-bit sky at FLOOR_Y to C x 17
+	uint32_t ulA = logicSkyColor24(ubMission, FLOOR_Y - PLAY_TOP), ulOut = 0;
+	const int32_t n = FLOOR_LINES - 1;
+	for(uint8_t s = 0; s < 24; s = (uint8_t)(s + 8)) {
+		int32_t a = (int32_t)((ulA >> s) & 0xFF);
+		int32_t b = (int32_t)((g_pMissionLandPal[ubMission][6] >> (s / 2)) & 15) * 17;
+		int32_t num = (b - a) * (int32_t)j;
+		int32_t c = a + (num >= 0 ? (num + n / 2) / n : -((-num + n / 2) / n));
+		ulOut |= (uint32_t)c << s;
+	}
+	return ulOut;
 }
 
 #if defined(__GNUC__) && !defined(__clang__)
