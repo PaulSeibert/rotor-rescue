@@ -2203,6 +2203,22 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	}
 }
 
+// The first picture is up: how long the boot took, then "AGK ready". CIA-A's
+// TOD counter counts vertical syncs, but not through the ROM's start-up, so
+// bootvbl trails the harness's frame count (its boot window is 3000 frames
+// from power-on) by a fixed amount per ROM: AROS 102, Kickstart 3.1 138,
+// Kickstart 1.3 333 (measured on vAmiga, 2026-11-12). tests/memory.agk keeps
+// the AROS boot's margin (it loads the program at ~10 frames a KB).
+__attribute__((noinline, optimize("Os"))) static void bootReady(void) {
+	volatile tCia *pCia = g_pCia[CIA_A];
+	ULONG ulHi = pCia->todhi;   // (reading the high byte latches the count)
+	ULONG ulMid = pCia->todmid;
+	ULONG ulLo = pCia->todlow;
+	agkState("bootvbl", (LONG)((ulHi << 16) | (ulMid << 8) | ulLo));
+	agkEnd();
+	agkReady();
+}
+
 void genericProcess(void) {
 	agkPerfBegin();
 	s_ulFrameVbl = timerGet();
@@ -2229,7 +2245,7 @@ void genericProcess(void) {
 		while(timerGet() - s_ulFrameVbl < 1) continue;
 		if(!s_isReady) {
 			s_isReady = 1;
-			agkReady();
+			bootReady();
 		}
 		else if(s_isTitlePending) titleLoad();   // the splash is still black
 		else if(s_isRotorPending) rotorSetup();  // (a frame later)
@@ -2287,7 +2303,7 @@ void genericProcess(void) {
 		if(s_uwCopUsed > s_uwCopCount || s_uwTitleCopUsed > s_uwTitleCopCount) agkPrint("AGK ERR copper list overflow\n");
 		if(!s_isReady) {
 			s_isReady = 1;
-			agkReady();
+			bootReady();
 		}
 	}
 	if(s_sGame.frame == SYNC_FRAME) agkPrint("AGK t0\n");
