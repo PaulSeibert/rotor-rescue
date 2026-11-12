@@ -38,7 +38,7 @@ routes (there is one battlefield, repeated three times with harder numbers).
 
 | machine | what it gets |
 |---|---|
-| **A500 OCS, PAL 50 Hz, Kickstart 1.3** | the whole game. README and `agk.toml` state **1 MB (512K chip + 512K slow)**: the 425.6 KB program lives in slow RAM. 50 fps, worst frame 82% (section 11). |
+| **A500 OCS, PAL 50 Hz, Kickstart 1.3** | the whole game. README and `agk.toml` state **1 MB (512K chip + 512K slow)**: the 425.6 KB program lives in slow RAM. 50 fps, worst frame 80% (section 11). |
 | 512K chip, no expansion | **does not boot: AmigaDOS says "Unable to load first: Error code 103"** (no free store). Measured 2026-11-11 on vAmiga with an A500 OCS, Kickstart 1.3 and no slow RAM (decision E, decided by Paul, 2026-11-11: measure only, nothing shrunk); the numbers are under the table. |
 | **A1200 AGA** (found at boot: Lisa's DENISEID low byte `$F8`, `agaDetect` in `main.c`) | a 24-bit copper sky on all 172 sky lines (4 MOVEs a line via BPLCON3 LOCT), a 224-colour title logo (8 planes, `titlelogo8.bin`), quarter-pixel parallax (BPLCON1 35 ns bits) for the clouds, mountains and hills. The game itself is the OCS game. |
 | Kickstart 3.1, AROS ROM | tested profiles `a500-ks31`, `a500-aros`. AROS loads the program at about 10 frames a KB; the first picture arrives at frame 2938 against the harness's 3000-frame boot window (2931 at 17ece43; the damage, jet-flash and smoke art and code added 7 frames). |
@@ -452,9 +452,12 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 - **BOBs:** 13 types, `DRAW_MAX` 96 a frame. Limits: 3 player shots, 6 enemy shots, 5 tanks, 2 jets,
   3 mines, 6 explosions.
 - **Frame budget (A500):** `tests/perf.agk` (a whole trip: 16 boarding, 16 running into the hangar)
-  asserts `expect-max-load 83`; the heaviest picture measures 82% (v1.2; 81% before), about 18% short of a dropped
-  frame (`e6cc691`). No dropped frames. The average load is not recorded. Target (average <= 70%,
-  worst < 100%): the worst is met; the average is unmeasured.
+  asserts `expect-max-load 83`; the heaviest picture measures 80% on a500 and a500-ks31 (the game's
+  own perf counter; `agk profile` 81%, average 35%), about 20% short of a dropped frame. It was 82%
+  at v1.2 and 85% (profile 86%) after the deep rotor and jet fairness merged; the perf trim won it
+  back without changing what is played or heard: last picture's BOBs are erased in the top border
+  while the HUD types, the HUD's numbers take one DIVU a digit, and the pacing sample never shares
+  a picture with the status line. No dropped frames. Target (average <= 70%, worst < 100%): met.
 - **Memory:** executable 425.6 KB in slow RAM (`b9d5987`); `expect-min-chip-free 64` (KB) on every
   profile. Kickstart 3.1's chip RAM was the binding limit when it dipped below 64 KB; earlier
   builds measured lowest chip free 95 / 88 / 155 KB (a500 / ks31 / aros); at v1.2 85 / 83 / 158 KB (a1200 1075 KB).
@@ -483,7 +486,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 **Acceptance criteria** (state as recorded in the commit messages at 2c0c4f9; **not re-run for this spec**)
 - [x] `agk unit` passes (54 tests in `tests/unit/test_logic.c`)
 - [x] `agk test` passes on a500, a500-ks31, a500-aros, a1200 (14 scenario files, per-profile goldens where intended)
-- [x] no dropped frames in `tests/perf.agk` (max load 83% asserted, 81% measured)
+- [x] no dropped frames in `tests/perf.agk` (max load 83% asserted, 80% measured)
 - [ ] the pacing checker passes section 5's targets: **no checker exists** for this game
 - [x] tells on every tank shell, unit-tested and scenario-tested (`testNoShellWithoutTell`, `tests/tell.agk`)
 - [ ] boss anti-stall: **n/a** (no boss); no set piece

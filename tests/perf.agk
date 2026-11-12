@@ -32,6 +32,9 @@ expect-no-dropped-frames
 # (80 until the tank tell, quarter-pixel scroll, dithered sky, preview card
 # and hall of fame: the heaviest picture - 16 people running into the hangar
 # while the score bar types - went 79% -> 81%, about 1% of it the dithered
-# sky's copper DMA, the rest spread thin; still ~19% short of a dropped frame)
+# sky's copper DMA, the rest spread thin; still ~19% short of a dropped frame.
+# The deep rotor and jet fairness took it to 85%; the perf trim brought it to
+# 80%: erases in the top border beside the HUD typing, fewer DIVUs for the
+# HUD's numbers, the pacing sample off the status line's frames)
 expect-max-load 83
 expect-min-chip-free 64
