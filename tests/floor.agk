@@ -1,0 +1,23 @@
+# The plain's perspective floor (SPEC 8, Paul 2026-11-12). Fly left flat
+# out, high up: the camera settles at 3 px a frame. Floor line j (game line
+# 180 + j) moves at (18 + j) / 72 of the camera. expect-scroll needs two rows,
+# so each region pairs a floor line with one the art contract keeps
+# transparent (rows 0 and 18: one colour, no vote): line 181 moves 19/24 px a
+# frame, line 197 35/24 - next to the mountains' 3/4 and the hills' 3/2, two
+# speeds no band has. The far strip (the mountains band's last rows, lines
+# 170-179) moves as one block at the mountains' 3/4: it doesn't shear.
+wait-serial "AGK t0"
+press fire 2
+wait 125
+press up 80
+hold left
+wait 60
+expect-scroll 0 180 319 181 136 19/24
+expect-scroll 0 197 319 198 136 35/24
+expect-scroll 0 170 319 178 136 3/4
+screenshot plain
+# the plain's ground: C (land pen 6, mission 1) on the floor's last line (row
+# 18 is empty by contract) and between the hill crests below it
+expect-color plain 4 198 0xDA6
+expect-color plain 315 198 0xDA6
+release

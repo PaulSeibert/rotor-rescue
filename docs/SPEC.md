@@ -150,14 +150,18 @@ four barracks at x 420, 1080, 1700, 2240 (far to near; 2460, 1800, 1180 and 640 
 | 3 Coastal Dawn | 0x237, 0xFB8 | sea spray rising | 400 frames (8 s) | 3 | the start | the start |
 
 (Normal skill: jets and mines switch on when trips + mission index reach 1 and 2; the tank cap is
-`1 + trip + mission`, at most 5. Section 7 gives all skills.) Game lines (`main.c:75-82`): HUD 0-23, clouds band y72
-(40 rows, camera / 8), mountains y120 (76 rows, / 4), a gap row at 196 where the land palette loads,
-hills y197 (27 rows, / 2), ground y224 (32 rows, / 1). The title shows no cloud band.
+`1 + trip + mission`, at most 5. Section 7 gives all skills.) Game lines in play (`main.c`): HUD 0-23, clouds band y72
+(40 rows, camera / 8), mountains y120 (50 rows, / 4) and below them the plain's far strip y170 (10 rows,
+the same band and speed), the plain's perspective floor y180-198 (19 lines, each at its own speed from / 4
+to / 2; the land palette loads at the end of line 179), hills y199 (their rows 2-26, / 2), ground y224
+(32 rows, / 1). The title keeps the old layout: no clouds, its own mountain strip, a gap row at 196, hills
+y197.
 
 - **No tile map and no per-mission load:** the world is rules plus four looping parallax bands, all
   resident. Only boot loads from the floppy (logos, hall of fame).
 - **Disk:** one 880 KB floppy (`first.adf`, 901,120 bytes). Files: the executable, `dpslogo.bin`
-  (22.2 KB packed), `titlelogo.bin` (10.4 KB packed), `titlelogo8.bin` (18.8 KB packed), and the
+  (22.2 KB packed), `titlelogo.bin` (10.4 KB packed), `titlelogo8.bin` (18.8 KB packed), `plainfloor.bin`
+  (the plain's floor, 1.2 KB packed), and the
   hall of fame file `rrscores` (56 bytes) written by the game. About 477 KB of 880 KB used, derived.
 - **Boot to play:** the DPS logo and title load during the black splash. Time from fire to play on
   a real floppy is **not measured** (open question 1); the AROS profile's first picture is at frame
@@ -341,7 +345,8 @@ no outline.
 | 17-27 | the chopper, attached sprites on channels 0-3: 111 445 778 AAB EEE D22 811 38D BEF F70 FE4 |
 | 25-27 (shared pair) | the weather on sprite channels 4-5 (pale blue, orange, yellow) |
 | 29-31 | sky wisps or stars on sprite channel 6, per mission (A45 E86 FCA / 335 99B FFF / DA9 FDB FFE) |
-| 9-15 | the parallax bands, reloaded by the copper per band and per mission. Each band is drawn in indices 1-7 dark to light so one bitmap serves all three palettes |
+| 9-15 | the parallax bands, reloaded by the copper per band and per mission. Each band is drawn in indices 1-7 dark to light so one bitmap serves all three palettes. The plain uses no new slots: its far strip is in the mountains' palette, its floor in the land palette |
+| 0 on lines 180-198 | the plain's ground under the floor: a line-dithered gradient per mission from H (the sky's own colour at line 180, the haze) to C (land pen 6); C from line 199 down, so the hills stand on the plain's colour, not the sky's |
 
 Band palettes (7 colours, dark to light): clouds dusk 312 423 534 745 A55 D86 FB8, night 011 112 123
 234 346 68A 9BD, dawn 245 356 568 89A CAA FCB FEE; mountains dusk 413 524 635 746 857 A68 C9A, night
@@ -360,6 +365,26 @@ about 24 px). `parallax_check.py` (the pilot) asserts every pixel on each bounda
 line's sky colour or C at 12 camera offsets for each mission: last run PASS. On AGA the quarter-pixel
 shift only moves pixels already sky or C, so it cannot open a seam. **There are no horizontal biome
 transitions:** the border is the fence and the ground band is the same everywhere.
+
+**The plain: a perspective floor between the mountains and the hills** (decided by Paul, 2026-11-12).
+The band of flat sky colour between the mountains' foot and the hills (lines 192-198 solid, and the sky
+between the hill crests down to 218) read as too solid and showed the banding. In its place, a plain:
+scrub and flats, distant mesas, a dry lake or riverbed, a road or rail line.
+- **Far strip** (lines 170-179, 10 rows): the mountains' foot fading into haze, with small mesas. It is
+  the bottom of the mountains band (the same bitmap rows, speed / 4, palette, AGA quarter pixels), so
+  anything taller than a line may stand here without shearing.
+- **Floor** (lines 180-198, 19 lines): every line scrolls at its own speed, rising linearly down the
+  screen (speed is proportional to 1/z, and 1/z is linear in screen y on a flat plain): line 180 at
+  the mountains' camera / 4, line 198 at the hills' camera / 2, `(18 + j) / 72` of the camera for
+  floor line j. Row j loops every `8 (18 + j)` px (144-288), so every row repeats after the same 576 px
+  of camera travel and a flat feature drawn in perspective stays one feature. Only flat, one-line-high
+  or perspective-drawn features go here; anything taller shears.
+- **Seams:** floor row 0 and row 18 are transparent (the haze at the far edge, C at the near one); the
+  far strip's last two rows dither into haze. The full art contract (sizes, pens, rules, files) is
+  `docs/plain-spec.md`.
+- **Hills:** they start at their row 2 (rows 0-1 were empty) at line 199; their transparent pixels now
+  show C (the plain's near colour) instead of the sky. Optional for the art pass: near-plain texture
+  baked into the hills' empty pixels, which scroll at / 2, the floor's near speed.
 
 **Animation** (`logic.h`, art pilot section 6): chopper 6 poses x 2 rotor phases, mirrored for
 left; person 8 frames (stand, 2 run right, 2 run left, 2 wave, down); tank 10 (2 each way, 2 fire,
@@ -446,6 +471,20 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   120 lines", from before the cloud band). DDFSTRT `$30` (a fetch word early for
   fine scroll; costs sprite 7). One raw copper list per buffer, rebuilt each frame; 496 entries
   allocated, 465 used (`b9d5987`). The title has its own list (the logo as a 4-plane section).
+- **The perspective floor** (decided by Paul, 2026-11-12; section 8): lines 180-198 of PF2, one copper
+  block per line at the line's start (WAIT, COLOR00 the plain's ground, BPLCON1 the line's fine scroll,
+  BPL2MOD the step to the next line's start: the modulo moves all three PF2 planes with one MOVE, so
+  a line costs 4 entries, 7 on AGA with its 24-bit COLOR00). At the end of line 179 the copper points
+  PF2 at floor row 0 and loads the land palette (row 0 is transparent, so the load can't show). The
+  far strip is the mountains band's last 10 rows: no copper of its own. Per frame, only when the
+  camera moves, `logicFloorScroll` (`logic.c`) writes each line's BPLCON1 and modulo straight into
+  the back list: one 16 x 16 multiply a frame, then an add, a mask and a table lookup a line (no
+  divide, no per-line wrap: each row's loop is its speed times 576 px). The same code serves the
+  A1200 in quarter pixels (a mask keeps or drops BPLCON1's 35 ns bits). The per-mission ground
+  gradients are made at startup. The sky's COLOR00 changes stop at line 179 (they stay on lines the
+  mountains cover: COLOR00 is also the overscan border beside the picture). The floor's art (640 x 19, 3 planes, 4.6 KB
+  chip) is a floppy file, `plainfloor.bin` (1.2 KB packed), loaded with the title logo during the
+  splash: in the program it pushed AROS's first picture to frame 2992 of its 3000.
 - **Sprites:** 0-3 the chopper (32 px, 15 colours, attached pairs, a pose per frame); 4-5 weather
   (13 items stacked down each channel's DMA list, slid by the CPU); 6 the far sky's wisps or stars
   (behind both playfields, priority code `0x1B`); 7 lost to the fine-scroll fetch.
@@ -533,3 +572,4 @@ writable disk.)
 | v1.1 | 2026-11-11 | the pilot art landed on `main` (567e6c5, 065a44d): section 8 and the milestones updated |
 | v1.2 | 2026-11-11 | decided by Paul, 2026-11-11: A damage instead of instant loss; B shell 1.5 and missile 2.5 px/frame, a jet tell, no off-screen fire; C a tank score quota of 10 a mission; D GODMODE's tables equal normal's, unit-tested; E the 512K test (measurement only, result in section 2). Open questions 2, 4, 5, 7 removed |
 | v1.3 | 2026-11-12 | (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest): jet fairness (ground grace, one jet at a time, a warning and a longer tell, an easier skill 1), jet pacing measured; section 5, 6, 7 |
+| v1.4 | 2026-11-12 | decided by Paul, 2026-11-12: the plain between the mountains and the hills, a true perspective floor (each line its own speed, / 4 to / 2), sections 4, 8, 11; art contract `docs/plain-spec.md`. Art v4 approved by Paul: no mesas, blue-noise wandering foot, perspective texture between and under the hills, no full-width solid or dithered rows (checked by `art/tools/plain_check.py`) |

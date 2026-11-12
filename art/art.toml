@@ -73,8 +73,10 @@ depth = 3
 palette = "cloud_pal.txt"
 wrap_x = 320
 
-[mountains]               # PF2 band, camera / 4
-source = "mountains.txt"
+# (the plain's floor is not here: art/tools/make_plain.py writes it to disk/plainfloor.bin,
+# loaded during the splash, so the program, and AROS's boot, stays small)
+[mountains]               # PF2 band, camera / 4: mountains.txt rows 0-49 + the plain's far strip
+source = "mountains_play.txt"   # (art/tools/make_plain.py writes it; docs/plain-spec.md)
 kind = "bitmap"
 depth = 3
 palette = "mtn_pal.txt"

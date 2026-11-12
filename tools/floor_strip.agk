@@ -1,0 +1,33 @@
+# Not a test (no goldens): pictures for the perspective floor's strip
+# (python3 tools/floor_strip.py after "agk run -f tools/floor_strip.agk").
+# Fly left flat out, then twelve pictures 4 frames (12 px of camera) apart.
+wait-serial "AGK t0"
+press fire 2
+wait 125
+press up 80
+hold left
+wait 60
+screenshot s00
+wait 4
+screenshot s01
+wait 4
+screenshot s02
+wait 4
+screenshot s03
+wait 4
+screenshot s04
+wait 4
+screenshot s05
+wait 4
+screenshot s06
+wait 4
+screenshot s07
+wait 4
+screenshot s08
+wait 4
+screenshot s09
+wait 4
+screenshot s10
+wait 4
+screenshot s11
+release

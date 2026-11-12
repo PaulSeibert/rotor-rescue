@@ -417,6 +417,33 @@ uint16_t logicBandOffset4(int16_t wCam, uint8_t ubShift, uint16_t uwLoopW);
 uint16_t logicScrollCon1Pf2Aga(uint16_t uwX4);
 int16_t logicScrollByteOffset4(uint16_t uwX4);
 
+// The plain (SPEC 8, decided by Paul, 2026-11-12): a true perspective floor
+// between the mountains and the hills. Its far strip is the mountains band's
+// last PLAIN_FAR_ROWS rows (lines FLOOR_Y - 10 .. FLOOR_Y - 1, camera / 4, one
+// block: mesas may stand there). Below it FLOOR_LINES lines, each scrolled on
+// its own by the copper: line j at (18 + j) / 72 of the camera, linear down the
+// screen (on a flat plain 1/z is linear in screen y), from the mountains' 1/4
+// to the hills' 1/2. Row j of the floor art loops every 8 (18 + j) px, its
+// speed times FLOOR_PERIOD, so every row repeats after the same FLOOR_PERIOD px
+// of camera and needs no wrap of its own (docs/plain-spec.md: the art contract).
+#define PLAIN_FAR_ROWS 10
+#define FLOOR_Y 180          // the floor's first game line (row 0: transparent, the haze)
+#define FLOOR_LINES 19       // .. FLOOR_Y + 18 (row 18: transparent, C), then the hills
+#define FLOOR_PERIOD 576     // camera px: 32 x (FLOOR_LINES - 1), so every row's loop is whole px
+uint16_t logicFloorRowW(uint8_t j);                // row j's loop, px: 144 .. 288
+uint16_t logicFloorX4(int16_t wCam, uint8_t j);    // row j's left edge, 1/4 px (0 .. 4 W - 1)
+// Each floor line's copper values for this camera, written straight into the
+// list: BPLCON1 (PF2's fine scroll, the quarters kept where uwX4Mask is
+// 0xFFFF, AGA; 0xFFFC drops them, OCS) at pOut[j * ubStride], and the modulo
+// that takes line j's PF2 fetch to row j + 1's start at pOut[j * ubStride + 2]
+// (uwModBase = the bitmap's row bytes less the fetch). Returns row 0's byte
+// offset (its bitplane pointers). Per frame: one 16 x 16 multiply, no divide.
+int16_t logicFloorScroll(int16_t wCam, uint16_t uwX4Mask, uint16_t uwModBase, uint16_t *pOut, uint8_t ubStride);
+// The plain's ground (COLOR00 under the floor), per line: from the sky's own
+// colour at FLOOR_Y (the haze) to C, the land palette's pen 6 (line-dithered)
+void logicFloorFillGround(uint8_t ubMission, uint16_t *pOut);
+uint32_t logicFloorGround24(uint8_t ubMission, uint8_t j);   // the same in 24 bits, for AGA
+
 // Radar: 0..RADAR_W-1 from a world x
 #define RADAR_W 192
 #define RADAR_X0 64
