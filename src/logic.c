@@ -1668,7 +1668,7 @@ uint8_t logicChopperFrame(const tGame *g) {
 	return pose | (c->face == FACE_LEFT ? CHOP_LEFT : 0);
 }
 
-// ---- the rotor's sound. Periods: 845 idle (3.5 thumps/s), 591 hover (5), 17/6 less
+// ---- the rotor's sound. Periods: 845 idle (3.5 thumps/s), 591 hover (5), 45/16 less
 // per 1/16 px of speed (523 at 24: 5.6, 500 at 32: 5.9, 455 at 48: 6.5/s; Paul's
 // playtest, 2026-11-12: 8.4 at top speed was irritating), 4 less per climb unit; the
 // spin-up takes 3 per boosted frame off (up to 300). Never below 455 (6.5/s)
@@ -1693,8 +1693,8 @@ static void rotorTick(tGame *g) {
 		else {
 			int16_t wSpeed = absw(c->vx);
 			int16_t wClimb = c->vy < 0 ? (int16_t)-c->vy : 0;
-			wPer = (int16_t)(ROTOR_PER_HOVER - (wSpeed * 17) / 6 - wClimb * 4);
-			wVol = (int16_t)(40 + wSpeed / 12 + (wClimb ? 3 : 0));   // (speed/3 rose to 56 flat out)
+			wPer = (int16_t)(ROTOR_PER_HOVER - ((wSpeed * 45) >> 4) - wClimb * 4);
+			wVol = (int16_t)(40 + ((wSpeed * 11) >> 7) + (wClimb ? 3 : 0));   // (speed/3 rose to 56 flat out)
 			if(g->rotorBoost) {
 				wPer = (int16_t)(wPer - g->rotorBoost * 3);
 				wVol = (int16_t)(wVol + g->rotorBoost / 10);
