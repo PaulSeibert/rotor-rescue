@@ -75,10 +75,12 @@ the route; not planned.
 | stick up / down | climb / descend; descend onto the ground to land; up to take off |
 | stick held against the facing | turn, through facing the screen (side, front, other side) |
 | fire, facing left or right | cannon (6 px/frame, repeat 10 frames, 3 shots live, 36 frames of life) |
-| down + fire in the air | turn to face the screen |
+| fire, facing left or right | the cannon, always: taps, a held fire, any volley, whatever the stick is doing (Paul's playtest, 2026-11-12; studio proposal) |
+| stick held down 20 frames with no fire in them, then fire | turn to face the screen: the bomb stance (the press turns, it doesn't shoot). Firing at any time restarts the 20 frames, so a volley never gets there |
 | fire, facing the screen | drop a bomb (airborne only) |
+| up + fire, facing the screen | turn back to the side you came from: the cannon (so: bomb the tank, up + fire, shoot the jet) |
 | left / right, facing the screen | a sidestep: 2.5 px/frame, full speed in ~5 frames |
-| fire 2, or X | turn: left, front, right, front... |
+| fire 2, or X | turn: left, front, right, front... (always allowed, never times out) |
 | keys | arrows, Space fire, X turn, P pause (in play), M music, Esc quit |
 | Ctrl+L, then 0-5 | difficulty (section 7); Ctrl+L, T / H: debug dumps (parallax fine scroll, hall-of-fame file read-back) |
 | fire on the mission card | skip it |
@@ -90,8 +92,16 @@ the route; not planned.
   to a stop).
 - Vertical: up max 1.75 px/frame, down max 2 px/frame, accel 3, released decel 2. Take-off starts at
   0.4 px/frame.
-- Turn: 6 frames per step (side to front to side = 12); the stick must push against the facing 5
+- Turn (Paul's playtest, 2026-11-12; studio proposal, pending his playtest): eased, no snaps. Side to front is
+  the three-quarter view for 5 frames (`TURN_STEP_FRAMES`), then a **lean** frame for 6 (`LEAN_FRAMES`)
+  toward the way the nose is swinging, then (going on to the other side) the three-quarter view
+  for 5 and the side: left to right = 16 frames, side, 3/4, lean right, 3/4, side. Leaning left is
+  the mirror. Every pose of the sequence is shown, in order. The stick must push against the facing 5
   frames to start a turn, 20 frames from the front (so you can strafe while bombing).
+- Front-facing hover sways gently (front 24 frames, slight lean one way 24, front 24, slight lean the other 24: 96
+  frames); a sidestep leans into the move (slight at 0.75 px/frame, full at 1.75).
+- Bomb stance times out: a stance entered by the stick (down, then fire) turns back to the side 75 frames
+  after the last bomb; a stance entered with X stays until you turn it.
 - Facing is separate from moving: the chopper keeps its velocity through a turn.
 - Camera: locked to the chopper's pixel, with a 56 px look-ahead that glides (accel 1/8 px per frame
   squared, max 2 px/frame) and a scroll speed that changes by at most 1 px a frame; a long pan after
@@ -361,7 +371,7 @@ line's sky colour or C at 12 camera offsets for each mission: last run PASS. On 
 shift only moves pixels already sky or C, so it cannot open a seam. **There are no horizontal biome
 transitions:** the border is the fence and the ground band is the same everywhere.
 
-**Animation** (`logic.h`, art pilot section 6): chopper 6 poses x 2 rotor phases, mirrored for
+**Animation** (`logic.h`, art pilot section 6): chopper 8 poses (+ slight and full lean, front view) x 2 rotor phases, mirrored for
 left; person 8 frames (stand, 2 run right, 2 run left, 2 wave, down); tank 10 (2 each way, 2 fire,
 2 aim, 2 flash); jet 2; barracks 4; explosion 5; mine 2; shadow 4 sizes x 2 dither phases; flag 2.
 Rule: one drawn frame per 4-6 px of travel, held at least 2 game frames.
@@ -533,3 +543,4 @@ writable disk.)
 | v1.1 | 2026-11-11 | the pilot art landed on `main` (567e6c5, 065a44d): section 8 and the milestones updated |
 | v1.2 | 2026-11-11 | decided by Paul, 2026-11-11: A damage instead of instant loss; B shell 1.5 and missile 2.5 px/frame, a jet tell, no off-screen fire; C a tank score quota of 10 a mission; D GODMODE's tables equal normal's, unit-tested; E the 512K test (measurement only, result in section 2). Open questions 2, 4, 5, 7 removed |
 | v1.3 | 2026-11-12 | (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest): jet fairness (ground grace, one jet at a time, a warning and a longer tell, an easier skill 1), jet pacing measured; section 5, 6, 7 |
+| v1.4 | 2026-11-12 | (Paul's playtest, 2026-11-12; studio proposal, pending his playtest): volleys never become bombs (the bomb stance needs a 20-frame down hold with no fire, section 3), eased turn through front with lean frames and a front-facing sway |
