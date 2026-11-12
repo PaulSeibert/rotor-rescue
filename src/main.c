@@ -77,10 +77,29 @@
 // The PF2 bands, in game lines (the clouds: CLOUDS_Y in logic.h)
 #define CLOUDS_END (CLOUDS_Y + ART_CLOUDS_H)  // 112: blank PF2 rows to the mountains
 #define MTN_Y 120
-#define GAP_Y (MTN_Y + ART_MOUNTAINS_H)      // 196: one blank line, the land palette loads
-#define HILLS_Y (GAP_Y + 1)                  // 197
+#define GAP_Y 196                            // the title: one blank line, the land palette loads
+#define HILLS_Y (GAP_Y + 1)                  // 197 (the title)
 #define GROUND_BAND_Y (HILLS_Y + ART_HILLS_H) // 224 .. 255
 #define SKY_END GAP_Y
+// In play (SPEC 8, Paul 2026-11-12): the mountains band runs on into the
+// plain's far strip (lines 120-179, one block at camera / 4), then the
+// perspective floor (FLOOR_Y .. FLOOR_END - 1, a speed per line, logic.h), then
+// the hills from their row 2 (rows 0-1 are empty) at line 199
+#define FLOOR_END (FLOOR_Y + FLOOR_LINES)    // 199
+#define PLAY_HILLS_ROW (FLOOR_END - HILLS_Y)  // 2
+_Static_assert(MTN_Y + ART_MOUNTAINS_H == FLOOR_Y, "the mountains band (with the far strip) ends where the floor starts");
+// The floor's art: disk/plainfloor.bin (art/tools/make_plain.py), 640 px rows,
+// 3 interleaved planes, loaded during the splash (titleLoad) like the logo:
+// in the program it would push AROS's first picture past the boot window
+#define PLAIN_FLOOR_W 640
+#define PLAIN_FLOOR_BYTES ((ULONG)(PLAIN_FLOOR_W / 8) * 3 * FLOOR_LINES)
+_Static_assert(PLAY_HILLS_ROW == 2 && FLOOR_END + ART_HILLS_H - PLAY_HILLS_ROW == GROUND_BAND_Y, "the hills in play: rows 2-26, lines 199-223");
+// The floor's copper, per line at its start: WAIT, COLOR00 (the plain's ground;
+// 4 MOVEs in 24 bits on AGA), BPLCON1, BPL2MOD. At the end of line 179: PF2's
+// pointers to floor row 0 and the land palette (no blank line any more).
+// Against the old gap line (WAIT, blank pointers, modulo, WAIT, palette: 16):
+#define FLOOR_COP_OCS (1 + 6 + 7 + FLOOR_LINES * 4 - 16)
+#define FLOOR_COP_AGA (1 + 6 + 7 + FLOOR_LINES * 7 - 16 - 5 * (SKY_END - FLOOR_Y))
 
 // The title's own layout (its copper list): the logo, then its lines of text,
 // the mountains lower down (the clouds don't show), the hills and ground as in
@@ -105,7 +124,7 @@ _Static_assert(TITLE_MTN_Y - 1 > TITLE_LOGO_END + 3 && TITLE_MTN_Y < GAP_Y - 24,
 #define AGA_SKY_MOVES (4 * (SKY_END - PLAY_TOP))
 #define TITLE_LOGO8_PAL_MOVES ((TITLE_LOGO8_COLORS / 32) * 66 + 1)
 // (the OCS sky changes on few lines: AGA's has a WAIT and 4 MOVEs on each)
-#define COP_RAW_COUNT_AGA (COP_RAW_COUNT + AGA_SKY_MOVES + (SKY_END - PLAY_TOP) + 6)
+#define COP_RAW_COUNT_AGA (COP_RAW_COUNT + AGA_SKY_MOVES + (SKY_END - PLAY_TOP) + 6 + FLOOR_COP_AGA)
 #define TITLE_COP_COUNT_AGA (TITLE_COP_COUNT + AGA_SKY_MOVES + 6 + TITLE_LOGO8_PAL_MOVES)
 _Static_assert(TITLE_LOGO8_W == TITLE_LOGO_W && TITLE_LOGO8_H == TITLE_LOGO_H, "the A1200's logo: the same size");
 _Static_assert(TITLE_LOGO8_FIRST == 32 && TITLE_LOGO8_COLORS == 224, "the A1200's logo: pens 32-255");
@@ -137,7 +156,15 @@ static tCopBfr *s_pCopBfrA;         // copper buffer 0
 static UWORD s_uwCopUsed, s_uwTitleCopUsed;
 static UBYTE s_pListMission[2];     // which mission's colours each copper list has
 static UWORD s_pSky[MISSION_COUNT][SKY_END - PLAY_TOP];   // COLOR00 per line (from logic.c, at startup: OCS line-dithered)
-static UBYTE s_ubSkyHiddenFrom = SKY_END;   // from this line down the mountains cover the sky everywhere
+// The plain's floor (SPEC 8): its art, the hills from their row 2, the ground
+// colour per mission and line, and where each list's floor MOVEs are
+static tBitMap *s_pPlainFloor;
+static tBitMap s_sHillsPlay;        // s_pHills from row PLAY_HILLS_ROW (its planes moved down)
+static UWORD s_pFloorBg[MISSION_COUNT][FLOOR_LINES];   // COLOR00 (AGA: the high nibbles)
+static UWORD s_pFloorBgLo[MISSION_COUNT][FLOOR_LINES]; // AGA: the low nibbles
+static UWORD s_pFloorPtr[2];        // per buffer: floor row 0's pointer MOVEs (3 pairs)
+static UWORD s_pFloorCon1[2];       // per buffer: line 0's BPLCON1 MOVE (its BPL2MOD follows; a line a stride)
+static UBYTE s_ubFloorStride = 4;   // copper entries a floor line (7 on AGA)
 
 typedef struct {
 	UWORD uwCon1;          // index of the MOVE BPLCON1
@@ -246,6 +273,8 @@ static void skillKeys(void) {
 #define REG_BPLCON4 0x10C
 #define REG_FMODE 0x1FC
 #define REG_COLOR00 0x180
+#define REG_BPLCON1 0x102
+#define REG_BPL2MOD 0x10A
 #define BPLCON3_OCS 0x0C00   // bank 0, PF2's colours from 8 (PF2OF 3), high nibbles
 #define BPLCON3_LOCT 0x0E00  // the same, writing low nibbles
 #define BPLCON4_OCS 0x0011   // sprites in colours 16-31
@@ -347,6 +376,47 @@ static tCopSlots cwBand(tAgkCopWriter *pW, UWORD uwGameY, const tBitMap *pBm) {
 	agkCopMove(pW, &g_pCustom->bplcon1, 0);
 	agkCopMove(pW, &g_pCustom->bpl2mod, pBm->BytesPerRow - FETCH_BYTES);
 	return sSlots;
+}
+
+// The plain's perspective floor in play (SPEC 8, logic.h): after the far
+// strip's last line PF2 goes to floor row 0 and the land palette loads (row 0 is
+// empty: the palette's MOVEs, which run into line FLOOR_Y, can't show). Then a
+// block at the start of every floor line, before its fetch: COLOR00 (the
+// plain's ground), BPLCON1 (this line's fine scroll), BPL2MOD (added at the end
+// of this line's fetch: where the next row starts, so all three PF2 planes
+// move with one MOVE). floorSet() fills in the scroll each frame. Then the
+// hills, from their row 2.
+__attribute__((noinline, optimize("Os"))) static void cwFloor(tAgkCopWriter *pW, UBYTE ubBfr, UBYTE ubMission) {
+	// (raw MOVEs by register offset: small code, the A500's slow RAM is full)
+	agkCopWait(pW, FLOOR_Y - 1, SWITCH_WAIT_X);
+	s_pFloorPtr[ubBfr] = pW->uwPos;
+	for(UBYTE p = 0; p < 3; ++p) cwPtr8(pW, (UBYTE)(1 + 2 * p), (ULONG)s_pPlainFloor->Planes[p]);
+	for(UBYTE i = 1; i < 8; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * (8 + i)), g_pMissionLandPal[ubMission][i]);
+	for(UBYTE j = 0; j < FLOOR_LINES; ++j) {
+		agkCopWait(pW, FLOOR_Y + j, 0);
+		if(s_isAga) cwSky24(pW, s_pFloorBg[ubMission][j], s_pFloorBgLo[ubMission][j]);
+		else cwReg(pW, REG_COLOR00, s_pFloorBg[ubMission][j]);
+		if(!j) s_pFloorCon1[ubBfr] = pW->uwPos;
+		cwReg(pW, REG_BPLCON1, 0);
+		cwReg(pW, REG_BPL2MOD, (UWORD)(s_pPlainFloor->BytesPerRow - FETCH_BYTES));
+	}
+	s_sHillSlots[0][ubBfr] = cwBand(pW, FLOOR_END, &s_sHillsPlay);
+}
+
+// Each frame the camera moves: every floor line's BPLCON1 and modulo, straight
+// into the back list (logic.c: an add, a mask and a table a line), then row 0's
+// pointers. AGA keeps BPLCON1's quarter pixels, OCS drops them.
+__attribute__((noinline, optimize("Os"))) static void floorSet(tCopCmd *pList, UBYTE ubBfr, WORD wCam) {
+	UWORD *pVal = (UWORD *)&pList[s_pFloorCon1[ubBfr]] + 1;   // (a MOVE: register, value)
+	WORD wOff = logicFloorScroll(wCam, s_isAga ? 0xFFFF : 0xFFFC,
+		(UWORD)(s_pPlainFloor->BytesPerRow - FETCH_BYTES), pVal, (UBYTE)(2 * s_ubFloorStride));
+	UWORD *pPtr = (UWORD *)&pList[s_pFloorPtr[ubBfr]] + 1;
+	for(UBYTE p = 0; p < 3; ++p) {
+		ULONG ulAddr = (ULONG)s_pPlainFloor->Planes[p] + wOff;
+		pPtr[0] = (UWORD)(ulAddr >> 16);
+		pPtr[2] = (UWORD)ulAddr;
+		pPtr += 4;
+	}
 }
 
 // The HUD panel (lines 0..PLAY_TOP-1), all from the copper: a brushed-steel
@@ -503,6 +573,9 @@ static void titleLoad(void) {
 		agkLoadFile("titlelogo.bin.pk", s_pTitleLogo, TITLE_LOGO_BYTES) == TITLE_LOGO_BYTES);
 	// (a hard-disk copy without the file: a title without the logo)
 	if(!s_isTitleLogo) agkPrint("AGK title logo missing\n");
+	// the plain's floor (without the file: just its ground colours)
+	if(agkLoadFile("plainfloor.bin.pk", s_pPlainFloor->Planes[0], PLAIN_FLOOR_BYTES) != PLAIN_FLOOR_BYTES)
+		agkPrint("AGK plain floor missing\n");
 	for(UBYTE b = 0; b < 2; ++b) {
 		copperWriteList(s_pTitleList[b], b, s_sGame.mission, 1);
 		s_pTitleListMission[b] = s_sGame.mission;
@@ -595,10 +668,11 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 		}
 	}
 	else {
-		// The sky, line by line where the colour changes; the switch to dual playfield
+		// The sky, line by line where the colour changes, down to the plain; the
+		// switch to dual playfield
 		UWORD uwPrev = 0xFFFF;
 		ULONG ulPrev24 = ~0UL;
-		for(UWORD y = PLAY_TOP; y < SKY_END; ++y) {
+		for(UWORD y = PLAY_TOP; y < FLOOR_Y; ++y) {
 			UWORD uwColor = s_pSky[ubMission][y - PLAY_TOP];
 			if(s_isAga) {
 				// 24 bits: nearly every line differs
@@ -610,9 +684,9 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 					ulPrev24 = ul24;
 				}
 			}
-			else if(uwColor != uwPrev && (y < s_ubSkyHiddenFrom || y == SKY_END - 1)) {
-				// (no change where nothing shows the sky - copper DMA is bus time -
-				// but the last line's colour shows through the hills below)
+			else if(uwColor != uwPrev) {
+				// (every change, even where the mountains hide the sky: COLOR00 is
+				// also the overscan border either side of the picture)
 				agkCopWait(&sW, y, 0);
 				agkCopMove(&sW, &g_pCustom->color[0], uwColor);
 				uwPrev = uwColor;
@@ -654,14 +728,17 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 			}
 		}
 	}
-	// Mountains -> hills: a blank line in between, for the land palette
-	agkCopWait(&sW, GAP_Y - 1, SWITCH_WAIT_X);
-	cwPlanePtrs(&sW, 1, pBlank);
-	agkCopMove(&sW, &g_pCustom->bpl2mod, (UWORD)-FETCH_BYTES);
-	agkCopWait(&sW, GAP_Y, 0);
-	if(isTitle) s_uwTitleLandPal = sW.uwPos;
-	cwPf2Palette(&sW, g_pMissionLandPal[ubMission]);
-	s_sHillSlots[isTitle][ubBfr] = cwBand(&sW, HILLS_Y, s_pHills);
+	if(isTitle) {
+		// Mountains -> hills: a blank line in between, for the land palette
+		agkCopWait(&sW, GAP_Y - 1, SWITCH_WAIT_X);
+		cwPlanePtrs(&sW, 1, pBlank);
+		agkCopMove(&sW, &g_pCustom->bpl2mod, (UWORD)-FETCH_BYTES);
+		agkCopWait(&sW, GAP_Y, 0);
+		s_uwTitleLandPal = sW.uwPos;
+		cwPf2Palette(&sW, g_pMissionLandPal[ubMission]);
+		s_sHillSlots[1][ubBfr] = cwBand(&sW, HILLS_Y, s_pHills);
+	}
+	else cwFloor(&sW, ubBfr, ubMission);
 	s_sGndSlots[isTitle][ubBfr] = cwBand(&sW, GROUND_BAND_Y, s_pGround);
 
 	if(isTitle) {
@@ -745,12 +822,14 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 	}
 	if(wCam == pListCam[isTitle][ubBfr]) return;   // a still camera: nothing to scroll (chip RAM writes are slow)
 	pListCam[isTitle][ubBfr] = wCam;
+	const tBitMap *pHills = isTitle ? s_pHills : &s_sHillsPlay;
+	if(!isTitle) floorSet(pList, ubBfr, wCam);
 	if(s_isAga) {
 		// the far bands in quarter pixels: no judder at 1/8, 1/4, 1/2 speed
 		if(!isTitle) bandSet4(pList, &s_sCloudSlots[ubBfr], s_pCloudsBm, wCam, 3, ART_CLOUDS_LOOP_W);
 		s_uwMtnCon1 = isTitle ? bandSet4(pList, &s_sMtnSlots[1][ubBfr], s_pTitleMtn, wCam, 2, ART_TITLE_MTN_LOOP_W) :
 			bandSet4(pList, &s_sMtnSlots[0][ubBfr], s_pMountains, wCam, 2, ART_MOUNTAINS_LOOP_W);
-		s_uwHillCon1 = bandSet4(pList, &s_sHillSlots[isTitle][ubBfr], s_pHills, wCam, 1, ART_HILLS_LOOP_W);
+		s_uwHillCon1 = bandSet4(pList, &s_sHillSlots[isTitle][ubBfr], pHills, wCam, 1, ART_HILLS_LOOP_W);
 		s_uwGndX = logicBandOffset(wCam, 0, ART_GROUND_LOOP_W);
 		bandSet(pList, &s_sGndSlots[isTitle][ubBfr], s_pGround, s_uwGndX);
 		return;
@@ -760,7 +839,7 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 	s_uwHillX = logicBandOffset(wCam, 1, ART_HILLS_LOOP_W);
 	s_uwGndX = logicBandOffset(wCam, 0, ART_GROUND_LOOP_W);
 	bandSet(pList, &s_sMtnSlots[isTitle][ubBfr], isTitle ? s_pTitleMtn : s_pMountains, s_uwMtnX);
-	bandSet(pList, &s_sHillSlots[isTitle][ubBfr], s_pHills, s_uwHillX);
+	bandSet(pList, &s_sHillSlots[isTitle][ubBfr], pHills, s_uwHillX);
 	s_uwMtnCon1 = (UWORD)(logicScrollDelay(s_uwMtnX) << 4);
 	s_uwHillCon1 = (UWORD)(logicScrollDelay(s_uwHillX) << 4);
 	s_uwMtnX4 = (UWORD)(s_uwMtnX << 2);
@@ -1887,6 +1966,22 @@ static void readInput(tInput *pIn) {
 	pIn->fire2 = !(g_pCustom->potinp & (1 << 14)) || keyCheck(KEY_X);
 }
 
+// The plain's floor (SPEC 8): its art, the hills' play view (from their row 2),
+// the ground under it per mission and line (AGA: 24 bits, split as the sky's)
+__attribute__((noinline, optimize("Os"))) static void floorCreate(void) {
+	s_pPlainFloor = bitmapCreate(PLAIN_FLOOR_W, FLOOR_LINES, 3, BMF_CLEAR | BMF_INTERLEAVED);   // (empty: transparent until titleLoad)
+	s_sHillsPlay = *s_pHills;
+	for(UBYTE p = 0; p < 3; ++p) s_sHillsPlay.Planes[p] += PLAY_HILLS_ROW * s_pHills->BytesPerRow;
+	for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
+		logicFloorFillGround(m, s_pFloorBg[m]);
+		for(UBYTE j = 0; s_isAga && j < FLOOR_LINES; ++j) {
+			ULONG c = logicFloorGround24(m, j);
+			s_pFloorBg[m][j] = (UWORD)(((c >> 12) & 0xF00) | ((c >> 8) & 0x0F0) | ((c >> 4) & 0x00F));
+			s_pFloorBgLo[m][j] = (UWORD)(((c >> 8) & 0xF00) | ((c >> 4) & 0x0F0) | (c & 0x00F));
+		}
+	}
+}
+
 void genericCreate(void) {
 	agkDebugInit();
 	agkPrint("AGK boot rotor-rescue\n");
@@ -1903,35 +1998,29 @@ void genericCreate(void) {
 
 	s_pMountains = artMountainsCreate();   // (first: the copper list's length depends on it)
 	s_pTitleMtn = artTitleMtnCreate();
-	// the mountains' rows with no gap anywhere in their loop: below the first
-	// of them (down to the band's end) the sky never shows
-	for(UBYTE r = ART_MOUNTAINS_H; r--;) {
-		UBYTE isOpaque = 1;
-		for(UWORD k = 0; k < ART_MOUNTAINS_LOOP_W / 8 && isOpaque; ++k) {
-			UWORD uwOffs = (UWORD)(r * s_pMountains->BytesPerRow + k);
-			isOpaque = (s_pMountains->Planes[0][uwOffs] | s_pMountains->Planes[1][uwOffs] |
-				s_pMountains->Planes[2][uwOffs]) == 0xFF;
-		}
-		if(!isOpaque) break;
-		s_ubSkyHiddenFrom = (UBYTE)(MTN_Y + r);
-	}
 	// The sky per mission and line: OCS line-dithered (a MOVE on most lines
-	// where the sky shows: the list grows by the changes beyond the plain
-	// gradient's, which COP_RAW_COUNT has room for), the A1200's 24-bit below
+	// where the sky shows, down to the plain: the list grows by the changes
+	// beyond the plain gradient's, which COP_RAW_COUNT has room for), the
+	// A1200's 24-bit below
 	_Static_assert(SKY_END - PLAY_TOP == SKY_LINES, "the sky table is logic.c's");
 	WORD wSkyMoves = 0;
 	for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
 		logicSkyFillDither(m, s_pSky[m]);
 		WORD wN = 0;
-		for(UWORD y = 0; y < SKY_LINES; ++y) {
-			UBYTE isShown = PLAY_TOP + y < s_ubSkyHiddenFrom || PLAY_TOP + y == SKY_END - 1;
-			wN += isShown && (!y || s_pSky[m][y] != s_pSky[m][y - 1]);
+		UWORD uwPrev = 0xFFFF;
+		for(UWORD y = PLAY_TOP; y < FLOOR_Y; ++y) {
+			UWORD uwColor = s_pSky[m][y - PLAY_TOP];
+			if(uwColor != uwPrev) {
+				++wN;
+				uwPrev = uwColor;
+			}
 		}
 		if(wN > wSkyMoves) wSkyMoves = wN;
 	}
 	// (the rest of the list takes ~210 of COP_RAW_COUNT; chip RAM is tight on
 	// Kickstart 3.1, so no more slack than that)
-	if(!s_isAga) s_uwCopCount = (UWORD)(COP_RAW_COUNT - 120 + 2 * wSkyMoves);   // (a WAIT and a MOVE each)
+	if(!s_isAga) s_uwCopCount = (UWORD)(COP_RAW_COUNT - 120 + 2 * wSkyMoves + FLOOR_COP_OCS);   // (a WAIT and a MOVE each)
+	else s_ubFloorStride = 7;
 
 	s_pView = viewCreate(0,
 		TAG_VIEW_GLOBAL_PALETTE, 1,
@@ -1950,6 +2039,7 @@ void genericCreate(void) {
 	for(UBYTE b = 0; b < 2; ++b) s_pTitleList[b] = memAllocChip(s_uwTitleCopCount * sizeof(tCopCmd));
 	s_pCloudsBm = artCloudsCreate();
 	s_pHills = artHillsCreate();
+	floorCreate();
 	s_pGround = artGroundCreate();
 	bobsCreate();
 	hudInit();

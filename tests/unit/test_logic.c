@@ -746,6 +746,83 @@ static void testScrollMathsAga(void) {
 	CHECK(logicBandOffset4(1003, 1, 320) - logicBandOffset4(1000, 1, 320) == 6);
 }
 
+// The plain's perspective floor (Paul, 2026-11-12): floor line j moves at
+// (18 + j) / 72 of the camera, linear down the screen (1/z on a flat plain):
+// line 0 at the mountains' / 4, the last at the hills' / 2; the far strip
+// above is the mountains band itself (one speed); every row repeats after the
+// same FLOOR_PERIOD of camera
+static void testFloorSpeeds(void) {
+	CHECK(FLOOR_LINES == 19 && FLOOR_PERIOD == 576 && PLAIN_FAR_ROWS == 10);
+	CHECK(logicFloorRowW(0) == 144 && logicFloorRowW(FLOOR_LINES - 1) == 288);
+	for(uint8_t j = 0; j < FLOOR_LINES; ++j) {
+		uint16_t uwW4 = (uint16_t)(4 * logicFloorRowW(j));
+		CHECK(logicFloorRowW(j) + 42 * 8 <= 640);   // the fetch (336 px) never leaves the 640 px bitmap row
+		for(int16_t c = 0; c < WORLD_W - SCREEN_W; ++c) {
+			uint16_t x4 = logicFloorX4(c, j);
+			CHECK(x4 < uwW4);
+			if(c + FLOOR_PERIOD < WORLD_W - SCREEN_W) CHECK(logicFloorX4((int16_t)(c + FLOOR_PERIOD), j) == x4);
+		}
+		// over 72 px of camera: 72 + 4 j quarters, exactly
+		for(int16_t c = 0; c < WORLD_W - SCREEN_W - 72; c = (int16_t)(c + 13)) {
+			uint16_t a = logicFloorX4(c, j), b = logicFloorX4((int16_t)(c + 72), j);
+			uint16_t d = (uint16_t)((b + uwW4 - a) % uwW4);
+			CHECK(d == 72 + 4 * j);
+		}
+	}
+	// the far edge = the mountains (and so the far strip, their last rows): 1/4
+	// px a camera px; the near edge = the hills: 1/2
+	CHECK((logicBandOffset4(1072, 2, 320) - logicBandOffset4(1000, 2, 320)) == 72 + 4 * 0);
+	CHECK((logicBandOffset4(1072, 1, 320) - logicBandOffset4(1000, 1, 320)) == 72 + 4 * (FLOOR_LINES - 1));
+	// at 3 px a frame line 6 moves 1 px a frame, line 12 1.25 (5 px in 4 frames)
+	CHECK((logicFloorX4(1003, 6) - logicFloorX4(1000, 6) + 4 * logicFloorRowW(6)) % (4 * logicFloorRowW(6)) == 4);
+	CHECK((logicFloorX4(1012, 12) - logicFloorX4(1000, 12) + 4 * logicFloorRowW(12)) % (4 * logicFloorRowW(12)) == 20);
+}
+
+// What logicFloorScroll writes into the copper list, per floor line: BPLCON1
+// (OCS: whole pixels; AGA: with the quarters) and the modulo to the next row's
+// start, from the same maths as the bands'
+static void testFloorCopper(void) {
+	enum { STRIDE = 4, ROW = 240, BASE = ROW - 42 };
+	uint16_t pOut[FLOOR_LINES * STRIDE];
+	for(uint8_t isAga = 0; isAga < 2; ++isAga) {
+		uint16_t uwMask = isAga ? 0xFFFF : 0xFFFC;
+		for(int16_t c = 0; c < WORLD_W - SCREEN_W; c = (int16_t)(c + 7)) {
+			for(uint16_t i = 0; i < FLOOR_LINES * STRIDE; ++i) pOut[i] = 0xDEAD;
+			int16_t wOff0 = logicFloorScroll(c, uwMask, BASE, pOut, STRIDE);
+			int16_t pOff[FLOOR_LINES];
+			for(uint8_t j = 0; j < FLOOR_LINES; ++j) {
+				uint16_t x4 = (uint16_t)(logicFloorX4(c, j) & uwMask);
+				pOff[j] = logicScrollByteOffset4(x4);
+				CHECK(pOut[j * STRIDE] == logicScrollCon1Pf2Aga(x4));
+				if(!isAga) CHECK(pOut[j * STRIDE] == (uint16_t)(logicScrollDelay((uint16_t)(x4 >> 2)) << 4));
+				CHECK(pOut[j * STRIDE + 1] == 0xDEAD && pOut[j * STRIDE + 3] == 0xDEAD);   // only its two words
+			}
+			CHECK(wOff0 == pOff[0]);
+			for(uint8_t j = 0; j + 1 < FLOOR_LINES; ++j) CHECK(pOut[j * STRIDE + 2] == (uint16_t)(BASE + pOff[j + 1] - pOff[j]));
+		}
+	}
+}
+
+// The plain's ground under the floor (COLOR00): from the sky's own colour at
+// the floor's first line (no seam with the haze above) to C, the land
+// palette's pen 6, at its last (the hills stand on it), line-dithered
+static void testFloorGround(void) {
+	for(uint8_t m = 0; m < MISSION_COUNT; ++m) {
+		uint16_t pBg[FLOOR_LINES];
+		logicFloorFillGround(m, pBg);
+		CHECK(pBg[0] == logicSkyColor(m, FLOOR_Y - PLAY_TOP));
+		CHECK(pBg[FLOOR_LINES - 1] == g_pMissionLandPal[m][6]);
+		for(uint8_t s = 0; s < 12; s = (uint8_t)(s + 4)) {
+			int16_t a = (int16_t)((pBg[0] >> s) & 15), b = (int16_t)((pBg[FLOOR_LINES - 1] >> s) & 15);
+			for(uint8_t j = 1; j < FLOOR_LINES; ++j) {
+				int16_t p = (int16_t)((pBg[j - 1] >> s) & 15), q = (int16_t)((pBg[j] >> s) & 15);
+				CHECK(q - p <= 1 && p - q <= 1);                          // one step at most
+				CHECK((q >= (a < b ? a : b)) && (q <= (a > b ? a : b)));  // inside the ramp
+			}
+		}
+	}
+}
+
 // The OCS sky's line dither: each line within 3/4 step of the true gradient
 // per channel, neighbours at most one step apart, two lines together within
 // 1/4 step (the half steps show), and twice the shades of the plain sky
@@ -1896,6 +1973,9 @@ int main(void) {
 	testSkyLayer();
 	testScrollMaths();
 	testScrollMathsAga();
+	testFloorSpeeds();
+	testFloorCopper();
+	testFloorGround();
 	testSkyGradient();
 	testSkyDither();
 	testDrawListShowsBaseAtStart();
