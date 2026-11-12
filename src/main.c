@@ -2057,8 +2057,10 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 		agkState("killed", g->killed);
 		agkEnd();
 	}
-	if(g->state == GS_PLAY && !(g->frame & 15)) {
+	if(g->state == GS_PLAY && (g->frame & 15) == 8) {
 		// the pacing sample (tools/pace.py): what threatens the chopper right now
+		// (half-way between the status lines below, every 32 frames: the two in
+		// one picture were its heaviest frame)
 		UBYTE ubJets = 0, ubShots = 0, ubJetShots = 0, ubTells = 0;
 		for(UBYTE i = 0; i < JET_MAX; ++i) {
 			const tJet *j = &g->pJets[i];
