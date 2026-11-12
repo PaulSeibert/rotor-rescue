@@ -6,16 +6,19 @@ key 0x28
 wait 10
 key 0x24
 wait 30
+expect-serial "ghost=1"
 key 0x63
 key 0x28
 wait 10
 key 0x03
 wait 30
+expect-serial "difficulty=3"
 key 0x63
 key 0x28
 wait 10
 key 0x36
 wait 30
+expect-serial "trip=1"
 wait 20
 wait 1200
 press up 40

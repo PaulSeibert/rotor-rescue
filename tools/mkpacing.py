@@ -20,17 +20,18 @@ CYCLES, LANDED = 3, 1200   # (the emulator runs ~40 frames a second and a run ma
 KEYS = {0: 0x0A, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
 
 
-def ctrl_l(key):
-    return ["key 0x63", "key 0x28", "wait 10", f"key 0x{key:02X}", "wait 30"]
+def ctrl_l(key, echo):
+    # (wait 5 dropped keys: the game polls the keyboard once a frame and the harness is quick)
+    return ["key 0x63", "key 0x28", "wait 10", f"key 0x{key:02X}", "wait 30", f'expect-serial "{echo}"']
 
 
 def build(skill):
     out = [f"# Pacing at difficulty {skill}: written by tools/mkpacing.py, run with tools/pace.py (see there).",
            "start-at boarding", "wait 5"]
-    out += ctrl_l(0x24)                      # ghost
-    out += ctrl_l(KEYS[skill])               # difficulty
-    for _ in range(JETS_FROM[skill]):
-        out += ctrl_l(0x36)                  # next trip
+    out += ctrl_l(0x24, "ghost=1")          # ghost
+    out += ctrl_l(KEYS[skill], f"difficulty={skill}")   # difficulty
+    for n in range(1, JETS_FROM[skill] + 1):
+        out += ctrl_l(0x36, f"trip={n}")     # next trip
     out += ["wait 20"]
     for _ in range(CYCLES):
         out += [f"wait {LANDED}",
