@@ -109,6 +109,8 @@ typedef struct {
 	uint8_t leanTimer;   // frames left of the front-view lean after / before a turn
 	uint8_t leanDir;     // FACE_LEFT or FACE_RIGHT: which way that lean banks
 	uint8_t swayTimer;   // the front-facing hover's sway clock
+	int8_t lean;         // the head-on strafe's lean: -2..2, one step at a time (negative: left)
+	uint8_t leanStep;    // frames to the next step of it
 } tChopper;
 
 enum { HS_INSIDE, HS_FREE, HS_TO_CHOPPER, HS_ABOARD, HS_TO_HANGAR, HS_SAVED, HS_DEAD };
@@ -314,6 +316,7 @@ typedef struct {
 #define VY_ACCEL 3
 #define TURN_STEP_FRAMES 5   // the three-quarter view between a side and the front
 #define LEAN_FRAMES 6        // the lean frame at the front, before / after a turn
+#define LEAN_STEP_FRAMES 3   // the strafe's lean moves one pose (front, slight, full) this often
 #define SWAY_PHASE 24        // front-facing hover: front, lean, front, lean, each this long
 #define BOMB_ARM_FRAMES 20   // stick down this long with no fire: the next fire press is the bomb stance
 #define BOMB_STANCE_FRAMES 75 // the stick's bomb stance turns back to the cannon this long after the last bomb

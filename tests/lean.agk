@@ -31,6 +31,11 @@ screenshot leanL
 expect-color leanL 120 112 0x778   # the rotor's left end is low: a lean left
 wait 20
 expect-serial "face=1"
+# a head-on strafe leans into the move, eased: the full lean at the end of the push
+press right 14
+screenshot strafeR
+expect-color strafeR 160 112 0x778   # the rotor leans into the strafe (right end low)
+wait 40
 # a volley while diving: the stick down and fire tapped, never the bombs
 press fire2 1
 wait 30

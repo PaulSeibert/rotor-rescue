@@ -922,6 +922,19 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 		}
 	}
 
+	// the head-on strafe's lean follows the speed (slight from 0.75 px/frame, full from 1.75), a pose
+	// every LEAN_STEP_FRAMES: eased in and out, no pose skipped, never a snap from one side to the other
+	{
+		int8_t bTo = 0;
+		if(c->face == FACE_FRONT && c->faceTarget == FACE_FRONT && !c->turnTimer && !c->leanTimer) {
+			int16_t wV = c->vx;
+			bTo = wV >= 28 ? 2 : wV >= 12 ? 1 : wV <= -28 ? -2 : wV <= -12 ? -1 : 0;
+		}
+		if(c->leanStep) --c->leanStep;
+		else if(c->lean != bTo) { c->lean += c->lean < bTo ? 1 : -1; c->leanStep = LEAN_STEP_FRAMES; }
+		if(c->lean) c->swayTimer = 0;
+	}
+
 	// --- firing
 	if(pIn->fire && !isFireUsed && !isTurning) {
 		if(isFireEdge || c->fireTimer <= 1) {
@@ -1691,9 +1704,8 @@ uint8_t logicChopperFrame(const tGame *g) {
 		uint8_t ubLeft = c->leanDir == FACE_LEFT ? CHOP_LEFT : 0;
 		if(c->leanTimer) return CHOP_LEAN2 | ubLeft;   // the turn's lean
 		if(c->faceTarget != FACE_FRONT) return CHOP_FRONT;
-		// a sidestep leans into the move: slightly from 0.75 px/frame, fully from 1.75
-		int16_t wV = c->vx < 0 ? (int16_t)-c->vx : c->vx;
-		if(wV >= 12) return (wV >= 28 ? CHOP_LEAN2 : CHOP_LEAN1) | (c->vx < 0 ? CHOP_LEFT : 0);
+		// a sidestep leans into the move, one pose at a time (c->lean, eased in chopperUpdate)
+		if(c->lean) return (c->lean == 2 || c->lean == -2 ? CHOP_LEAN2 : CHOP_LEAN1) | (c->lean < 0 ? CHOP_LEFT : 0);
 		// the hover's sway: front, slight lean one way, front, the other way
 		uint8_t ubPhase = c->swayTimer / SWAY_PHASE;
 		if(ubPhase & 1) return CHOP_LEAN1 | (ubPhase == 3 ? CHOP_LEFT : 0);
