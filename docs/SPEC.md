@@ -240,10 +240,11 @@ bar. Tables in `logic.c:454-468`. Index 0 is GODMODE.
 ## 8. Art direction / style guide
 
 The approved direction is `~/art-pilot/first/STYLE.md` (sections 1-10, pilot approved on mock-ups
-2026-11-11) and its `NOTES.md`. **Landing:** the art integration is being committed to `main`
-as this is written (seamless parallax bands, the mountain fix, new sprites). This section describes
-the approved direction; the shipped 1.0 look (drawn by `art/tools/draw.py`) is what `main` still
-has until that lands. Update this section after the merge, and decide
+2026-11-11) and its `NOTES.md`. **Landed** on `main` in 567e6c5/065a44d (2026-11-11): the pilot
+sprites, seamless hazed parallax bands (the sky gradient now runs to line 195), pointed summits
+(`art/tools/make_mountain_caps.py`: the first opaque row of the mountain band is 5 px, was 57),
+and the title's hazed mountain strip (`art/tools/make_title_mtn.py`, 320x34, 8 KB chip). Paul
+approved the result on 2026-11-11. `art/tools/draw.py` now only writes the palettes. Still open:
 whether a copy of STYLE.md joins the repo as `docs/STYLE.md` (open question 6).
 
 **Look:** a painted dusk diorama: hazy, layered landscape bands behind a crisp, hard-outlined
@@ -293,7 +294,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 **Sources (honest list)**
 - 1.0 art: scripts only, `art/tools/draw.py` (our own drawing code), logos from the user's source
   pictures (`art/src/*.png`). No other games' art.
-- Approved pilot (**landing**): Retro Diffusion (`rd_plus__environment` + `tile_x` for the bands,
+- Approved pilot (**landed** 2026-11-11): Retro Diffusion (`rd_plus__environment` + `tile_x` for the bands,
   `rd_pro__default` with our own chopper as the reference, `rd_animation__vfx` for the explosion,
   `rd_plus__low_res` as a rough for the tank), then locked to the exact palette slots, orphans
   removed, mirrored where it lit from the right, hand-finished and outlined. 19 calls, $1.72 of a
@@ -382,7 +383,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   coming -> A1200 extras (11-09) -> the tank tell, dithered sky, quarter-pixel bands, mission card,
   hall of fame and demo (11-11) -> this spec.
 - **Milestones:** playable core done; one complete mission done; three missions done; polish
-  (art pilot landing, 2026-11-11); release v1.0 shipped (zip with ADF, README, GIF; no `CREDITS.txt`
+  (art pilot landed 2026-11-11, approved by Paul); release v1.0 shipped (zip with ADF, README, GIF; no `CREDITS.txt`
   yet, none needed). Attract loop and hall of fame done.
 - **Playtests:** outside playtests: none recorded. Complaints go in as tuning tickets.
 
@@ -410,7 +411,7 @@ writable disk.)
 | new rotor whop by ear | listened to on speakers: deep thump and slap, no tinny hiss, no clicks at the loop | Paul | unproven (agk records it; nobody has judged it by ear) |
 | attract loop and demo | left alone 12 s + 8 s: the hall of fame, then the demo plays the same trip and ends with 16 aboard; fire returns to the title | Paul in WinUAE | scenario-tested in vAmiga only |
 | boot time from a real floppy | fire-to-play measured with a stopwatch on a real A500 or WinUAE at floppy speed | Paul | **not measured** |
-| the approved new art (**landing**) | the scrolled bands show no seam at 1x on a real display; the palette reads on all three missions | Paul after the art merge | pending the merge |
+| the approved new art (landed 567e6c5) | the scrolled bands show no seam at 1x on a real display; the palette reads on all three missions | Paul after the art merge | pending: Paul on WinUAE/real display |
 
 ## Open questions for Paul
 
@@ -433,3 +434,4 @@ writable disk.)
 | version | date | change |
 |---|---|---|
 | v1.0 | 2026-11-11 | retroactive: the game as it is at `main` 2c0c4f9, with the approved new art noted as landing |
+| v1.1 | 2026-11-11 | the pilot art landed on `main` (567e6c5, 065a44d): section 8 and the milestones updated |
