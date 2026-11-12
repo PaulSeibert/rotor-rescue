@@ -92,6 +92,13 @@ decay = 5
 volume = 44
 priority = 3
 
+[sfx.jetwarn]             # incoming jet (the radar blip flashes with it): two quick beeps, short
+wave = "square"
+steps = [[1760, 0.07], [1175, 0.07], [1760, 0.07], [1175, 0.07]]
+decay = 6
+volume = 40
+priority = 3
+
 [music.theme]
 source = "theme.mml"
 volume = 50

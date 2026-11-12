@@ -132,10 +132,12 @@ typedef struct {
 typedef struct {
 	int16_t x, y;
 	int8_t dir;
-	uint8_t active, cool, hp;
+	uint8_t active, hp;
+	uint16_t cool;       // frames to its next shot, or (inactive) to its next appearance
 	uint8_t pass;        // passes made
 	uint8_t seen;        // frames on screen this pass: no shot before JET_AIM frames
 	uint8_t tell;        // frames left of the flash before a missile or bomb (0: none)
+	uint8_t warn;        // frames left of its warning: no attack run before it is 0 (radar blip flashes)
 } tJet;
 
 typedef struct {
@@ -207,6 +209,10 @@ typedef struct {
 	uint8_t difficulty;  // 0 (invincible) .. DIFFICULTY_MAX; kept from game to game
 	uint8_t ghost;       // testing (Ctrl+L, G): nothing destroys the chopper, whatever the difficulty
 	uint16_t jetAttacks; // jet attack runs started (a flash begun), for the pacing report
+	uint16_t landFrames; // frames the chopper has been landed without a break (0: airborne)
+	uint8_t airGrace;    // frames left of the grace after a take-off: no jet attack run starts
+	uint8_t jetWait;     // frames until another jet may start its attack run (pairs)
+	uint8_t jetLast;     // the jet that started the latest attack run
 	uint16_t wxFall;     // the weather's slide, 1/4 px (wraps)
 	int16_t wxDrift;     // its wind, 1/4 px, 0..4 * SCREEN_W - 1
 	// the attract loop: title -> hall of fame -> a self-playing demo -> title
@@ -264,6 +270,7 @@ typedef struct {
 #define EV2_JETFIRE  0x02     // a jet launched one
 #define EV2_DAMAGE   0x04     // the chopper took its first hit
 #define EV2_REPAIR   0x08     // landing on the pad mended it
+#define EV2_JETWARN  0x10     // a jet appeared: the incoming-jet warning (a radar flash, an alert)
 
 // --------------------------------------------------------------- tuning ---
 #define VX_MAX 48            // 3 px/frame
@@ -284,6 +291,12 @@ typedef struct {
 #define SHELL_LIFE 140       // frames: 210 px at 1.5 (a tank fires from up to 200 px)
 #define TANK_GAP_BASE 85     // frames between a tank's shells at mission 1, trip 0, normal (110 before)
 #define JET_AHEAD_MIN 56     // no shot from closer than this ahead
+// Jet fairness (Paul's playtest, 2026-11-11 - studio tuning, pending Paul's playtest; SPEC 5-7)
+#define JET_WARN_FRAMES 100  // 2 s: from the jet's appearance (its warning) to the first moment it may start an attack run
+#define JET_LEAD 384         // px off screen it appears: 100 frames at 4 px/frame later it is whole on screen
+#define JET_TAKEOFF_GRACE 100  // 2 s after take-off before any jet may start an attack run
+#define JET_PAIR_GAP 150     // 3 s between one jet's attack run starting and the next jet's
+#define GROUND_NEVER 0xFFFF
 #define VY_UP_MAX 28
 #define VY_DOWN_MAX 32
 #define VY_ACCEL 3
@@ -347,6 +360,11 @@ uint8_t logicTankTell(const tGame *g);
 // table as the tank's: 16 on normal, 12 on the hardest), and only while the
 // whole jet is on screen
 uint8_t logicJetTell(const tGame *g);
+// Jets and a chopper on the ground: frames it must have sat landed (without a
+// break) before a jet may bomb it; GROUND_NEVER on skill 1-2 (they overfly it)
+uint16_t logicGroundDwell(const tGame *g);
+// How many jets may be out at once: 1 on skill 1-2, and on 3 until mission 3; 2 above
+uint8_t logicJetsMax(const tGame *g);
 
 // Drawing: what's on screen, back to front, in screen coordinates (top-left)
 typedef struct {

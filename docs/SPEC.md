@@ -197,13 +197,13 @@ hard still." Rules (section 6 has the mechanics, section 7 the tables):
 - **One jet at a time.** Skill 1-2, and skill 3 in missions 1-2: one jet out at a time, the next waits until the first has gone
   (this lowers the jets' frequency). Skill 3 in mission 3, and skill 4-5: pairs, but the second jet's attack run starts at least
   3 s after the first's. (Read as: "on skill 1-3 one jet; on 4-5 or in mission 3 pairs" with skill 1-2 never paired in mission 3,
-  so that skill 1 stays the easiest. Tell Paul if he meant skill 1-2 in mission 3 too.)
+  so that skill 1 stays the easiest: studio decision, pending Paul's playtest.)
 - **A warning, then time to switch weapons.** Every jet is announced the moment it appears: its radar blip flashes white and a
   short two-beep alert plays (effect `jetwarn`, priority 3, on the effect channels 1/3 like the others). No attack run starts
   until 2 s after that (it appears 384 px off screen, 100 frames of flight from being whole on screen), and the jet's flash (tell)
   is longer on the low skills (24 / 20 / 16 / 14 / 12).
 - **Measured** with `tools/pacing1.agk`, `tools/pacing3.agk` and `tools/pace.py` (ghost mode: the difficulty's tables, an
-  immortal chopper; four cycles of 30 s landed and 16 s airborne at the first jets-on trip): see the table in "Jet pacing,
+  immortal chopper; three cycles of 24 s landed and about 18 s airborne at the first jets-on trip): see the table in "Jet pacing,
   measured" below. Not measured with a person: that is the playtest.
 
 **Length:** a bot-assisted trip to the nearest barracks and home takes 1452 frames (29 s,
@@ -489,7 +489,7 @@ writable disk.)
    the budget, and does a 1 MB requirement stand?
 3. Jet pacing is measured (v1.3, section 5); the tank and mine pacing is not. Is a full pacing run wanted?
 9. Jet fairness (v1.3) is studio tuning, pending Paul's playtest: skill 1 landed at a barracks with jets around; a jet pair on
-   skill 4; the warning (radar flash and alert). Is a mission-3 pair on skill 3 wanted, or should skill 3 stay single there too?
+   skill 4; the warning (radar flash and alert). Studio decision: skill 1-2 never get pairs, skill 3 gets them in mission 3. Is that wanted, or should skill 3 stay single there too?
 6. Add `docs/STYLE.md` (a copy of the pilot's) after the art lands?
 8. Add a credits screen and an animated ending, as the playbook's presentation list asks?
 

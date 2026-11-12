@@ -444,7 +444,8 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	}
 	g->outCount = 0;
 	for(uint8_t i = 0; i < TANK_MAX; ++i) g->pTanks[i].active = 0;
-	for(uint8_t i = 0; i < JET_MAX; ++i) { g->pJets[i].active = 0; g->pJets[i].cool = (uint8_t)(100 + i * 120); }
+	for(uint8_t i = 0; i < JET_MAX; ++i) { g->pJets[i].active = 0; g->pJets[i].cool = (uint16_t)(100 + i * 120); }
+	g->landFrames = 0; g->airGrace = 0; g->jetWait = 0;
 	for(uint8_t i = 0; i < MINE_MAX; ++i) g->pMines[i].active = 0;
 	for(uint8_t i = 0; i < SHOT_MAX; ++i) g->pShots[i].active = 0;
 	for(uint8_t i = 0; i < ESHOT_MAX; ++i) g->pEShots[i].active = 0;
@@ -464,22 +465,24 @@ COLD void logicStartGame(tGame *g) {
 // ---------------------------------------------------------- difficulty ---
 // Per difficulty 0..5 (0 invincible: plays like 3, normal). Tables, no maths.
 
-static const int8_t s_pTankExtra[DIFFICULTY_MAX + 1] = {0, -1, -1, 0, 1, 2};     // tanks at once
-static const int8_t s_pTankCool[DIFFICULTY_MAX + 1] = {0, 60, 30, 0, -15, -30};  // frames between shells
-static const uint8_t s_pTankCoolMin[DIFFICULTY_MAX + 1] = {40, 60, 50, 40, 32, 26};
+static const int8_t s_pTankExtra[DIFFICULTY_MAX + 1] = {0, -2, -1, 0, 1, 2};     // tanks at once
+static const int8_t s_pTankCool[DIFFICULTY_MAX + 1] = {0, 90, 30, 0, -15, -30};  // frames between shells
+static const uint8_t s_pTankCoolMin[DIFFICULTY_MAX + 1] = {40, 75, 50, 40, 32, 26};
 static const uint8_t s_pAimMask[DIFFICULTY_MAX + 1] = {31, 63, 63, 31, 15, 7};   // aim error: +-(mask+1)/2 px
 static const uint8_t s_pJetsFrom[DIFFICULTY_MAX + 1] = {1, 3, 2, 1, 1, 0};       // trips + missions before jets
 static const uint8_t s_pMinesFrom[DIFFICULTY_MAX + 1] = {2, 4, 3, 2, 1, 1};      // ... and mines
 static const int16_t s_pSpawnExtra[DIFFICULTY_MAX + 1] = {0, 120, 60, 0, -40, -70};
-static const int16_t s_pJetRest[DIFFICULTY_MAX + 1] = {0, 80, 40, 0, -30, -50};  // frames between jet passes
-// how far off screen a jet starts (its sound and radar dot are the warning) and
-// how long it's on screen before its first shot
-static const uint8_t s_pJetLead[DIFFICULTY_MAX + 1] = {180, 255, 220, 180, 150, 130};
-static const uint8_t s_pJetAim[DIFFICULTY_MAX + 1] = {24, 40, 30, 24, 20, 18};
+static const int16_t s_pJetRest[DIFFICULTY_MAX + 1] = {0, 260, 100, 0, -30, -50};  // frames between jet passes (jet cool-down is 16 bits: it was 8, and skill 1's 240-303 wrapped)
 // a tank's wind-up before each shell (it comes out of the time between shells:
 // the rate of fire is the same, the shell is announced)
 static const uint8_t s_pTankTell[DIFFICULTY_MAX + 1] = {16, 22, 18, 16, 14, 12};
-static const uint8_t s_pJetTell[DIFFICULTY_MAX + 1] = {16, 22, 18, 16, 14, 12};   // a jet's flash before a shot
+static const uint8_t s_pJetTell[DIFFICULTY_MAX + 1] = {16, 24, 20, 16, 14, 12};   // a jet's flash before a shot (its own table since the fairness pass: slower to react to on the low skills)
+// Jets and the chopper on the ground (Paul's playtest, 2026-11-11; studio tuning): frames it must have
+// sat landed, without a break, before a jet may bomb it (65535: never, the jets overfly it)
+static const uint16_t s_pLandDwell[DIFFICULTY_MAX + 1] = {300, GROUND_NEVER, GROUND_NEVER, 300, 200, 150};
+// How many jets may be out at once: missions 1-2, and mission 3
+static const uint8_t s_pJetsMax[DIFFICULTY_MAX + 1] = {1, 1, 1, 1, 2, 2};
+static const uint8_t s_pJetsMaxM3[DIFFICULTY_MAX + 1] = {2, 1, 1, 2, 2, 2};
 
 // Every per-difficulty table, for the unit test that index 0 (GODMODE) equals
 // index 3 (normal) in each. A new table goes in this list.
@@ -492,10 +495,11 @@ static const tDiffTable s_pDiffTables[] = {
 	{"minesFrom", s_pMinesFrom, sizeof(s_pMinesFrom[0])},
 	{"spawnExtra", s_pSpawnExtra, sizeof(s_pSpawnExtra[0])},
 	{"jetRest", s_pJetRest, sizeof(s_pJetRest[0])},
-	{"jetLead", s_pJetLead, sizeof(s_pJetLead[0])},
-	{"jetAim", s_pJetAim, sizeof(s_pJetAim[0])},
 	{"tankTell", s_pTankTell, sizeof(s_pTankTell[0])},
 	{"jetTell", s_pJetTell, sizeof(s_pJetTell[0])},
+	{"landDwell", s_pLandDwell, sizeof(s_pLandDwell[0])},
+	{"jetsMax", s_pJetsMax, sizeof(s_pJetsMax[0])},
+	{"jetsMaxM3", s_pJetsMaxM3, sizeof(s_pJetsMaxM3[0])},
 };
 
 const tDiffTable *logicDiffTables(uint8_t *pCount) {
@@ -526,6 +530,14 @@ uint8_t logicTankTell(const tGame *g) {
 
 uint8_t logicJetTell(const tGame *g) {
 	return s_pJetTell[g->difficulty];
+}
+
+uint16_t logicGroundDwell(const tGame *g) {
+	return s_pLandDwell[g->difficulty];
+}
+
+uint8_t logicJetsMax(const tGame *g) {
+	return g->mission >= MISSION_COUNT - 1 ? s_pJetsMaxM3[g->difficulty] : s_pJetsMax[g->difficulty];
 }
 
 // --------------------------------------------------------------- hostages ---
@@ -1151,12 +1163,33 @@ static inline uint8_t jetFullyOnScreen(const tGame *g, const tJet *j) {
 	return j->x - 16 >= g->cam && j->x + 16 <= g->cam + SCREEN_W;
 }
 
+// An earlier jet is still out (alive): where only one may attack, the later one waits
+static uint8_t jetEarlierOut(const tGame *g, uint8_t ubSelf) {
+	for(uint8_t k = 0; k < ubSelf; ++k) if(g->pJets[k].active) return 1;
+	return 0;
+}
+
 __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 	tChopper *c = &g->chop;
+	// the chopper on the ground, and just off it: jets wait (SPEC 6, jet fairness)
+	if(c->landed) {
+		if(g->landFrames < 65535) ++g->landFrames;
+		g->airGrace = 0;
+	}
+	else if(g->landFrames) {
+		g->landFrames = 0;
+		g->airGrace = JET_TAKEOFF_GRACE;
+	}
+	else if(g->airGrace) --g->airGrace;
+	if(g->jetWait) --g->jetWait;
+	uint8_t ubMax = logicJetsMax(g);
+	uint16_t uwDwell = logicGroundDwell(g);
+	uint8_t isBombOk = c->landed && uwDwell != GROUND_NEVER && g->landFrames >= uwDwell;
+	uint8_t isMissileOk = !c->landed && !g->airGrace;
 	for(uint8_t i = 0; i < JET_MAX; ++i) {
 		tJet *j = &g->pJets[i];
 		if(!j->active) {
-			if(!logicJetsOn(g) || !c->alive || c->x > BORDER_X + 120) continue;
+			if(!logicJetsOn(g) || !c->alive || c->x > BORDER_X + 120 || i >= ubMax) continue;
 			if(j->cool) { --j->cool; continue; }
 			// mostly from ahead (where the chopper is heading: you see it coming),
 			// 1 in 4 from behind; well off screen, so its sound and its radar dot
@@ -1165,15 +1198,16 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 			uint16_t r = logicRandom(g);
 			int8_t ahead = c->vx > 0 ? -1 : c->vx < 0 ? 1 : (c->face == FACE_RIGHT ? -1 : 1);
 			j->dir = (r & 3) ? ahead : (int8_t)-ahead;
-			int16_t wLead = s_pJetLead[g->difficulty];
-			j->x = (int16_t)(j->dir > 0 ? g->cam - wLead : g->cam + SCREEN_W + wLead);
+			j->x = (int16_t)(j->dir > 0 ? g->cam - JET_LEAD : g->cam + SCREEN_W + JET_LEAD);
 			j->seen = 0;
 			j->tell = 0;
+			j->warn = JET_WARN_FRAMES;
 			j->y = clampw((int16_t)(c->y - 20), PLAY_TOP + 16, 180);
 			j->hp = 1;
 			j->pass = 0;
 			j->cool = 20;
 			g->events |= EV_JET;
+			g->events2 |= EV2_JETWARN;
 			continue;
 		}
 		j->x = (int16_t)(j->x + j->dir * 4);
@@ -1182,6 +1216,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 		if((g->frame & 1) && j->y < wTargetY) ++j->y;
 		if((g->frame & 1) && j->y > wTargetY) --j->y;
 		if(j->cool) --j->cool;
+		if(j->warn) --j->warn;
 		if(j->x > g->cam - 16 && j->x < g->cam + SCREEN_W + 16) {
 			if(j->seen < 255) ++j->seen;
 		}
@@ -1205,7 +1240,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 					s->life = JET_MISSILE_LIFE;
 					isFired = 1;
 				}
-				else if(s && c->landed && absw(dx) < 32) {
+				else if(s && c->landed && isBombOk && absw(dx) < 32) {
 					s->active = 1;
 					s->kind = ESHOT_BOMB;
 					s->x = j->x;
@@ -1221,7 +1256,8 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 				j->cool = isFired ? (uint8_t)(JET_GAP - ubTell) : 20;
 			}
 		}
-		else if(c->alive && !j->cool && isFull && j->seen + ubTell >= s_pJetAim[g->difficulty]) {
+		else if(c->alive && !j->cool && !j->warn && isFull && (c->landed ? isBombOk : isMissileOk) &&
+			(!g->jetWait || g->jetLast == i) && (ubMax > 1 || !jetEarlierOut(g, i))) {
 			// start the flash if a shot is on, allowing for how far the jet flies meanwhile
 			// (4 px a frame): a missile needs JET_AHEAD_MIN left at the end, a bomb the chopper under it
 			int16_t wRun = (int16_t)(ubTell * 4);
@@ -1231,6 +1267,8 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 			if(isShot && eshotNew(g)) {
 				j->tell = ubTell;
 				++g->jetAttacks;
+				g->jetLast = i;
+				g->jetWait = JET_PAIR_GAP;
 				g->events2 |= EV2_JETTELL;
 			}
 		}
@@ -1244,7 +1282,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 		if((j->dir > 0 && j->x > g->cam + SCREEN_W + 64 && j->seen) || (j->dir < 0 && j->x < g->cam - 64 && j->seen)) {
 			j->active = 0;
 			int16_t wRest = (int16_t)(160 - g->mission * 30 + s_pJetRest[g->difficulty]);
-			j->cool = (uint8_t)((wRest < 40 ? 40 : wRest) + (logicRandom(g) & 63));
+			j->cool = (uint16_t)((wRest < 40 ? 40 : wRest) + (logicRandom(g) & 63));
 		}
 	}
 }
