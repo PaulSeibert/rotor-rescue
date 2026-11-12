@@ -10,18 +10,18 @@ barracks), switches the chopper to ghost (Ctrl+L, G: nothing destroys it, so the
 run lasts, but the difficulty's own tables apply), sets the difficulty and moves
 the schedule on to the trip where jets are on (Ctrl+L, N, once per trip), then
 CYCLES times: sits landed LANDED frames (boarding), takes off, flies left and
-back for AIR frames, lands again. About 4 minutes with the defaults.
+back for about 900 frames, lands again. About 2 minutes of play with the defaults.
 """
 import sys
 
 JETS_FROM = {1: 3, 2: 2, 3: 1, 4: 1, 5: 0}   # trips + missions before jets (src/logic.c)
-CYCLES, LANDED, AIR = 5, 1500, 800
+CYCLES, LANDED = 3, 1200   # (the emulator runs ~40 frames a second and a run may last 300 s)
 
 KEYS = {0: 0x0A, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
 
 
 def ctrl_l(key):
-    return ["key 0x63", "key 0x28", "wait 5", f"key 0x{key:02X}", "wait 5"]
+    return ["key 0x63", "key 0x28", "wait 10", f"key 0x{key:02X}", "wait 30"]
 
 
 def build(skill):

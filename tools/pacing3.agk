@@ -3,21 +3,21 @@ start-at boarding
 wait 5
 key 0x63
 key 0x28
-wait 5
+wait 10
 key 0x24
-wait 5
+wait 30
 key 0x63
 key 0x28
-wait 5
+wait 10
 key 0x03
-wait 5
+wait 30
 key 0x63
 key 0x28
-wait 5
+wait 10
 key 0x36
-wait 5
+wait 30
 wait 20
-wait 1500
+wait 1200
 press up 40
 press left 300
 press right 300
@@ -25,7 +25,7 @@ press left 100
 press right 100
 press down 90
 wait 10
-wait 1500
+wait 1200
 press up 40
 press left 300
 press right 300
@@ -33,23 +33,7 @@ press left 100
 press right 100
 press down 90
 wait 10
-wait 1500
-press up 40
-press left 300
-press right 300
-press left 100
-press right 100
-press down 90
-wait 10
-wait 1500
-press up 40
-press left 300
-press right 300
-press left 100
-press right 100
-press down 90
-wait 10
-wait 1500
+wait 1200
 press up 40
 press left 300
 press right 300
