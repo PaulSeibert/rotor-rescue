@@ -6,6 +6,12 @@ commit messages. It describes the game as it is: where a Desert Palms playbook t
 the section says **Gap vs playbook** in plain words. It does not change the game. From now on it
 is the contract everyone works from: change the design, change this file in the same commit.
 
+**v1.5 (2026-11-12): approved by Paul, the commercial content plan** (`docs/CONTENT-PLAN.md`): twelve missions in
+four worlds. Sections 4, 6 and 10 now carry the approved full-game design; sections 1, 2, 5, 7, 9, 11 and 12 are touched
+only where it requires. **Not built yet.** Text marked *shipped* describes the game at `main` (world 1) and stays true
+for it; text marked *approved, not built* is the contract for work to come. Where a number is "studio default" Paul has
+not chosen it: revisit at a playtest gate.
+
 Sources, used throughout: `src/logic.c` / `src/logic.h` (rules, tuning, tables), `src/main.c`
 (display, sound, input, text), `src/hiscore.c`, `sound/sound.toml`, `art/art.toml`,
 `art/palette.txt`, `agk.toml`, `tests/*.agk`, `tests/unit/test_logic.c`, and the art pilot's
@@ -20,7 +26,7 @@ Four barracks, spread out between the enemy border fence and your base on the fa
 hostages each. Blow a barracks open with the cannon (two shots) or a bomb (one), land beside it so
 the people can run aboard, then fly the cabin full (16) home through tank shells, jets and air
 mines, and land on the pad so they run into the hangar. The first hit only damages the chopper (smoke,
-slower, everyone aboard kept); a second hit while damaged destroys it with everyone aboard. 64 people, three missions (Desert Dusk, Mountain Night, Coastal Dawn), three
+slower, everyone aboard kept); a second hit while damaged destroys it with everyone aboard. 64 people, three missions (*shipped:* Desert Dusk, Mountain Night, Coastal Dawn; v1.5 grows this to twelve missions in four worlds, section 4), three
 choppers for the whole game. A side-view rescue shooter in the 8-bit helicopter-rescue tradition,
 built from scratch: our own code, art, music and sound.
 
@@ -31,8 +37,14 @@ built from scratch: our own code, art, music and sound.
    (12-22 frames by skill, 16 on normal). Jets are heard and seen on the radar before they appear.
 3. **A500 at 50 fps:** player, camera and parallax update every frame on a stock A500.
 
-**Not:** a scrolling-shooter with waves or bosses; a game with lives by score; a puzzle of
-routes (there is one battlefield, repeated three times with harder numbers).
+**Not:** a scrolling-shooter with waves or bosses; a game with lives by score; a game with fuel or long stretches where
+you cannot land. *Shipped:* one battlefield repeated three times with harder numbers. *Approved, not built (v1.5):* four
+worlds with their own battlefields, see section 4.
+
+**Pillars for the full game (approved, not built)** - 4. **Read the ground:** the terrain is the level; you plan a route,
+a landing and a retreat from what you see. 5. **Prepare, then land:** every threat to a landed chopper is visible,
+telegraphed and clearable beforehand. 6. **One new idea per world:** the first mission of a world teaches it with less
+pressure, then it ramps. Terrain never kills: it is a wall to route around.
 
 ## 2. Target machine
 
@@ -64,6 +76,14 @@ CLI with that message at frame 800, and still at 3000).
 **Gap vs playbook:** the playbook's master is a 512K A500 that boots and plays complete. This
 game needs the 1 MB expansion (measured above); moving data to the floppy (as Rotor Raider does) is
 the route; not planned.
+
+**Memory rules for the full game (approved, not built; Paul, 2026-11-12):** the game stays at **1 MB** (512K chip + 512K
+slow). The executable does not grow (target 430 KB or less, new code is paid for by moving resident art and sound to disk).
+Each world is a packed file of 150 KB or less loaded from the floppy into one reused chip arena. Lowest chip free in play
+stays at 64 KB or more on the a500 and a500-ks31 profiles, re-measured per world. The AROS profile's boot window (62
+frames of spare today, about 6 KB) may be raised slightly in the test harness if the program needs it; that is a test
+setting, not a game limit. Measured 2026-11-12 (latest `perf` logs): chip free in play 81 KB a500, 79 KB a500-ks31, 154 KB
+a500-aros, 1070 KB a1200; slow RAM free about 3 KB.
 
 ## 3. Core loop and feel
 
@@ -153,6 +173,94 @@ Lost on death (the second hit): everyone aboard. No extra lives by score (**Gap 
 
 ## 4. Structure and content budget
 
+*Approved, not built (v1.5).* **Four worlds, twelve missions.** Each mission has 64 people (the finale's last site is two
+trips of 16). A mission ends when everyone is saved or lost. Worlds are separate battlefields with their own parallax,
+terrain, enemies and music. World 1 is the game as shipped (4.2). Order: desert, islands, mountains, city (decided by Paul).
+
+| mission | world | name (studio default) | length px | sites (people) | new element | pressure (M1 = 1.0, estimated) | minutes (estimated) |
+|---|---|---|---|---|---|---|---|
+| 1 | Border Desert | Desert Dusk | 3072 | 4 barracks (64) | as shipped | 1.0 | 6 |
+| 2 | Border Desert | Desert Night | 3072 | 4 barracks (64) | missile truck, garrisons, the clear-then-land loop | 1.25 | 6 |
+| 3 | Border Desert | Desert Dawn | 3072 | 4 barracks (64) | AA gun site; the border convoy set piece; jet pairs as shipped | 1.5 | 7 |
+| 4 | Coral Islands | Reef Run | 4608 | 4 island barracks (64) | water, islands, small pads with the landing guide, gunboats | 1.1 | 5.5 |
+| 5 | Coral Islands | Trade Winds | 4608 | 3 barracks + ship deck (48 + 16) | wind gusts, the ship-deck winch, radar sites | 1.4 | 6.5 |
+| 6 | Coral Islands | Typhoon Strait | 4608 | 3 barracks + sinking freighter (48 + 16, timed) | time pressure; the destroyer set piece | 1.7 | 7 |
+| 7 | Highlands | Foothills | 4096 | 4 barracks at 4 heights (64) | height-map terrain, slopes, passes, barracks at varied heights | 1.2 | 6 |
+| 8 | Highlands | High Pass | 4096 | 3 barracks + summit pad (48 + 16) | cloud ceiling, summit pad, wind in passes, radar peaks | 1.6 | 7 |
+| 9 | Highlands | Cliff Ledges | 4096 | 2 barracks (32) + 4 ledge winches (8 each) | ledge winches, the tunnel, the summit helicopter duel | 1.9 | 7.5 |
+| 10 | Harbour City | Night Docks | 3584 | 4 rooftop and dock barracks (64) | rooftop pads, searchlights, the lit gauntlet | 1.5 | 6 |
+| 11 | Harbour City | Burning Block | 3584 | 2 barracks (32) + 4 rooftop winches (8 each), fires timed | fire time pressure, enemy helicopters in packs | 1.9 | 6.5 |
+| 12 | Harbour City | Last Light | 3584 | 2 rooftop barracks (32) + HQ roof (32, two trips) | the gunship finale, the evacuation | 2.2 | 8 |
+
+About 80 minutes for a good first-time player (estimated; a clean run is about 40% of that). Missions 2 and 3 are renamed
+from "Mountain Night" and "Coastal Dawn" (studio default). Pressure is a planning index, defined by the pacing checker once it exists.
+
+**4.1 Worlds and what each introduces** (approved, not built)
+- **World 1, Border Desert (missions 1-3):** flat desert, dusk / night / dawn, the shipped parallax and perspective plain.
+  New: missile trucks and AA guns, garrisons at each barracks, the border convoy (a column crosses the road at about 50%;
+  destroying the lead truck stops it; reward: a repair crate and a bonus).
+- **World 2, Coral Islands (4-6):** bright sea in morning, midday and storm dusk. Sky; clouds /8; distant volcanic islands /4;
+  **the sea is the perspective floor** (re-cut to lines 180-207, wave rows in perspective, a 1 px shimmer by time); hills
+  dropped; terrain strip from line 208 (48 rows, island height at most about 40 px). Water is not landable (touching it is a soft
+  stop with a splash, no damage; decided by Paul). Pads (4.4), wind gusts, ship-deck winch, gunboats, radar sites, a timed
+  sinking freighter. Set piece, M6 about 50%: **the strait destroyer** (two turrets of 6 HP, AA guards; anti-stall at 40 s
+  a barrage, at 90 s the turrets overheat open). A field pad mid-map repairs damage (studio default, maps over 4000 px).
+- **World 3, Highlands (7-9):** alpine dawn, noon, snow-storm dusk. Far range /4 above line 130; **terrain strip lines 130-255**
+  (125 rows, about 17 KB ring); an optional 1:1 **cloud-ceiling strip** (lines 44-84) in the cloud-ceiling stretches; a COLOR00
+  haze gradient behind the strip reads as valley depth; the perspective floor shows only in M7's low foothills. **The terrain
+  shapes the route:** passes, valleys, a low cloud ceiling, a tunnel (studio default: kept). Barracks at four heights:
+  valley, mid shelf, plateau, summit pad. Ledge winches where you cannot land. Set piece, M9 about 50%: **the summit duel**
+  with an enemy helicopter (anti-stall: reckless at 40 s, forced to hover in range by 90 s).
+- **World 4, Harbour City (10-12):** night port, a burning block at the blue hour, last light. Far skyline /4; the near cityscape
+  is the terrain strip (lines 120-255); the perspective floor is a road or quay in the low gaps. Rooftop pads and winches between
+  towers, searchlights (copper beams, with a beam-sprite fallback), fires, enemy helicopters. Set pieces: M10 **the lit gauntlet**
+  (three searchlight towers and a crane AA nest) and M12 **the gunship finale** (section 6).
+- **Rest beats and set pieces:** a rest of 4-8 s with no spawns after each cleared site and each sea or valley crossing, at
+  least one every 80 s; a set piece between the second and third site, with 5-7 s of clear flight before it.
+- **Design rule:** every stretch of flight has a place to land within about 45 s (a pad, flat ground or a ledge). No fuel.
+
+**4.2 The terrain** (approved, not built)
+- Each world carries a **height map** in columns of 16 px: surface height, flags (landable, wall, water, tunnel) and a ceiling for
+  the ceiling and tunnel stretches. `floorAt` and `ceilAt` read it (`floorAt` already decides roofs; the hook exists). A
+  slope or ledge is a floor you stop on but cannot board from, like a roof today. **Terrain never damages:** a wall bump
+  costs speed and a spark (decided by Paul).
+- Rules that use absolute heights today (a tank fires when skids y > 150; mines never go below y 200; the shadow at `SHADOW_Y`;
+  people at `FEET_Y`) become altitude above the local floor.
+- **No vertical scrolling** (decided by Paul): flyable height stays 192 px (`CEIL_Y` 44 to `GROUND_Y` 236); peaks and towers
+  stay on screen, at most about 110 px.
+- **Terrain strip:** a 1:1 ring buffer in PF2, streamed one 16 px column at a time, replacing the hills and plain on its lines;
+  the copper band layout comes from a per-world table. Spiked before any world art is made.
+- Per world about 100-150 terrain columns; top-10 columns cover 55% or more of a map, at most 40 one-offs; a map is about 1.2 KB
+  (estimated).
+
+**4.3 Streaming and disks** (approved, not built)
+- Each world is one packed file of at most 150 KB, loaded behind its world card into one chip arena freed on leaving the world.
+- **Two disks** (decided by Paul): Disk 1 boot, executable, title, worlds 1 and 2, hall of fame, save. Disk 2 worlds 3 and 4, the
+  ending and credits. No world spans disks. One swap in a normal run, after mission 6 ("INSERT DISK 2"; the volume name is
+  checked, no requester); "INSERT DISK 1" before the hall of fame is written after game over or the ending. A third disk is the
+  fallback only if worlds run over 150 KB. A hard-drive install is a later extra (files are loaded by name).
+- **Continue:** a checksummed save file (world, mission, lives, merit, upgrades; about 24 bytes) is written at each world card.
+- The long maps need a per-world radar scale (the HUD radar is 256 px wide; today `ROUTE_SCALE` is 12).
+
+**4.4 Pads and landing aids** (approved, not built)
+- Pad width by skill 96 / 80 / 64 / 56 / 48 px (studio default). Touch-down tolerance 6 px outside the edge. On skill 1-3 an
+  assist nudges you 0.5 px/frame toward the pad's centre during the last 12 px of descent. Two lamps blink (green once your skids
+  are over the pad, red when not), the shadow falls on the pad, the HUD shows a PAD tick.
+- **Wind gusts** (world 2 M5 on): 0.25 px/frame sideways for 3 s every 12-20 s; tell 50 frames before (windsock, spray or snow
+  streaks, a rising howl). None while landed; none on skill 1; none within 100 px of a barracks on skill 2-3.
+- **Winch** (world 2 M5 on): hover in a 24 x 20 px box above a ledge, deck or roof; 8 people take 8 s on normal; the climb is
+  paused, not reset, if you drift out. A winch hover counts as a landed state for the ground-grace rules (section 6).
+- **Timed rescues:** at most two a mission, never in world 1; 90 s on normal (120 / 105 / 90 / 75 / 60 by skill), shown on the
+  preview card and the HUD; losing a site loses only the people still there.
+
+**4.5 The upgrades** (approved; currency and list are studio defaults)
+A hangar screen after each mission: spend **merit** (10 per person saved, plus medals for zone clears and set pieces) on four
+upgrades of two levels each. Armour (the first hit of a trip is absorbed; refills on the pad; the second hit still destroys),
+winch speed (30% / 60% faster), seats (cabin 18 / 20), cannon (4 shots live; repeat 8 frames). Tuned for no upgrades; none touches a
+tell, a shot speed or a fairness rule; upgrades reset on game over; GODMODE ignores them. Skill 1 starts with armour level 1.
+
+**4.6 World 1 as shipped** (still the contract for missions 1-3)
+
 One battlefield, three times. World 3072 px wide: your base on the right (pad x 2800-2940, hangar
 x 2960, start x 2880), the enemy border fence at x 2560 (enemy ground units stay left of it), the
 four barracks at x 420, 1080, 1700, 2240 (far to near; 2460, 1800, 1180 and 640 px from the start).
@@ -185,6 +293,7 @@ y197.
 
 **Gap vs playbook:** no per-world load budget applies (nothing streams), but a 20 s fire-to-play
 target is unproven; the preview card (2.4 s, section 10) is the only "level intro".
+
 
 ## 5. Pacing
 
@@ -282,6 +391,15 @@ behind too quickly" and "on the last barracks, the far one, about to clear a lev
 `tests/rescue.agk`). Pure flight for four round trips is at least 12,160 px / 3 px a frame = 4053
 frames (81 s); with unloading (10 frames a person) a clean mission is about 2 minutes (derived).
 
+**Pacing for the full game (approved, not built).** The playbook's numbers come from vertical shooters; adapted here: threat
+on screen mean 2-3 in a world's first mission, p90 6; **encounters** (a garrison, an event, a roaming spawn) reached 5-8 s apart in
+flight on average, spawned by map position, not timer; a rest of 4-8 s after each cleared site and each sea or valley crossing,
+at least one every 80 s; a set piece at about 50% with 5-7 s clear before it; +25% pressure a mission inside a world, with
+a dip at the first mission of each world; enemy fire about 30 a minute in the first zone to about 70 a minute late (lower than
+a shooter, the player is often landed); tell at least 12 frames, shots 1-1.5 px/frame; set-piece and boss anti-stall at 30-45 s
+and the weak point open by 90 s. Not adopted: time to first threat 3-6 s (the quiet start stays, 8-14 s in world 1, 6-10 s later).
+Tooling: `wavescript` and its pacing checker for set pieces and garrisons; a trip bot (as `tools/jetsim.c`) for the rest.
+
 **Gap vs playbook:** the game has no pacing contract at all. There is no wave table to check, no
 set piece, no checker run. Until it is measured, treat the enemy numbers in 6 and 7 as the spec and
 do not call the pacing "tuned".
@@ -294,6 +412,14 @@ do not call the pacing "tuned".
 | jet | 1 (cannon only) | from 384 px off screen (100 frames of flight from being whole on screen; 576 px and 150 frames when from behind), mostly ahead of where you fly (3 of 4), at most `s_pJetsTrip` (section 7) a trip, 4 px/frame, follows your height at 0.5 px/frame | **An attack run starts** when its flash (tell) begins; a missile follows only if the jet is **fully on screen**, you are airborne, 56-200 px ahead and within 14 px of its height; a bomb if you are landed within 24 px (also fully on screen). **Never before** its warning is 2 s old (`JET_WARN_FRAMES` 100), never within 2 s after a take-off (`JET_TAKEOFF_GRACE`), never at a landed chopper on skill 1-2 and not before the dwell time on 3-5 (section 7), on skill 1-3 not while another jet is out, and a second jet's run never within 3 s (`JET_PAIR_GAP` 150) of the first's. The gap between one jet's missiles is 40 frames with the tell inside it; a ram hurts you | **warned** (a flashing white radar blip, a two-beep alert, the jet's scream) the moment it appears, then a **flash** (nose and engine glow, blinking) for the tell, 12-24 frames by skill (section 7); aborted (no missile or bomb) if at the end of the tell the jet is not fully on screen, you have landed, climbed out of its height, are closer than 56 px, or (a bomb) have not been landed long enough | 100 |
 | air mine | 1 (cannon only) | spawns off screen at y 54-117, homes at 0.5 px/frame in x and 0.25 in y when within 300 px, never below y 200 | contact | none (it is visible and slow) | 75 |
 | barracks | 2 (cannon 1 each; a bomb within 30 px does 2) | static; releases 1 person per 8 frames after a 20-frame delay | none; roofs stop bombs and the chopper | burning frames | 25 |
+| *missile truck* (approved, not built; world 1 M2 on) | 3 (cannon); a bomb kills | drives 0.4 px/frame on flat ground, stops to fire | a lobbed missile at your position when you are landed or below 30 px; 1.25 px/frame, flight 80-100 frames, blast radius 20 px; 150 frames reload | stops, rails rise, launcher flashes; **a ground marker blinks from launch**; 36 / 32 / 28 / 24 / 20 frames by skill | 75 |
+| *AA gun site* (world 1 M3 on) | 3; a bomb kills | static | flak burst at your position when you are more than 24 px above the ground, within 260 px; gap 120 / 100 / 85 / 70 / 60 frames; 1 burst live (skill 1-3), 2 (4-5); radius 18 px; **cannot fire at a chopper below 24 px** | barrel swings, muzzle flash, a **ranging puff** at the aim point; 26 / 22 / 18 / 15 / 12 frames | 100 |
+| *gunboat* (world 2 M4 on) | 3; a bomb kills (20 px) | 0.6 px/frame along its sea segment | a shell like a tank's (1.5 px/frame), 85-frame gap on normal; range 220 px, minimum 56 | turret swings up and flashes; 22 / 18 / 16 / 14 / 12 frames | 100 |
+| *radar site* (world 2 M5 on) | 4; a bomb kills | static (island, peak or roof) | no shot. While alive, its 1200 px coverage zone (red on the HUD radar and the strip map) is where jets may appear; destroying it ends jets there for the mission. Outside any live zone no jets appear (world 1 has no radar: today's rule). The jet budget per trip stays the cap | the dish turns | 150 |
+| *searchlight tower* (world 4 M10 on) | 4 | beam sweeps in 90 frames | the beam must rest on you; then a flare, then nearby AA and guns fire a volley of 2-3 shots at your lit position, each with its own tell and marker | the beam, the chopper flashing, the flare 12 frames later; beam dwell 60 / 50 / 40 / 34 / 28 frames | 100 |
+| *enemy helicopter* (world 3 M9 on) | 4 (cannon 1 each; a bomb 3) | follows your height at 0.6 px/frame, 3 px/frame horizontal, keeps 80-160 px away, never within 56 | a burst of 3 shots at 1.5 px/frame, 40-frame gap between bursts; 1 helicopter at a time on skill 1-3 | nose swings to you, nose and rotor glow blinks; 24 / 20 / 16 / 14 / 12 frames | 200 |
+| *destroyer* (world 2 M6 set piece) | two turrets of 6 HP, 4 AA | slow, patrols the strait | turret shells; a barrage at 40 s | turret turns and flashes; 28 / 24 / 20 / 18 / 16 frames | 400 |
+| *gunship* (world 4 M12 finale) | 24 (cannon); a bomb 4; core exposed below 50% | strafes the roof line, always reachable | a 5-shot arc, a marked rocket volley, calls the AA | big nose flash, rocket marker; 30 / 26 / 22 / 18 / 16 frames | 1000 |
 
 - **Tell units:** tanks and jets, section 7 table. A unit test (`testNoShellWithoutTell`) and a
   scenario (`tests/tell.agk`: no `AGK sfx tankfire` without a `tank tell` before it) enforce it for
@@ -310,10 +436,22 @@ do not call the pacing "tuned".
   edge once it had been seen, `logic.c:1107` at 17ece43.)
 - **Sight no longer than weapon range:** tanks drive at the chopper from any distance but shoot
   only inside 200 px; mines see 300 px and have no weapon.
+**Rules for every weapon that can hit a landed or low chopper (approved, not built; they join section 5's jet rules and remove none):**
+- **R1 shared ground grace:** the jet table is shared by jets, trucks, gunboats and garrison guns: landed this long before it may be targeted: never (skill 1), never (2), 6 s (3), 4 s (4), 3 s (5); GODMODE uses skill 3. (Tanks keep their shipped behaviour.)
+- **R2 take-off grace:** 2 s after lift-off no new landed-or-low attack starts.
+- **R3 one attack at a time:** a global token across jets, trucks and gunboats: one attack on a landed or hovering chopper at a time on skill 1-3, two on skill 4-5, at least 3 s apart.
+- **R4 the tell:** 12 frames or more on every skill, longer for lethal weapons (the tables in this section); a unit test per weapon: no shot, lob, flak or rocket without its tell.
+- **R5 the impact is marked:** a truck's missile has a blinking ground marker from launch; flak shows a ranging puff before it bursts.
+- **R6 slow weapons:** ground-launched lobs 1.25 px/frame (flight 80-100 frames); shells 1.5; the jet missile 2.5 after its long tell.
+- **R7** not from off screen, not point-blank (56 px). **R8** sight no longer than weapon range. **R9** terrain is not a weapon.
+- **Garrisons:** each barracks and winch site has 1-3 placed units within about 300 px, visible from afar, fixed. Clearing them all is a **zone clear** (+100 points and a medal); roaming spawns then stay 400 px away while you are landed there. If you land without clearing, R1 applies: on skill 1-2 the garrison cannot attack you while landed, but still attacks you in the air; on skill 3-5 it starts after the dwell time.
+- **A landed chopper:** the AA gun cannot hit it (it cannot depress below 24 px: the counterplay); the truck lobs after the dwell, you lift off in time because the marker shows from frame 1.
+
 - **Path scripts:** none. Movement is per-unit code in `logic.c` (no `wavescript`).
-- **Bosses and set pieces: none. Gap vs playbook:** no boss, no mid-mission set piece, no
-  anti-stall escalation (there is nothing to stall: a mission ends when all 64 are saved or lost).
-  The nearest thing is the ramp in the trips: tanks +1 a trip, jets after trip 1, mines after trip 2.
+- **Bosses and set pieces** (approved, not built): world 1 M3 the border convoy; world 2 M6 the strait destroyer; world 3 M9
+  the summit duel; world 4 M10 the lit gauntlet and M12 the gunship. Each has anti-stall escalation at 30-45 s and its weak point
+  open by 90 s, a 5-7 s quiet before it, and drops a reward (a repair crate, a medal). *Shipped:* none; the ramp is the trips.
+  Terrain, pads, winch and wind are in section 4.
 
 ## 7. Difficulty
 
@@ -345,7 +483,7 @@ and fails on any difference.
   8 bits and wrapped for skill 1's rest of 240-303 frames (it was often 0-47 instead); it is 16 bits now. `testNoBombOnLandedChopper`,
   `testTakeoffGrace`, `testOneJetAtATime`, `testPairOffset`, `testWarningBeforeAttack`, `testJetTellTable` and `testSkillOneEasier`
   hold the rules.
-- **Never changes:** the battlefield, barracks positions and hit points, people, cabin 16, 3 lives,
+- **Never changes:** the battlefield, barracks positions and hit points, people, cabin 16, 3 lives (refilled per world from v1.5),
   the chopper's handling and hitbox, every tell existing, the second hit's death (the first only damages).
 - **The ramp:** within a mission by trip (tanks +1, shell gap -8, jets after the first trip, mines
   after the second); across missions by mission (tanks +1, spawn gap -40, shell gap -20, jet rest -30,
@@ -353,11 +491,11 @@ and fails on any difference.
 - **Hero device: damage** (decided by Paul, 2026-11-11, section 3): the first hit costs smoke, 20 % speed and the rest
   of the trip until the pad, not the cabin; 2 s of blinking invulnerability follow. No shield,
   no smart bomb, no extra lives by score, no power-ups.
-- **Respawn:** in place at the pad, landed, after a crash (70 frames) and a 150-frame LOST screen.
+- **Respawn:** in place at the pad, landed, after a crash (70 frames) and a 150-frame LOST screen. Lives: *shipped* 3 for the whole game; *approved, not built (decided by Paul, v1.5):* **lives refill to 3 at the start of each world, and there is a continue** (a save at each world card: world, mission, lives, merit, upgrades). In a world, lives are not refilled between missions.
   Enemy shots, jets and mines are cleared; jets cool 150 frames; tanks stay. The camera pans back.
-  Lives (3) are for the whole game and are not refilled between missions. People still free stay
-  free; open barracks stay open. No checkpoints and no continue: game over goes to the hall of
-  fame, then the title.
+  (Shipped: lives are for the whole game; see the bullet head for v1.5.) People still free stay
+  free; open barracks stay open. *Shipped:* no checkpoints and no continue: game over goes to the hall of
+  fame, then the title (v1.5 adds the world-card save, section 4.3).
 - **Exploit rules (read from the code, none unit-tested):**
   - The base is safe: no tank spawns while the chopper is at x 2760 or more, tanks cannot pass
     x 2536, and a tank shoots only within 200 px, so the pad (x 2800+) cannot be shot.
@@ -374,6 +512,28 @@ and fails on any difference.
   hi-score), Ctrl+L 1-5, the serial heartbeat
   (`state`, `x`, `landed`, `aboard`, `saved`, `trip`, `lives`), and the scenario checkpoints
   `boarding` and `rescued`.
+
+**Difficulty for the full game (approved, not built).** Skills 1-5 keep their meaning and their tables; new weapons use the same
+indices.
+
+| | 1 | 2 | **3** | 4 | 5 |
+|---|---|---|---|---|---|
+| missile truck tell (frames) | 36 | 32 | 28 | 24 | 20 |
+| AA flak ranging puff (frames) | 26 | 22 | 18 | 15 | 12 |
+| gunboat tell | 22 | 18 | 16 | 14 | 12 |
+| enemy helicopter tell | 24 | 20 | 16 | 14 | 12 |
+| destroyer turret tell | 28 | 24 | 20 | 18 | 16 |
+| gunship tell | 30 | 26 | 22 | 18 | 16 |
+| searchlight beam dwell | 60 | 50 | 40 | 34 | 28 |
+| AA gap between bursts (frames) | 120 | 100 | 85 | 70 | 60 |
+| pad width (px) | 96 | 80 | 64 | 56 | 48 |
+| timed rescue (s) | 120 | 105 | 90 | 75 | 60 |
+| wind gusts | none | not near barracks | not near barracks | yes | yes |
+| landed-chopper attacks at once | 1 | 1 | 1 | 2 | 2 |
+
+All values are studio defaults, revisit at a playtest gate. Within a world the pressure rises about +25% a mission; the first
+mission of a world dips (section 4's index). Zone-clear bonus 100; the tank quota of 10 stays, and trucks, AA guns and boats pay
+for their first 6 kills a mission only (studio default).
 
 ## 8. Art direction / style guide
 
@@ -511,6 +671,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   hall of fame and initials; `fanfare` for mission cleared and the ending; `gameover`. **Gap:** no
   music in play (the rotor owns the sound); no boss or ending theme (none needed: no boss).
   No third-party music.
+  *Approved, not built (v1.5):* a theme per world, played on its world card (our own, about 20 KB each), an ending theme and a credits theme; still no music in play. Third-party music only with artist and licence recorded and credited (`modcredits`). Music budget about 100 KB, on disk.
 
 ## 10. Presentation
 
@@ -521,12 +682,14 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 | attract loop | **yes:** title 600 frames (12 s), then the hall of fame 400 frames (8 s), then a recorded demo of the first trip (1453 input frames, 29 s, DEMO in the score bar, no score kept), then the title; fire ends it |
 | options | difficulty by Ctrl+L, no menu |
 | mission flow | a preview card before each mission (120 frames, fire skips): MISSION n OF 3, its name, a strip map of the battlefield (enemy ground red, fence, four barracks, pad, hangar, a "you are here" arrow), "64 HELD IN 4 BARRACKS" and a one-line brief (TANKS ON PATROL / ...AND JETS / ...AND AIR MINES). No start banner |
+| world card and route map (approved, not built) | a world card before each world (loading behind it, the disk request, its theme), a preview card with a strip map of the whole world, and a route map across the twelve missions (`missionmap`) |
+| between missions (approved, not built) | a hangar screen for the upgrades (section 4.5), the merit total, the continue save |
 | in play | HUD: SAVED / ABOARD / LOST / score; choppers left; a radar of the whole battlefield |
 | end of mission | MISSION COMPLETE, SAVED n OF 64, 250 frames, then the next card |
 | game over | GAME OVER, total saved, rank, score; 300 frames, fire skips after 100; then the hall of fame if the score ranks |
 | high scores | a hall of fame of 5 (initials, score, mission reached, rank), saved to the floppy as `rrscores` (56 bytes, checksummed, read at boot); name entry with the stick, 30 s limit; defaults DPS 5000, PRS 4000, ACE 3000, AGK 2000, RTR 1000. A write-protected disk is found with `Info()` before any write; the table still shows with "DISK WRITE-PROTECTED: NOT SAVED". Never brings up a requester |
-| ending | ALL MISSIONS COMPLETE: the tally and a rank. **Gap vs playbook:** no animated ending |
-| credits | the author and publisher lines on the title. **Gap:** no credits screen (no third-party music, but no art credits either; the pilot's tools are not listed) |
+| ending | *shipped:* ALL MISSIONS COMPLETE: the tally and a rank. *Approved, not built (v1.5):* an **animated ending of 25-35 s in three outcomes**, by people saved of 768: **90% or more** a sunrise flight home, the crowd waving, the flag raised, the fanfare, credits over the dawn; **60-89%** dusk, empty seats, the names of those saved scroll; **under 60%** night, a lone chopper, a memorial and a silent beat. Built from the engine's bands, sprites and copper sky plus two large stills (studio default thresholds and tone). A game over with no lives left is not an ending: it goes to the hall of fame, as before |
+| credits | *shipped:* the author and publisher lines on the title. *Approved, not built (v1.5):* a **credits screen** (code, art, music, sound, the art tools used, third-party licences; the `modcredits` pattern), a page in the attract loop and after the ending |
 
 ## 11. Tech plan
 
@@ -578,12 +741,21 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   BPLCON4 `$0011` set in every list (Kickstart 3.1 leaves BPLCON3 at 0, which gave 1.0 wrong band
   colours on an A1200). Not tried on real hardware (section 12).
 
+**Planned for the full game (approved, not built; 26 work items in `docs/CONTENT-PLAN.md` section 6 with tier and size).**
+- **Per-world arena and loader:** a world file (packed bands, BOB sheets, terrain tiles, map) loaded from the floppy into one reused chip arena (kit `loading`). **Band layout table:** the copper builder reads each world's lines, heights, speeds and palettes from a table (amiga-hw).
+- **Terrain strip** (amiga-hw, large; spiked first): a 1:1 PF2 ring buffer streamed a column at a time, a cloud-ceiling strip, the COLOR00 haze behind it; the copper list (465 of 496 entries used) must be enlarged for the strip, the ceiling strip and searchlight beams (about 3 KB chip more, estimated). **Water:** the perspective floor as a sea with a BPLCON1 shimmer.
+- **Height-map logic** (amiga-game): `floorAt` / `ceilAt`, wall bump, altitude above the floor, enemies and people follow terrain.
+- **Set pieces and garrisons** with `wavescript` and its pacing checker. **Program diet:** resident title and world-1 art and samples move to disk; the executable stays at 430 KB or less.
+- Frame budget: terrain streaming, more units and long maps get a measured budget; the target stays average <= 70%, worst < 100%.
+
 ## 12. Production
 
 - **Order of work (as it happened):** the engine and a first trip (1.0, 2026-11-04) -> smooth
   camera, shadow, weather, far sky (11-08, 11-09) -> HUD polish, the rotor sound, jets you see
   coming -> A1200 extras (11-09) -> the tank tell, dithered sky, quarter-pixel bands, mission card,
   hall of fame and demo (11-11) -> this spec.
+- **Order of work for the full game (approved, not built):** phase 0 spikes and mock-ups (terrain strip, arena and copper list sizes, art mock-ups for worlds 2 and 3) -> phase 1 foundations with world 1 unchanged (every existing golden identical) -> phase 1b the ground-threat loop in world 1 (gate A) -> phase 2 world 2 as the vertical slice (gate B) -> phase 3 world 3 (gate C) -> phase 4 world 4, the finale and the ending (gate D) -> phase 5 disks, save, credits, AROS, perf, release. About 15 weeks, plus or minus 40% (estimated). Each gate is a build Paul plays. Features ship behind disabled flags and merge within a day or two.
+- **Art gates for each world:** a `docs/STYLE.md` addendum, a reference mock-up approved by Paul, a pilot set approved by Paul, then the full pass; no visible bands, the perspective-floor standard, no flat-topped cut-offs.
 - **Milestones:** playable core done; one complete mission done; three missions done; polish
   (art pilot landed 2026-11-11, approved by Paul); release v1.0 shipped (zip with ADF, README, GIF; no `CREDITS.txt`
   yet, none needed). Attract loop and hall of fame done.
@@ -624,12 +796,13 @@ writable disk.)
 (Numbers are kept from before. Questions 2, 4, 5 and 7 are decided, decided by Paul, 2026-11-11: see v1.2.)
 
 1. Fire-to-play time from a real floppy is not measured (425.6 KB executable plus logos). What is
-   the budget, and does a 1 MB requirement stand?
+   the budget? (The 1 MB requirement stands: decided by Paul, 2026-11-12, v1.5.)
 3. Jet pacing is measured (v1.3, section 5); the tank and mine pacing is not. Is a full pacing run wanted?
 9. Jet fairness (v1.3) is studio tuning, pending Paul's playtest: skill 1 landed at a barracks with jets around; a jet pair on
    skill 4; the warning (radar flash and alert). Studio decision: skill 1-2 never get pairs, skill 3 gets them in mission 3. Is that wanted, or should skill 3 stay single there too?
 6. Add `docs/STYLE.md` (a copy of the pilot's) after the art lands?
-8. Add a credits screen and an animated ending, as the playbook's presentation list asks?
+8. Decided in v1.5: a credits screen and an animated ending are in the plan (section 10).
+10. Studio defaults awaiting a playtest gate (v1.5): the upgrade list and currency (4.5); the field pad on maps over 4000 px; world and mission names; the ending thresholds (90% / 60%) and tone, no named villain; music (own themes on cards, ending, credits); the tunnel; the scoring caps (first 6 kills a mission for trucks, AA and boats).
 
 ## Version history
 
@@ -640,4 +813,5 @@ writable disk.)
 | v1.2 | 2026-11-11 | decided by Paul, 2026-11-11: A damage instead of instant loss; B shell 1.5 and missile 2.5 px/frame, a jet tell, no off-screen fire; C a tank score quota of 10 a mission; D GODMODE's tables equal normal's, unit-tested; E the 512K test (measurement only, result in section 2). Open questions 2, 4, 5, 7 removed |
 | v1.3 | 2026-11-12 | (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest): jet fairness (ground grace, one jet at a time, a warning and a longer tell, an easier skill 1), jet pacing measured; section 5, 6, 7 |
 | v1.4 | 2026-11-12 | decided by Paul, 2026-11-12: the plain between the mountains and the hills, a true perspective floor (each line its own speed, / 4 to / 2), sections 4, 8, 11; art contract `docs/plain-spec.md`. Art v4 approved by Paul: no mesas, blue-noise wandering foot, perspective texture between and under the hills, no full-width solid or dithered rows (checked by `art/tools/plain_check.py`) |
-| v1.5 | 2026-11-12 | (Paul's playtest, 2026-11-12; studio proposal, pending his playtest): volleys never become bombs (the bomb stance needs a 20-frame down hold with no fire, section 3), eased turn through front with lean frames and a front-facing sway |
+| v1.5 | 2026-11-12 | approved by Paul: commercial content plan (`docs/CONTENT-PLAN.md`): twelve missions in four worlds (desert, islands, mountains, city), height-map terrain with no vertical scroll, pads and winch and wind, ground threats under shared fairness rules, lives refill per world with a continue, an animated ending and credits, two disks with one swap, 1 MB kept; sections 1, 2, 4-7, 9-12. Not built |
+| v1.6 | 2026-11-12 | (Paul's playtest, 2026-11-12; studio proposal, pending his playtest): volleys never become bombs (the bomb stance needs a 20-frame down hold with no fire, section 3), eased turn through front with lean frames and a front-facing sway |
