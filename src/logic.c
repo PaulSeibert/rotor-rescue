@@ -214,81 +214,24 @@ COLD void logicInit(tGame *g) {
 	g->state = GS_TITLE;
 	g->stateTimer = 0;
 	g->difficulty = DIFFICULTY_NORMAL;
-	g->newRank = SCORE_COUNT;
+	g->newRank = HI_COUNT;
 	logicScoresDefault(g);
 }
 
 // ------------------------------------------------------------ hall of fame ---
 
+// The file keeps the table it always had: "RRH1", per entry the initials,
+// mission, hostages saved (2), score (4), a 16-bit sum: an old disk's table
+// reads as it is (tests/unit/test_logic.c has one)
+const tHiConfig g_sHiConfig = {"RRH1", MISSION_COUNT + 1, "rrscores"};
+
 COLD void logicScoresDefault(tGame *g) {
-	static const char pNames[SCORE_COUNT][SCORE_NAME + 1] = {"DPS", "PRS", "ACE", "AGK", "RTR"};
-	for(uint8_t i = 0; i < SCORE_COUNT; ++i) {
-		tScore *s = &g->pScores[i];
-		for(uint8_t c = 0; c < SCORE_NAME; ++c) s->name[c] = pNames[i][c];
-		s->score = (uint32_t)(5000 - 1000 * i);
-		s->mission = (uint8_t)(i < 1 ? 3 : i < 3 ? 2 : 1);
-		s->saved = (uint16_t)(150 - 30 * i);
-	}
-	g->hiScore = g->pScores[0].score;
-}
-
-COLD uint8_t logicScoreRank(const tGame *g, uint32_t ulScore) {
-	// below an equal score already there
-	uint8_t r = 0;
-	while(r < SCORE_COUNT && g->pScores[r].score >= ulScore) ++r;
-	return r;
-}
-
-// Big-endian, so the file reads the same on any machine: "RRH1", then per
-// entry the initials, mission, saved (2), score (4), then a 16-bit sum
-COLD static uint16_t scoresSum(const uint8_t *p) {
-	uint16_t s = 0x5252;
-	for(uint8_t i = 0; i < SCORES_BYTES - 2; ++i) s = (uint16_t)(((s << 1) | (s >> 15)) + p[i]);
-	return s;
-}
-
-COLD void logicScoresPack(const tGame *g, uint8_t *pOut) {
-	uint8_t *p = pOut;
-	*p++ = 'R'; *p++ = 'R'; *p++ = 'H'; *p++ = '1';
-	for(uint8_t i = 0; i < SCORE_COUNT; ++i) {
-		const tScore *s = &g->pScores[i];
-		for(uint8_t c = 0; c < SCORE_NAME; ++c) *p++ = (uint8_t)s->name[c];
-		*p++ = s->mission;
-		*p++ = (uint8_t)(s->saved >> 8); *p++ = (uint8_t)s->saved;
-		for(int8_t b = 24; b >= 0; b -= 8) *p++ = (uint8_t)(s->score >> b);
-	}
-	uint16_t uwSum = scoresSum(pOut);
-	*p++ = (uint8_t)(uwSum >> 8);
-	*p = (uint8_t)uwSum;
-}
-
-COLD static uint8_t isNameChar(uint8_t c) {
-	for(const char *p = DEMO_LETTERS; *p; ++p) if((uint8_t)*p == c) return 1;
-	return 0;
-}
-
-COLD uint8_t logicScoresUnpack(tGame *g, const uint8_t *pIn) {
-	if(pIn[0] != 'R' || pIn[1] != 'R' || pIn[2] != 'H' || pIn[3] != '1') return 0;
-	if(scoresSum(pIn) != (uint16_t)((pIn[SCORES_BYTES - 2] << 8) | pIn[SCORES_BYTES - 1])) return 0;
-	tScore pNew[SCORE_COUNT];
-	const uint8_t *p = pIn + 4;
-	for(uint8_t i = 0; i < SCORE_COUNT; ++i) {
-		tScore *s = &pNew[i];
-		for(uint8_t c = 0; c < SCORE_NAME; ++c) {
-			if(!isNameChar(*p)) return 0;
-			s->name[c] = (char)*p++;
-		}
-		s->mission = *p++;
-		s->saved = (uint16_t)((p[0] << 8) | p[1]);
-		p += 2;
-		s->score = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
-		p += 4;
-		// best first, and sane
-		if(!s->mission || s->mission > MISSION_COUNT + 1 || (i && s->score > pNew[i - 1].score)) return 0;
-	}
-	for(uint8_t i = 0; i < SCORE_COUNT; ++i) g->pScores[i] = pNew[i];
-	g->hiScore = g->pScores[0].score;
-	return 1;
+	static const tHiScore pDefaults[HI_COUNT] = {
+		{"DPS", 3, 150, 5000}, {"PRS", 2, 120, 4000}, {"ACE", 2, 90, 3000},
+		{"AGK", 1, 60, 2000}, {"RTR", 1, 30, 1000},
+	};
+	hiDefaults(&g->hi, pDefaults);
+	g->hiScore = hiTop(&g->hi);
 }
 
 uint8_t logicIsMenu(const tGame *g) {
@@ -297,56 +240,25 @@ uint8_t logicIsMenu(const tGame *g) {
 
 // After a game: the hall of fame if the score made it (not invincible, not the demo)
 COLD static void gameEnded(tGame *g) {
-	uint8_t r = logicScoreRank(g, g->score);
-	if(r >= SCORE_COUNT || g->difficulty == DIFFICULTY_INVINCIBLE || g->demo) {
+	uint8_t r = hiQualify(&g->hi, g->score, g->difficulty == DIFFICULTY_INVINCIBLE, g->demo);
+	if(r >= HI_COUNT) {
 		setState(g, GS_TITLE, 50);
 		g->titleArmed = 0;
 		return;
 	}
-	for(uint8_t i = SCORE_COUNT - 1; i > r; --i) g->pScores[i] = g->pScores[i - 1];
-	tScore *s = &g->pScores[r];
-	s->name[0] = 'A';
-	s->name[1] = s->name[2] = ' ';
-	s->score = g->score;
-	s->saved = g->savedTotal;
-	s->mission = (uint8_t)(g->state == GS_VICTORY ? MISSION_COUNT + 1 : g->mission + 1);
-	g->hiScore = g->pScores[0].score;
+	r = hiInsert(&g->hi, g->score, (uint8_t)(g->state == GS_VICTORY ? MISSION_COUNT + 1 : g->mission + 1), g->savedTotal);
+	g->hiScore = hiTop(&g->hi);
 	g->newRank = r;
-	g->entryPos = 0;
-	g->entryHold = 0;
-	g->chop.prevFire = 1;   // (fire held from the end screen doesn't choose a letter)
+	hiEditBegin(&g->edit, r, ENTRY_FRAMES);   // (fire held from the end screen doesn't choose a letter)
 	setState(g, GS_ENTRY, ENTRY_FRAMES);
 }
 
+// The initials: the stick (up/down a letter, fire the next, left back one) and
+// the keyboard (A-Z, 0-9, Space, Backspace, Return), either or both
 COLD static void entryUpdate(tGame *g, const tInput *pIn) {
-	tScore *s = &g->pScores[g->newRank];
-	char *pC = &s->name[g->entryPos];
-	uint8_t isFireEdge = pIn->fire && !g->chop.prevFire;
-	uint8_t isLeftEdge = pIn->dx < 0 && !g->chop.prevFire2;
-	g->chop.prevFire = pIn->fire;
-	g->chop.prevFire2 = pIn->dx < 0;
-	// up/down: the next or previous letter, at once and then repeating
-	if(pIn->dy) {
-		if(!g->entryHold) {
-			const char *pL = DEMO_LETTERS;
-			uint8_t n = 0, i = 0;
-			while(pL[n]) ++n;
-			while(i < n && pL[i] != *pC) ++i;
-			i = (uint8_t)(pIn->dy < 0 ? (i + 1 >= n ? 0 : i + 1) : (i ? i - 1 : n - 1));
-			*pC = pL[i];
-			g->entryHold = 8;
-		}
-		else --g->entryHold;
-	}
-	else g->entryHold = 0;
-	if(isLeftEdge && g->entryPos) --g->entryPos;   // back a letter
-	if(isFireEdge) {
-		if(++g->entryPos < SCORE_NAME) {
-			if(s->name[g->entryPos] == ' ') s->name[g->entryPos] = *pC;   // start from the last letter
-		}
-	}
-	if(g->entryPos >= SCORE_NAME || !g->stateTimer) {
-		g->entryPos = SCORE_NAME;
+	uint8_t isKeyDone = hiEditKey(&g->edit, &g->hi, pIn->key ? pIn->key : HI_KEY_NONE);
+	uint8_t isStickDone = hiEditUpdate(&g->edit, &g->hi, pIn->dx, pIn->dy, pIn->fire);
+	if(isKeyDone || isStickDone) {
 		g->scoresChanged = 1;
 		g->scoresNext = GS_TITLE;
 		g->titleArmed = 0;
@@ -1593,7 +1505,7 @@ COLD static void menuUpdate(tGame *g, const tInput *pIn) {
 		if(g->cam <= 0) g->cam = WORLD_W - SCREEN_W;
 	}
 	if(g->state == GS_TITLE && ++g->attract >= ATTRACT_FRAMES) {
-		g->newRank = SCORE_COUNT;
+		g->newRank = HI_COUNT;
 		g->scoresNext = GS_INTRO;
 		g->titleArmed = 0;
 		setState(g, GS_SCORES, SCORES_FRAMES);

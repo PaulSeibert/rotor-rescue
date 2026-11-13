@@ -96,29 +96,42 @@ static void testPreviewCard(void) {
 // damaged file is refused and leaves the table as it was
 static void testScoresTable(void) {
 	logicInit(&g);
-	for(uint8_t i = 1; i < SCORE_COUNT; ++i) CHECK(g.pScores[i].score < g.pScores[i - 1].score);
-	CHECK(g.hiScore == g.pScores[0].score);
-	CHECK(logicScoreRank(&g, g.pScores[0].score + 1) == 0);
-	CHECK(logicScoreRank(&g, g.pScores[1].score) == 2);            // an equal score goes below
-	CHECK(logicScoreRank(&g, 1) == SCORE_COUNT - 1 || g.pScores[SCORE_COUNT - 1].score >= 1);
-	CHECK(logicScoreRank(&g, 0) == SCORE_COUNT);
-	uint8_t pDisk[SCORES_BYTES];
-	g.pScores[2].name[0] = 'Q';
-	g.pScores[2].score = 3333;
-	g.pScores[2].saved = 300;
-	logicScoresPack(&g, pDisk);
+	for(uint8_t i = 1; i < HI_COUNT; ++i) CHECK(g.hi.pEntries[i].score < g.hi.pEntries[i - 1].score);
+	CHECK(g.hiScore == g.hi.pEntries[0].score);
+	CHECK(hiRank(&g.hi, g.hi.pEntries[0].score + 1) == 0);
+	CHECK(hiRank(&g.hi, g.hi.pEntries[1].score) == 2);            // an equal score goes below
+	CHECK(hiRank(&g.hi, 1) == HI_COUNT - 1 || g.hi.pEntries[HI_COUNT - 1].score >= 1);
+	CHECK(hiRank(&g.hi, 0) == HI_COUNT);
+	// A table the game wrote before the kit's hiscore ("rrscores", 56 bytes): it
+	// reads as it is, and writes back byte for byte
+	static const uint8_t pOld[HI_BYTES] = {
+		0x52, 0x52, 0x48, 0x31, 0x44, 0x50, 0x53, 0x03, 0x00, 0x96, 0x00, 0x00, 0x23, 0x28, 0x5A, 0x45,
+		0x44, 0x02, 0x00, 0x64, 0x00, 0x00, 0x0F, 0xA0, 0x51, 0x31, 0x20, 0x01, 0x00, 0x2D, 0x00, 0x00,
+		0x0D, 0x05, 0x41, 0x47, 0x4B, 0x01, 0x00, 0x3C, 0x00, 0x00, 0x07, 0xD0, 0x52, 0x54, 0x52, 0x01,
+		0x00, 0x1E, 0x00, 0x00, 0x03, 0xE8, 0x81, 0x7F,
+	};
+	CHECK(HI_BYTES == 56 && !strcmp(g_sHiConfig.szMagic, "RRH1") && !strcmp(g_sHiConfig.szFile, "rrscores"));
+	CHECK(hiUnpack(&g.hi, &g_sHiConfig, pOld));
+	CHECK(!strncmp(g.hi.pEntries[0].name, "DPS", 3) && g.hi.pEntries[0].score == 9000 &&
+		g.hi.pEntries[0].reached == 3 && g.hi.pEntries[0].extra == 150);
+	CHECK(!strncmp(g.hi.pEntries[2].name, "Q1 ", 3) && g.hi.pEntries[2].score == 3333 &&
+		g.hi.pEntries[2].reached == 1 && g.hi.pEntries[2].extra == 45);
+	uint8_t pDisk[HI_BYTES];
+	hiPack(&g.hi, &g_sHiConfig, pDisk);
+	CHECK(!memcmp(pDisk, pOld, HI_BYTES));
+	// "all done" (MISSION_COUNT + 1) is a valid mission to have reached; a later one is not
+	g.hi.pEntries[1].reached = MISSION_COUNT + 1;
+	hiPack(&g.hi, &g_sHiConfig, pDisk);
 	logicScoresDefault(&g);
-	CHECK(g.pScores[2].score != 3333);
-	CHECK(logicScoresUnpack(&g, pDisk));
-	CHECK(g.pScores[2].score == 3333 && g.pScores[2].name[0] == 'Q' && g.pScores[2].saved == 300);
-	uint8_t pBad[SCORES_BYTES];
-	for(uint8_t i = 0; i < SCORES_BYTES; ++i) pBad[i] = pDisk[i];
-	pBad[10] ^= 1;                                                  // a bit flipped
+	CHECK(hiUnpack(&g.hi, &g_sHiConfig, pDisk) && g.hi.pEntries[1].reached == MISSION_COUNT + 1);
+	uint8_t pBad[HI_BYTES];
+	memcpy(pBad, pOld, HI_BYTES);
+	pBad[9] ^= 1;                                                  // a damaged byte: refused, nothing changes
 	logicScoresDefault(&g);
-	CHECK(!logicScoresUnpack(&g, pBad) && g.pScores[2].score == 4000 - 1000);
-	for(uint8_t i = 0; i < SCORES_BYTES; ++i) pBad[i] = 0;          // an empty file
-	CHECK(!logicScoresUnpack(&g, pBad));
-	CHECK(g.hiScore == g.pScores[0].score);
+	CHECK(!hiUnpack(&g.hi, &g_sHiConfig, pBad) && g.hi.pEntries[2].score == 3000);
+	memset(pBad, 0, HI_BYTES);                                     // an empty file
+	CHECK(!hiUnpack(&g.hi, &g_sHiConfig, pBad));
+	CHECK(g.hiScore == g.hi.pEntries[0].score);
 }
 
 static void endGameWith(uint32_t ulScore) {
@@ -135,44 +148,94 @@ static void testHighScoreEntry(void) {
 	uint32_t ulOld1 = 4000, ulOld4 = 1000;
 	endGameWith(4500);
 	CHECK(g.state == GS_ENTRY && g.newRank == 1);
-	CHECK(g.pScores[2].score == ulOld1 && g.pScores[4].score == 2000 && ulOld4 == 1000);   // shifted down
+	CHECK(g.hi.pEntries[2].score == ulOld1 && g.hi.pEntries[4].score == 2000 && ulOld4 == 1000);   // shifted down
 	step((tInput){.fire = 1}, 3);                 // fire held from the end screen: nothing
-	CHECK(g.entryPos == 0);
+	CHECK(g.edit.ubPos == 0);
 	step(NONE, 1);
 	step((tInput){.dy = -1}, 1);                  // A -> B
 	step(NONE, 1);
 	step((tInput){.dy = -1}, 1);                  // -> C
 	step(NONE, 1);
-	CHECK(g.pScores[1].name[0] == 'C');
+	CHECK(g.hi.pEntries[1].name[0] == 'C');
 	step((tInput){.fire = 1}, 1);                 // next letter (starts as C)
 	step(NONE, 1);
 	step((tInput){.dy = 1}, 1);                   // C -> B
 	step(NONE, 1);
 	step((tInput){.dx = -1}, 1);                  // back to the first
 	step(NONE, 1);
-	CHECK(g.entryPos == 0 && g.pScores[1].name[1] == 'B');
+	CHECK(g.edit.ubPos == 0 && g.hi.pEntries[1].name[1] == 'B');
 	step((tInput){.fire = 1}, 1);
 	step(NONE, 1);
 	step((tInput){.fire = 1}, 1);
 	step(NONE, 1);
-	CHECK(g.state == GS_ENTRY && g.entryPos == 2);
+	CHECK(g.state == GS_ENTRY && g.edit.ubPos == 2);
 	step((tInput){.dy = -1}, 20);                 // held: repeats every 8 frames (3 steps)
 	step(NONE, 1);
-	CHECK(g.pScores[1].name[2] == 'E');
+	CHECK(g.hi.pEntries[1].name[2] == 'E');
 	step((tInput){.fire = 1}, 1);
 	CHECK(g.state == GS_SCORES && g.scoresChanged && g.scoresNext == GS_TITLE);
-	CHECK(g.pScores[1].name[0] == 'C' && g.pScores[1].name[1] == 'B' && g.pScores[1].name[2] == 'E');
-	CHECK(g.pScores[1].score == 4500 && g.pScores[1].mission == 1 && g.hiScore == 5000);
+	CHECK(g.hi.pEntries[1].name[0] == 'C' && g.hi.pEntries[1].name[1] == 'B' && g.hi.pEntries[1].name[2] == 'E');
+	CHECK(g.hi.pEntries[1].score == 4500 && g.hi.pEntries[1].reached == 1 && g.hiScore == 5000);
 	step(NONE, SCORES_FRAMES + 1);
 	CHECK(g.state == GS_TITLE);
 	// no input at all: after ENTRY_FRAMES the initials stand as they are
 	endGameWith(9000);
 	CHECK(g.state == GS_ENTRY && g.newRank == 0);
 	step(NONE, ENTRY_FRAMES + 1);
-	CHECK(g.state == GS_SCORES && g.pScores[0].name[0] == 'A' && g.hiScore == 9000);
+	CHECK(g.state == GS_SCORES && g.hi.pEntries[0].name[0] == 'A' && g.hiScore == 9000);
 	// too low: straight to the title
 	endGameWith(10);
 	CHECK(g.state == GS_TITLE);
+}
+
+// The same entry typed on the keyboard (raw keycodes: Q 0x10, K 0x27, E 0x12,
+// 1 0x01, keypad 7 0x3D, Space 0x40, Backspace 0x41, Return 0x44)
+static void key(uint8_t ubRaw) {
+	step((tInput){.key = ubRaw}, 1);
+	step(NONE, 1);
+}
+
+static void testHighScoreKeys(void) {
+	endGameWith(4500);
+	CHECK(g.state == GS_ENTRY && g.newRank == 1);
+	step((tInput){.fire = 1}, 3);                 // (Space is a space here, not fire: main.c reads only the stick's)
+	key(0x27);                                    // K
+	CHECK(g.hi.pEntries[1].name[0] == 'K' && g.edit.ubPos == 1);
+	key(0x12);                                    // E
+	CHECK(g.hi.pEntries[1].name[1] == 'E' && g.edit.ubPos == 2);
+	key(0x41);                                    // Backspace: the E goes
+	CHECK(g.hi.pEntries[1].name[1] == ' ' && g.edit.ubPos == 1);
+	key(0x41);
+	key(0x41);                                    // (at the first place: nothing)
+	CHECK(g.edit.ubPos == 0 && g.state == GS_ENTRY);
+	key(0x4F);                                    // the left arrow types nothing
+	key(0x3D);                                    // keypad 7
+	CHECK(g.hi.pEntries[1].name[0] == '7' && g.edit.ubPos == 1);
+	step((tInput){.dy = -1}, 1);                  // the stick still works, from the cursor: ' ' -> A
+	step(NONE, 1);
+	CHECK(g.hi.pEntries[1].name[1] == 'A');
+	key(0x40);                                    // Space types a space
+	CHECK(g.hi.pEntries[1].name[1] == ' ' && g.edit.ubPos == 2);
+	CHECK(g.state == GS_ENTRY);
+	key(0x44);                                    // Return: done, the third place as it was
+	CHECK(g.state == GS_SCORES && g.scoresChanged && g.edit.ubPos == HI_NAME);
+	CHECK(!strncmp(g.hi.pEntries[1].name, "7  ", 3) && g.hi.pEntries[1].score == 4500);
+	step(NONE, SCORES_FRAMES + 1);
+	// the third letter ends it, as fire on the last place does
+	endGameWith(9000);
+	key(0x10); key(0x01);
+	CHECK(g.state == GS_ENTRY);
+	key(0x31);                                    // Z
+	CHECK(g.state == GS_SCORES && !strncmp(g.hi.pEntries[0].name, "Q1Z", 3) && g.hiScore == 9000);
+	step(NONE, SCORES_FRAMES + 1);
+	// a key restarts the 30 s; none and it times out with what is typed
+	endGameWith(9500);
+	step(NONE, ENTRY_FRAMES - 10);
+	key(0x27);
+	step(NONE, ENTRY_FRAMES - 10);
+	CHECK(g.state == GS_ENTRY && g.hi.pEntries[0].name[0] == 'K');
+	step(NONE, 20);
+	CHECK(g.state == GS_SCORES && g.hi.pEntries[0].name[0] == 'K' && g.hi.pEntries[0].name[1] == ' ');
 }
 
 static void testNoEntryWhenInvincible(void) {
@@ -182,7 +245,7 @@ static void testNoEntryWhenInvincible(void) {
 	g.state = GS_OVER;
 	g.stateTimer = 1;
 	step(NONE, 1);
-	CHECK(g.state == GS_TITLE && g.pScores[0].score == 5000);
+	CHECK(g.state == GS_TITLE && g.hi.pEntries[0].score == 5000);
 }
 
 // Title -> hall of fame -> the demo (the recorded trip: it rescues 16 and
@@ -194,7 +257,7 @@ static void testAttractLoop(void) {
 	step(NONE, ATTRACT_FRAMES - 1);
 	CHECK(g.state == GS_TITLE);
 	step(NONE, 1);
-	CHECK(g.state == GS_SCORES && g.newRank == SCORE_COUNT);
+	CHECK(g.state == GS_SCORES && g.newRank == HI_COUNT);
 	step(NONE, SCORES_FRAMES);
 	CHECK(g.demo && g.state == GS_INTRO && g.difficulty == DIFFICULTY_NORMAL);
 	uint8_t ubMaxAboard = 0, ubSaved = 0, isLost = 0;
@@ -2422,6 +2485,7 @@ int main(void) {
 	testPreviewCard();
 	testScoresTable();
 	testHighScoreEntry();
+	testHighScoreKeys();
 	testNoEntryWhenInvincible();
 	testAttractLoop();
 	testDemoEndsOnFire();

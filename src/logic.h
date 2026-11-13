@@ -15,6 +15,7 @@
 #define _LOGIC_H_
 
 #include <stdint.h>
+#include "hiscore.h"   // the kit's hall of fame (the table, the initials editor)
 
 // ------------------------------------------------------------- the world ---
 #define SCREEN_W 320
@@ -82,6 +83,7 @@ enum { CHOP_SIDE0, CHOP_SIDE1, CHOP_SIDE2, CHOP_TURN, CHOP_FRONT, CHOP_WRECK,
 typedef struct {
 	int8_t dx, dy;       // -1, 0, 1
 	uint8_t fire, fire2; // held
+	uint8_t key;         // a raw keycode pressed this frame (the initials), 0: none
 } tInput;
 
 // --------------------------------------------------------------- objects ---
@@ -183,16 +185,10 @@ enum { GS_TITLE, GS_INTRO, GS_PLAY, GS_LOST, GS_CLEAR, GS_OVER, GS_VICTORY,
 	GS_SCORES,   // the hall of fame: in the attract loop, or after a new entry
 	GS_ENTRY };  // a new high score: the player's initials
 
-// The hall of fame: SCORE_COUNT entries, best first, saved to the floppy
-#define SCORE_COUNT 5
-#define SCORE_NAME 3         // initials
-typedef struct {
-	char name[SCORE_NAME];
-	uint8_t mission;     // reached: 1..MISSION_COUNT, MISSION_COUNT + 1 = all done
-	uint16_t saved;      // hostages saved over the game (the rank comes from it)
-	uint32_t score;
-} tScore;
-#define SCORES_BYTES (4 + SCORE_COUNT * 10 + 2)   // what's on the disk: magic, entries, checksum
+// The hall of fame: HI_COUNT entries (the kit's hiscore technique), best first,
+// saved to the floppy. In an entry, `reached` is the mission (1..MISSION_COUNT,
+// MISSION_COUNT + 1 = all done) and `extra` the hostages saved over the game
+// (the rank comes from it).
 
 typedef struct {
 	uint8_t state;
@@ -233,10 +229,9 @@ typedef struct {
 	uint8_t demoDifficulty;      // the player's, put back after it
 	uint8_t scoresNext;  // after the hall of fame: GS_INTRO (the demo) or GS_TITLE
 	// the hall of fame, and a new entry
-	tScore pScores[SCORE_COUNT];
-	uint8_t newRank;     // the entry being or just made (SCORE_COUNT: none)
-	uint8_t entryPos;    // its letter being chosen (0..SCORE_NAME-1)
-	uint8_t entryHold;   // the stick held up/down: frames to the next letter
+	tHiTable hi;
+	tHiEdit edit;        // the initials being typed (edit.ubPos: the letter being chosen)
+	uint8_t newRank;     // the entry being or just made (HI_COUNT: none)
 	uint8_t scoresChanged;   // set when an entry is done: main.c saves the table
 	tChopper chop;
 	tHostage pHostages[HOSTAGE_COUNT];
@@ -537,12 +532,10 @@ const char *logicRank(uint16_t uwSaved);
 // 1-5, and never from the demo)
 #define ATTRACT_FRAMES 600   // idle on the title, then the hall of fame
 #define SCORES_FRAMES 400    // the hall of fame shows this long
-#define ENTRY_FRAMES 1500    // initials: 30 s, then what's chosen stands
-#define DEMO_LETTERS " ABCDEFGHIJKLMNOPQRSTUVWXYZ."   // a name's letters, in stick order
+#define ENTRY_FRAMES HI_EDIT_FRAMES   // initials: 30 s (a key restarts it), then what's chosen stands
+#define DEMO_LETTERS HI_LETTERS       // a name's letters, in stick order
 void logicScoresDefault(tGame *g);
-uint8_t logicScoreRank(const tGame *g, uint32_t ulScore);   // its place, or SCORE_COUNT
-void logicScoresPack(const tGame *g, uint8_t *pOut);        // SCORES_BYTES
-uint8_t logicScoresUnpack(tGame *g, const uint8_t *pIn);    // 0: not a valid table (g unchanged)
+extern const tHiConfig g_sHiConfig;   // the file: "RRH1" (as before the kit), "rrscores"
 void logicStartDemo(tGame *g);
 uint8_t logicDemoInput(tGame *g, tInput *pOut);             // 0: the stream is over
 uint8_t logicIsMenu(const tGame *g);                        // the title or the hall of fame
