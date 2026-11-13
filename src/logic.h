@@ -37,7 +37,18 @@
 #define HOSTAGE_COUNT (BARRACKS_COUNT * HOSTAGES_PER_BARRACKS)
 #define CABIN_MAX 16
 #define LIVES_START 3
-#define MISSION_COUNT 3
+#define MISSION_COUNT 3      // missions a world (world 1: missions 1-3, world 2: 4-6)
+
+// The worlds (SPEC 4): g->world 0 is the Border Desert (missions 1-3, WORLD_W),
+// 1 the Coral Islands (missions 4-6, W2_W). g->mission is the mission within the
+// world (0-2), so every per-mission table keeps three rows. World 2 is the
+// display slice so far (docs/STYLE-world2.md): its sea, islands and strip, no
+// barracks, enemies or pads yet (they are the next slice); it is reached only by
+// the debug keys (Ctrl+L, W, 4-6) until then.
+#define WORLD_COUNT 2
+#define W2_W 4608            // 288 tile columns of 16 px
+#define W2_START_X 4136      // on the base island's pad (art/world2/tilemap.txt: pad column 256, 80 px)
+#define W2_MAP_COLS (W2_W / 16)
 
 #define TANK_MAX 5
 #define JET_MAX 2
@@ -195,7 +206,8 @@ typedef struct {
 	uint16_t stateTimer;
 	uint16_t frame;      // frames since boot
 	uint16_t lfsr;
-	uint8_t mission;     // 0..MISSION_COUNT-1
+	uint8_t mission;     // 0..MISSION_COUNT-1, within the world
+	uint8_t world;       // 0..WORLD_COUNT-1 (missions 1-3, 4-6)
 	uint8_t lives;
 	uint8_t trip;        // completed trips home this mission
 	uint8_t aboard, saved, killed;  // this mission
@@ -344,7 +356,12 @@ typedef struct {
 void logicInit(tGame *g);
 void logicStartGame(tGame *g);
 void logicStartMission(tGame *g, uint8_t ubMission);
+// A mission of a world at once (the debug keys: Ctrl+L, W, 1-6): from a menu it
+// starts a game there; from play it moves to it (lives and score kept)
+void logicStartAt(tGame *g, uint8_t ubWorld, uint8_t ubMission);
 void logicUpdate(tGame *g, const tInput *pIn);
+// The battlefield's width: WORLD_W, or W2_W in world 2
+static inline int16_t logicWorldW(const tGame *g) { return g->world ? W2_W : WORLD_W; }
 
 // The chopper on its own (exposed for unit tests)
 void logicChopperUpdate(tGame *g, const tInput *pIn);
@@ -465,10 +482,39 @@ int16_t logicFloorScroll(int16_t wCam, uint16_t uwX4Mask, uint16_t uwModBase, ui
 void logicFloorFillGround(uint8_t ubMission, uint16_t *pOut);
 uint32_t logicFloorGround24(uint8_t ubMission, uint8_t j);   // the same in 24 bits, for AGA
 
+// World 2's sea (docs/STYLE-world2.md section 2): the perspective floor re-cut to
+// SEA_LINES lines, 180-207, line j at (28 + 3 j) / 112 of the camera (1/4 at the
+// horizon's side to 0.97 at the strip), its row loops 4 (28 + 3 j) px, all
+// repeating after SEA_PERIOD px of camera. Rows 0 and 27 are empty (the palette
+// switches at lines 179 and 207). The same copper values as logicFloorScroll
+// (pOut, ubStride, the BPLCON1 mask, the modulo base): per frame one 16 x 16
+// multiply and no divide (line j's left edge in quarters, c + 3 c j / 28 with
+// c = camera mod 448, is kept as a whole part and a remainder in 28ths).
+#define SEA_Y 180
+#define SEA_LINES 28
+#define SEA_PERIOD 448
+#define STRIP_Y (SEA_Y + SEA_LINES)   // 208: the terrain strip, 48 rows, 1:1
+#define STRIP_ROWS (SCREEN_H - STRIP_Y)
+int16_t logicSeaScroll(int16_t wCam, uint16_t uwX4Mask, uint16_t uwModBase, uint16_t *pOut, uint8_t ubStride);
+uint16_t logicSeaX4(int16_t wCam, uint8_t j);   // (host reference) row j's left edge, 1/4 px
+// A line-dithered COLOR00 gradient from uwA (line 0) to uwB (line ubLines - 1),
+// as the sky's (startup), and its 24-bit form (0xRRGGBB) for AGA
+void logicGradFill(uint16_t uwA, uint16_t uwB, uint8_t ubLines, uint16_t *pOut);
+uint32_t logicGrad24(uint32_t ulA, uint32_t ulB, uint8_t ubLine, uint8_t ubLines);
+
+// World 2's terrain (the hook for the gameplay slice): the floor under world x
+// from the tile map (W2_MAP_COLS bytes, a tile index a 16 px column). Island tiles
+// (flat, shore, palms, bush, rock, pad bed) are ground at GROUND_Y; water and reef
+// (tiles 0-7, 32-33) are not landable: TERRAIN_WATER. Off the map: water.
+#define TERRAIN_WATER 0xFF
+uint8_t logicTerrainFloorY(const uint8_t *pMap, int16_t x);
+
 // Radar: 0..RADAR_W-1 from a world x
 #define RADAR_W 192
 #define RADAR_X0 64
 static inline uint8_t logicRadarX(int16_t x) { return (uint8_t)(x >> 4); }
+// The same for world 2's 4608 px (x / 24, as a 16 x 16 multiply): x in 0..W2_W-1
+static inline uint8_t logicRadarX2(int16_t x) { return (uint8_t)(((uint32_t)(uint16_t)x * 2731u) >> 16); }
 
 // Mission palettes: sky gradient and band colours (copper)
 #define SKY_LINES 172

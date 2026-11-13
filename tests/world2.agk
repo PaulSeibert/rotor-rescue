@@ -1,0 +1,53 @@
+# World 2, Coral Islands (SPEC 4.1, 11; docs/STYLE-world2.md section 2): the display
+# engine. Ctrl+L, W, 4 starts mission 4 (Reef Run) behind its card; its art loads
+# from the floppy into the world arena there. Then a flight across the whole
+# 4608 px map, right to left, at full speed and high up:
+# - the clouds (lines 72-111) at 1/8, the far islands and their strip (120-179)
+#   at 1/4, as one block each;
+# - the perspective sea (180-207): line 180 + j at (28 + 3 j) / 112 of the camera
+#   (expect-scroll pairs a sea line with an empty one: row 0 and row 27 are bare
+#   by contract);
+# - the terrain strip (208-255) at 1:1, streamed a 16 px column at a time;
+# - line 180 shows the haze H (row 0 empty), the sky's last colour.
+# The same flight is the world's frame budget: no dropped frames, worst <= 85 %.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x04
+wait-serial "AGK world 2 loaded" 400
+wait 60
+screenshot card
+press fire 2
+wait 60
+screenshot start
+expect-color start 4 180 0xCFE
+expect-color start 160 180 0xCFE
+expect-color start 315 180 0xCFE
+press up 80
+hold left
+wait 60
+expect-scroll 0 74 319 108 136 3/8
+expect-scroll 0 124 319 176 136 3/4
+expect-scroll 0 180 319 181 136 93/112
+expect-scroll 0 206 319 207 136 318/112
+expect-scroll 0 212 319 252 136 3
+screenshot fly1
+wait 250
+screenshot fly2
+wait 250
+screenshot fly3
+wait 250
+screenshot fly4
+wait 300
+screenshot west
+release
+expect-serial "AGK start world=2 mission=4"
+expect-serial "AGK world=2 mission=4"
+expect-serial "world2 copper_used=\d+ copper_max=\d+"
+expect-no-serial "ERR|missing"
+expect-no-dropped-frames
+expect-max-load 85
+expect-min-chip-free 96

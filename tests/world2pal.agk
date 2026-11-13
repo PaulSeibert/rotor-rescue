@@ -1,0 +1,54 @@
+# World 2's three moods are palette swaps (STYLE-world2 sections 1 and 3): missions
+# 5 and 6 load no art, only their copper colours (line 180 is the haze H of each:
+# M4 CFE, M5 DFF, M6 8A9, the same on AGA, whose 24-bit ends are those x 17).
+# Then back to world 1 (mission 1): its bands load again into the world arena and
+# the plain is as before (its ground C, 0xDA6, on the floor's last line).
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x05
+wait-serial "AGK world 2 loaded" 400
+press fire 2
+wait 40
+press up 60
+press left 100
+screenshot m5
+expect-color m5 4 180 0xDFF
+expect-color m5 315 180 0xDFF
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x06
+wait-serial "AGK start world=2 mission=6" 200
+wait 60
+screenshot m6card
+press fire 2
+wait 40
+press up 60
+press left 100
+screenshot m6
+expect-color m6 4 180 0x8A9
+expect-color m6 315 180 0x8A9
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x01
+wait-serial "AGK world 1 loaded" 400
+press fire 2
+wait 40
+press up 80
+press left 60
+screenshot m1
+expect-color m1 4 198 0xDA6
+expect-color m1 315 198 0xDA6
+expect-serial "AGK world=1 mission=1"
+expect-no-serial "ERR|missing"
+expect-no-dropped-frames
+expect-min-chip-free 96

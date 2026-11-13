@@ -6,7 +6,7 @@ boot = "AGK ready"                                   # serial text that means "f
 unit_sources = ["src/logic.c", "src/hiscore.c"]                     # host-compiled for agk unit (no Amiga headers!)
 
 [lint]
-allow = ["logicSkyColor", "logicSkyColorDither", "logicRotorThumpsX10"]   # host-test-only helpers (the skies, the thump rate)
+allow = ["logicSkyColor", "logicSkyColorDither", "logicRotorThumpsX10", "w2Mission", "copperWriteList"]   # host-test-only helpers (the skies, the thump rate); w2Mission and copperWriteList (-Os) run once at a mission's start
 
 [cmake]                                              # build options, see CMakeLists.txt
 # ACE_BOB_WRAP_Y = false

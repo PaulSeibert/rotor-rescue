@@ -47,12 +47,35 @@
 #include <agk/asm.h>
 #include <agk/blitq.h>
 #include <agk/copw.h>
+// The copper writer's entries as whole longs, the same bits as ACE's copSetWait /
+// copSetMove: those fill bitfields, a read-modify-write of chip RAM per field, and a
+// whole game list took ~1.6 A500 frames (measured: the M5 -> M6 card's rewrite
+// picture 277 %, 2 pictures dropped; every mission start's two rewrites, world 1's too)
+static inline void cwFastWait(tAgkCopWriter *pW, UWORD uwGameY, UBYTE ubX) {
+	UWORD uwBeamY = (UWORD)(pW->uwBeamTop + uwGameY);
+	if(uwBeamY > 0xFF && !pW->isPast255) {
+		pW->pList[pW->uwPos++].ulCode = 0xFFDFFFFEUL;   // the end of line 255 first
+		pW->isPast255 = 1;
+	}
+	pW->pList[pW->uwPos++].ulCode = ((ULONG)(((uwBeamY & 0xFF) << 8) | (ubX & 0xFE) | 1) << 16) | 0xFFFE;
+}
+static inline void cwFastMove(tAgkCopWriter *pW, volatile void *pReg, UWORD uwValue) {
+	pW->pList[pW->uwPos++].ulCode = ((ULONG)((ULONG)pReg - (ULONG)g_pCustom) << 16) | uwValue;
+}
+static inline void cwFastPtrs(tAgkCopWriter *pW, UBYTE ubPlane, ULONG ulAddr) {
+	cwFastMove(pW, &g_pBplFetch[ubPlane].uwHi, (UWORD)(ulAddr >> 16));
+	cwFastMove(pW, &g_pBplFetch[ubPlane].uwLo, (UWORD)(ulAddr & 0xFFFF));
+}
+#define agkCopWait cwFastWait
+#define agkCopMove cwFastMove
+#define agkCopPtrs cwFastPtrs
 #include <agk/debug.h>
 #include <agk/pack.h>
 #include <agk/perf.h>
 #include <agk/text.h>
 #include "art.h"        // generated from art/ by agk (agk help-art)
 #include "disk_art.h"   // art/tools/make_disk_art.py: the art on the floppy
+#include "world2_art.h" // art/tools/make_world_disk.py: world 2's display art and palettes
 #include "sound.h"      // generated from sound/ by agk (agk help-sound)
 #include "logic.h"
 #include "splash.h"
@@ -105,6 +128,11 @@ _Static_assert(PLAY_HILLS_ROW == 2 && FLOOR_END + ART_HILLS_H - PLAY_HILLS_ROW =
 // WAIT and 6). Against the old gap line (WAIT, blank pointers, modulo, WAIT, palette: 16):
 #define FLOOR_COP_OCS (2 + 6 + 7 + FLOOR_LINES * 4 - 16)
 #define FLOOR_COP_AGA (2 + 6 + 7 + FLOOR_LINES * 7 - 16 - 5 * (SKY_END - FLOOR_Y))
+// World 2 against that (cwSea): SEA_LINES blocks instead of FLOOR_LINES, the
+// island palette's 7 MOVEs after line 207's block, no hills band (a WAIT and 8
+// MOVEs); the strip's switch replaces the ground band's
+#define W2_COP_OCS (FLOOR_COP_OCS + (SEA_LINES - FLOOR_LINES) * 4 + 7 - 9)
+#define W2_COP_AGA_MORE ((SEA_LINES - FLOOR_LINES) * 7 + 7 - 9)
 
 // The title's own layout (its copper list): the logo, then its lines of text,
 // the mountains lower down (the clouds don't show), the hills and ground as in
@@ -171,12 +199,59 @@ static UWORD s_pFloorPtr[2];        // per buffer: floor row 0's pointer MOVEs (
 static UWORD s_pFloorCon1[2];       // per buffer: line 0's BPLCON1 MOVE (its BPL2MOD follows; a line a stride)
 static UBYTE s_ubFloorStride = 4;   // copper entries a floor line (7 on AGA)
 
+// World 2, Coral Islands (missions 4-6; SPEC 11, docs/STYLE-world2.md section 2).
+// The same lines as world 1 down to 179 (sky, clouds at 72, blank PF2 rows while
+// the far palette loads at 113, the far islands and their strip at 120-179 as
+// one band), then the sea: SEA_LINES perspective lines (180-207, a block each as
+// the plain's), and from 208 the terrain strip, 1:1, a ring of 16 px tile
+// columns. Palette loads: the clouds' at the top, the far islands' at 113, the
+// sea's at the start of 179 (the far strip's bare last row), the islands' after
+// line 207's block (the sea's bare last row), PF2's pointers at $D8 of 179 and
+// 207. Its art (disk/world2.bin) loads at the mission card into the world
+// arena, the band region of the floppy art's chip block: world 1's clouds,
+// mountains, title mountains, hills and ground, loaded back (disk/world1.bin)
+// when the game returns to world 1. The strip's ring is a chip block of its own
+// while the game is in world 2.
+#define ARENA_OFFS DISK_ART_CLOUDS_OFFS
+#define ARENA_BYTES ((ULONG)(DISK_ART_HANGAR_OFFS - DISK_ART_CLOUDS_OFFS))
+_Static_assert(ARENA_BYTES == WORLD1_BANDS_BYTES, "disk/world1.bin is the art block's band region");
+_Static_assert(WORLD2_BYTES <= ARENA_BYTES, "world 2's display art fits the world arena");
+_Static_assert(SEA_Y == FLOOR_Y && STRIP_Y == 208 && ART_W2_SEA_H == SEA_LINES, "STYLE-world2's lines");
+_Static_assert(ART_W2_CLOUDS_H == ART_CLOUDS_H && ART_W2_FAR_H == ART_MOUNTAINS_H &&
+	ART_W2_CLOUDS_LOOP_W == ART_CLOUDS_LOOP_W && ART_W2_FAR_LOOP_W == ART_MOUNTAINS_LOOP_W,
+	"world 2's clouds and far band have world 1's lines and loops");
+// The strip: pointer creep, no copper wrap (docs/spikes/terrain-height.md): map
+// column j, row r at plane + 2 j + r * STRIP_RB; scrolling moves the pointers
+// only. STRIP_SPAN columns are kept drawn, the 21 fetched words of both
+// pictures; a column drawn overwrites the one STRIP_SPAN to its left (a row
+// down), which neither picture shows. Separate planes (a creeping pointer must
+// not run into the next plane's row).
+#define STRIP_RB 44                          // 22 words: 21 fetched + 1
+#define STRIP_SPAN 22
+#define STRIP_PLANE_BYTES ((ULONG)STRIP_RB * (STRIP_ROWS + 1) + W2_MAP_COLS * 2 + 2)
+#define STRIP_FILL_PER_FRAME 4               // after a jump: 12 blits a picture, behind a blank strip
+#define SEA_PLANE_BYTES (ART_W2_SEA_BITMAP_W / 8)
+static UBYTE s_ubWorld;             // the world whose art is in the arena and the game lists
+static UBYTE s_ubRasterOff;         // after a world's load: pictures until the bitplanes are back on
+static tBitMap s_sW2Clouds, s_sW2Far, s_sW2Sea, s_sStrip;
+static tBitMap *s_pFarBm;           // PF2 at line 120 in play: world 1's mountains, world 2's far islands
+static tBitMap *s_pW1CloudsBm;      // world 1's clouds (s_pCloudsBm is the world's)
+static const UBYTE *s_pW2Tiles, *s_pW2Map;   // (in the arena)
+static UBYTE *s_pStripMem;          // (chip) the strip's three planes, in world 2
+static UWORD s_pW2Sky[MISSION_COUNT][FLOOR_Y - PLAY_TOP];     // COLOR00 lines 24-179: top to H (AGA: high nibbles)
+static UWORD s_pW2SkyLo[MISSION_COUNT][FLOOR_Y - PLAY_TOP];   // AGA: the low nibbles
+static UWORD s_pW2SeaBg[MISSION_COUNT][SEA_LINES];            // lines 180-207: H to C
+static UWORD s_pW2SeaBgLo[MISSION_COUNT][SEA_LINES];
+static UWORD s_pW2SkySlot[2][FLOOR_Y - PLAY_TOP];   // per game list: each sky line's COLOR00 MOVE (w2Mission)
+static UWORD s_pW2PalSlot[2][4];                    // its clouds', far islands', sea's and islands' palettes
+
 typedef struct {
 	UWORD uwCon1;          // index of the MOVE BPLCON1
 	UWORD pPtr[3];         // per plane: index of its pointer's high-word MOVE
 } tCopSlots;
 // per list ([title][buffer]): the sky's length varies
 static tCopSlots s_sCloudSlots[2], s_sMtnSlots[2][2], s_sHillSlots[2][2], s_sGndSlots[2][2];
+static tCopSlots s_sStripSlots[2];  // world 2's terrain strip, per buffer (its BPL2MOD MOVE follows uwCon1)
 static tBitMap *s_pCloudsBm;        // the far clouds band (PF2, camera / 8)
 static UBYTE *s_pTitleLogo;         // chip RAM: the logo (from the floppy)
 static UBYTE s_isTitlePending, s_isTitleLogo;   // to load; loaded
@@ -235,10 +310,31 @@ static void scoresReport(void) {
 static const UBYTE s_pDigitKeys[DIFFICULTY_MAX + 1] = {KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5};
 
 // Ctrl+L, then 0-5 within 2 s: the difficulty (0 = invincible, for testing)
-static void skillKeys(void) {
+__attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
+	static UBYTE s_ubWorldKeyWait;   // Ctrl+L, W: frames left to press 1-6 (a mission, testing)
 	if(keyCheck(KEY_CONTROL) && keyUse(KEY_L)) s_ubSkillKeyWait = 100;
+	if(s_ubWorldKeyWait) {
+		--s_ubWorldKeyWait;
+		static const UBYTE pMissionKeys[6] = {KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6};
+		for(UBYTE m = 0; m < 6; ++m) {
+			if(keyUse(pMissionKeys[m])) {
+				s_ubWorldKeyWait = 0;
+				logicStartAt(&s_sGame, (UBYTE)(m / MISSION_COUNT), (UBYTE)(m % MISSION_COUNT));
+				agkState("start world", m / MISSION_COUNT + 1);
+				agkState("mission", m + 1);
+				agkEnd();
+				break;
+			}
+		}
+		return;
+	}
 	if(!s_ubSkillKeyWait) return;
 	--s_ubSkillKeyWait;
+	if(keyUse(KEY_W)) {
+		s_ubWorldKeyWait = 100;
+		s_ubSkillKeyWait = 0;
+		return;
+	}
 	if(keyUse(KEY_T)) {
 		s_ubScrollTrace = 12;
 		s_ubSkillKeyWait = 0;
@@ -450,6 +546,78 @@ __attribute__((noinline, optimize("Os"))) static void floorSet(tCopCmd *pList, U
 	UWORD *pPtr = (UWORD *)&pList[s_pFloorPtr[ubBfr]] + 1;
 	for(UBYTE p = 0; p < 3; ++p) {
 		ULONG ulAddr = (ULONG)s_pPlainFloor->Planes[p] + wOff;
+		pPtr[0] = (UWORD)(ulAddr >> 16);
+		pPtr[2] = (UWORD)ulAddr;
+		pPtr += 4;
+	}
+}
+
+// World 2's sea, the plain's floor re-cut (STYLE-world2 section 2): line 179 (the
+// far strip's bare last row) loads the sea palette at its start and points PF2
+// at sea row 0 at $D8, as the plain does; then a block at the start of each of
+// the SEA_LINES lines (WAIT, COLOR00 the H-to-C gradient, BPLCON1, BPL2MOD).
+// Line 207, the sea's bare last row: the island palette after its block (it
+// runs on into the line's 6-plane fetch, harmless on an empty row: no pen 9-15
+// shows there, and COLOR00 came first), then at $D8 PF2 to the terrain strip
+// (cwBand: 6 pointer MOVEs, BPLCON1, BPL2MOD, done before line 208's fetch).
+// COLOR00 stays the gradient's last colour, C, under the strip: no MOVE.
+__attribute__((noinline, optimize("Os"))) static void cwSea(tAgkCopWriter *pW, UBYTE ubBfr, UBYTE ubMission) {
+	agkCopWait(pW, SEA_Y - 1, 0);
+	s_pW2PalSlot[ubBfr][2] = pW->uwPos;
+	for(UBYTE i = 1; i < 8; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * (8 + i)), g_pW2SeaPal[ubMission][i]);
+	agkCopWait(pW, SEA_Y - 1, SWITCH_WAIT_X);
+	s_pFloorPtr[ubBfr] = pW->uwPos;
+	for(UBYTE p = 0; p < 3; ++p) cwPtr8(pW, (UBYTE)(1 + 2 * p), (ULONG)s_sW2Sea.Planes[p]);
+	for(UBYTE j = 0; j < SEA_LINES; ++j) {
+		agkCopWait(pW, SEA_Y + j, 0);
+		if(s_isAga) cwSky24(pW, s_pW2SeaBg[ubMission][j], s_pW2SeaBgLo[ubMission][j]);
+		else cwReg(pW, REG_COLOR00, s_pW2SeaBg[ubMission][j]);
+		if(!j) s_pFloorCon1[ubBfr] = pW->uwPos;
+		cwReg(pW, REG_BPLCON1, 0);
+		cwReg(pW, REG_BPL2MOD, (UWORD)(s_sW2Sea.BytesPerRow - FETCH_BYTES));
+#ifdef W2_COP_PROBE
+		cwReg(pW, REG_COLOR00, j ? s_pW2SeaBg[ubMission][j] : 0xF00);   // (a block a MOVE longer: the stride +1)
+#endif
+	}
+	s_pW2PalSlot[ubBfr][3] = pW->uwPos;
+	for(UBYTE i = 1; i < 8; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * (8 + i)), g_pW2IslPal[ubMission][i]);
+#ifdef W2_COP_PROBE
+	cwReg(pW, REG_COLOR00, 0x0F0);
+#endif
+	s_sStripSlots[ubBfr] = cwBand(pW, STRIP_Y, &s_sStrip);
+#ifdef W2_COP_PROBE
+	cwReg(pW, REG_COLOR00, 0x00F);
+#endif
+}
+
+// World 2's missions share one list layout (a sky MOVE on every line): a new
+// mission patches its colours (sky, sea gradient, the four PF2 palettes) into the
+// back list, a few hundred word writes, where writing the whole list again took
+// about 85 % of an A500 frame (a mission card dropped pictures)
+__attribute__((noinline, optimize("Os"))) static void w2Mission(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
+	for(UBYTE y = 0; y < FLOOR_Y - PLAY_TOP; ++y) {
+		UWORD i = s_pW2SkySlot[ubBfr][y];
+		copSetMoveVal(&pList[i].sMove, s_pW2Sky[ubMission][y]);
+		if(s_isAga) copSetMoveVal(&pList[i + 2].sMove, s_pW2SkyLo[ubMission][y]);
+	}
+	UWORD uwBg = (UWORD)(s_pFloorCon1[ubBfr] - (s_isAga ? 4 : 1));   // line 0's COLOR00 (cwSea)
+	for(UBYTE j = 0; j < SEA_LINES; ++j, uwBg += s_ubFloorStride) {
+		copSetMoveVal(&pList[uwBg].sMove, s_pW2SeaBg[ubMission][j]);
+		if(s_isAga) copSetMoveVal(&pList[uwBg + 2].sMove, s_pW2SeaBgLo[ubMission][j]);
+	}
+	const UWORD *pPal[4] = {g_pW2CloudPal[ubMission], g_pW2FarPal[ubMission], g_pW2SeaPal[ubMission], g_pW2IslPal[ubMission]};
+	for(UBYTE k = 0; k < 4; ++k)
+		for(UBYTE i = 0; i < 7; ++i) copSetMoveVal(&pList[s_pW2PalSlot[ubBfr][k] + i].sMove, pPal[k][i + 1]);
+}
+
+// Each frame the camera moves: the sea's lines (logicSeaScroll) and row 0's pointers
+__attribute__((noinline, optimize("Os"))) static void seaSet(tCopCmd *pList, UBYTE ubBfr, WORD wCam) {
+	UWORD *pVal = (UWORD *)&pList[s_pFloorCon1[ubBfr]] + 1;
+	WORD wOff = logicSeaScroll(wCam, s_isAga ? 0xFFFF : 0xFFFC,
+		(UWORD)(s_sW2Sea.BytesPerRow - FETCH_BYTES), pVal, (UBYTE)(2 * s_ubFloorStride));
+	UWORD *pPtr = (UWORD *)&pList[s_pFloorPtr[ubBfr]] + 1;
+	for(UBYTE p = 0; p < 3; ++p) {
+		ULONG ulAddr = (ULONG)s_sW2Sea.Planes[p] + wOff;
 		pPtr[0] = (UWORD)(ulAddr >> 16);
 		pPtr[2] = (UWORD)ulAddr;
 		pPtr += 4;
@@ -731,7 +899,9 @@ static void songsFree(void) {
 
 // (no loop unswitching: the AGA branches would copy whole loops - code size
 // counts on the A500, whose slow RAM is full)
-__attribute__((optimize("no-unswitch-loops")))
+// (optimized for size: the program's growth costs AROS ~3 boot frames a KB, and with the
+// whole-long entries a list is still ~0.9 A500 frame; it runs at a mission's start)
+__attribute__((optimize("Os", "no-unswitch-loops")))
 static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE isTitle) {
 	tAgkCopWriter sW;
 	// the game list starts after the sprite pointers, the title list jumped to
@@ -743,6 +913,12 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 	ULONG ulFbCloudRow = (ULONG)(CLOUDS_Y * FB_ROW_BYTES + FB_FETCH_OFFS);
 	ULONG ulFbTitleRow = (ULONG)((TITLE_LOGO_END + 3) * FB_ROW_BYTES + FB_FETCH_OFFS);
 	tCopSlots *pCld = &s_sCloudSlots[ubBfr];
+	// the world's tables (world 2: STYLE-world2's sky, palettes and bands; the title is world 1's)
+	UBYTE isW2 = !isTitle && s_ubWorld;
+	const UWORD *pSkyCol = isW2 ? s_pW2Sky[ubMission] : s_pSky[ubMission];
+	const UWORD *pSkyColLo = isW2 ? s_pW2SkyLo[ubMission] : s_pSkyLo ? s_pSkyLo[ubMission] : 0;
+	const UWORD *pSkyDots = isW2 ? g_pW2SkyDotPal[ubMission] : g_pMissionSkyDotPal[ubMission];
+	const UWORD *pFarPal = isW2 ? g_pW2FarPal[ubMission] : g_pMissionMtnPal[ubMission];
 
 	if(!isTitle) {
 		// (copperJump() sets where to)
@@ -755,7 +931,7 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 		cwAgaOcsRegs(&sW);
 		// the sky dots' colours 29-31 (skyUpdate() patches them)
 		s_pSkyDotColorSlot[isTitle] = sW.uwPos;
-		for(UBYTE i = 0; i < 3; ++i) cwReg(&sW, (UWORD)(REG_COLOR00 + 2 * (29 + i)), g_pMissionSkyDotPal[ubMission][i]);
+		for(UBYTE i = 0; i < 3; ++i) cwReg(&sW, (UWORD)(REG_COLOR00 + 2 * (29 + i)), pSkyDots[i]);
 	}
 	// Top of the frame (vertical blank): the HUD, 3 planes
 	agkCopMove(&sW, &g_pCustom->bplcon0, BPLCON0_3);
@@ -768,7 +944,8 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 	for(UBYTE p = 0; p < 3; ++p) agkCopPtrs(&sW, p, (ULONG)s_pHud[ubBfr]->Planes[p]);
 	agkCopMove(&sW, &g_pCustom->color[0], s_pHudBg[0]);
 	agkCopMove(&sW, &g_pCustom->color[HUD_INK], s_pHudInk[0]);
-	if(!isTitle) cwPf2Palette(&sW, g_pMissionCloudPal[ubMission]);   // PF2 shows nothing until the clouds
+	if(isW2) s_pW2PalSlot[ubBfr][0] = sW.uwPos;
+	if(!isTitle) cwPf2Palette(&sW, isW2 ? g_pW2CloudPal[ubMission] : g_pMissionCloudPal[ubMission]);   // PF2 shows nothing until the clouds
 	cwHudPanel(&sW);
 
 	// After the HUD: the frame buffer, still 3 planes; the ink back to PF1's colour 4
@@ -818,21 +995,24 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 		UWORD uwPrev = 0xFFFF;
 		ULONG ulPrev24 = ~0UL;
 		for(UWORD y = PLAY_TOP; y < FLOOR_Y; ++y) {
-			UWORD uwColor = s_pSky[ubMission][y - PLAY_TOP];
+			UWORD uwColor = pSkyCol[y - PLAY_TOP];
 			if(s_isAga) {
 				// 24 bits: nearly every line differs
-				UWORD uwLo = s_pSkyLo[ubMission][y - PLAY_TOP];
+				UWORD uwLo = pSkyColLo[y - PLAY_TOP];
 				ULONG ul24 = ((ULONG)uwColor << 16) | uwLo;
-				if(ul24 != ulPrev24) {
+				if(ul24 != ulPrev24 || isW2) {
 					agkCopWait(&sW, y, 0);
+					if(isW2) s_pW2SkySlot[ubBfr][y - PLAY_TOP] = sW.uwPos;
 					cwSky24(&sW, uwColor, uwLo);
 					ulPrev24 = ul24;
 				}
 			}
-			else if(uwColor != uwPrev) {
+			else if(uwColor != uwPrev || isW2) {
 				// (every change, even where the mountains hide the sky: COLOR00 is
-				// also the overscan border either side of the picture)
+				// also the overscan border either side of the picture. World 2: every
+				// line, so its three missions share one list layout: w2Mission)
 				agkCopWait(&sW, y, 0);
+				if(isW2) s_pW2SkySlot[ubBfr][y - PLAY_TOP] = sW.uwPos;
 				agkCopMove(&sW, &g_pCustom->color[0], uwColor);
 				uwPrev = uwColor;
 			}
@@ -866,10 +1046,11 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 			}
 			if(y == CLOUDS_END + 1) {
 				agkCopWait(&sW, y, SWITCH_WAIT_X);
-				cwPf2Palette(&sW, g_pMissionMtnPal[ubMission]);
+				if(isW2) s_pW2PalSlot[ubBfr][1] = sW.uwPos;
+				cwPf2Palette(&sW, pFarPal);
 			}
 			if(y == MTN_Y - 1) {
-				s_sMtnSlots[0][ubBfr] = cwBand(&sW, MTN_Y, s_pMountains);
+				s_sMtnSlots[0][ubBfr] = cwBand(&sW, MTN_Y, s_pFarBm);
 			}
 		}
 	}
@@ -883,8 +1064,9 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 		cwPf2Palette(&sW, g_pMissionLandPal[ubMission]);
 		s_sHillSlots[1][ubBfr] = cwBand(&sW, HILLS_Y, s_pHills);
 	}
+	else if(isW2) cwSea(&sW, ubBfr, ubMission);   // the sea, then the strip to the bottom
 	else cwFloor(&sW, ubBfr, ubMission);
-	s_sGndSlots[isTitle][ubBfr] = cwBand(&sW, GROUND_BAND_Y, s_pGround);
+	if(!isW2) s_sGndSlots[isTitle][ubBfr] = cwBand(&sW, GROUND_BAND_Y, s_pGround);
 
 	if(isTitle) {
 		s_uwTitleCopUsed = sW.uwPos;
@@ -944,6 +1126,112 @@ __attribute__((noinline, optimize("Os"))) static UWORD bandSet4(tCopCmd *pList, 
 
 static UWORD s_uwMtnX, s_uwHillX, s_uwGndX;
 
+// ------------------------------------------------- world 2's terrain strip ---
+// The ring (STRIP_SPAN columns drawn: lo .. lo + 21) follows the camera: a
+// column coming into either picture is queued with the BOBs, 3 blits (one a
+// plane, A -> D, 48 words) from the tile bank, about one every 5 pictures at
+// 3 px a frame. A jump (a mission's start, a world's load) draws the whole span
+// again, STRIP_FILL_PER_FRAME columns a picture (all 22 at once took a picture
+// 135 % in the spike), while both lists point the strip's lines at the blank
+// row: the islands appear whole, under the mission card.
+static WORD s_wStripFirst = -100;   // the first column the last picture showed
+static WORD s_wStripLo;             // the span drawn (once full)
+static UBYTE s_ubStripFill;         // columns of the span drawn since the jump (STRIP_SPAN: full)
+static UBYTE s_pStripLive[2];       // per list: its strip lines show the strip (1) or blank (0)
+static WORD s_pStripCam[2];         // the camera its strip pointers are for
+
+__attribute__((noinline, optimize("Os"))) static void stripColumn(WORD j) {
+	UBYTE t = (j < 0 || j >= W2_MAP_COLS) ? 0 : s_pW2Map[j];   // (off the map: water)
+	const UBYTE *pTile = s_pW2Tiles + (UWORD)t * (ART_W2_TILE_H * 6);
+	for(UBYTE p = 0; p < 3; ++p) {
+		tAgkBlit *pB = agkBlitqSlot();
+		pB->uwCon0 = 0x09F0;        // USEA | USED, D = A
+		pB->uwCon1 = 0;
+		pB->uwAlwm = 0xFFFF;
+		pB->pA = (UBYTE *)pTile + 2 * p;       // the tile's plane p: rows 6 bytes apart (interleaved)
+		pB->pB = 0;
+		pB->pCD = (UBYTE *)s_sStrip.Planes[p] + 2 * j;
+		pB->wSrcMod = 6 - 2;
+		pB->wDstMod = STRIP_RB - 2;
+		pB->uwSize = (UWORD)((ART_W2_TILE_H << 6) | 1);
+		agkBlitqPush();
+	}
+}
+
+__attribute__((noinline, optimize("Os"))) static void stripUpdate(tCopCmd *pList, UBYTE ubBfr, WORD wCam) {
+	WORD wFirst = (WORD)((wCam - 1) >> 4);   // logicScrollByteOffset's word
+	WORD wStep = (WORD)(wFirst - s_wStripFirst);
+	UBYTE isJump = wStep > 1 || wStep < -1;
+	if(isJump) {
+		// a jump: the span again, from scratch
+		s_ubStripFill = 0;
+		s_wStripLo = wFirst;
+		s_pStripLive[0] = s_pStripLive[1] = 0xFF;   // (both lists: blank now)
+	}
+	else if(s_ubStripFill == STRIP_SPAN) {
+		// both pictures' columns: this one's and the last one's
+		WORD wLo = wStep < 0 ? wFirst : s_wStripFirst;
+		if(wLo != s_wStripLo) {
+			WORD wOld = s_wStripLo;
+			s_wStripLo = wLo;
+			for(WORD j = wLo; j < wLo + STRIP_SPAN; ++j) if(j < wOld || j >= wOld + STRIP_SPAN) stripColumn(j);
+		}
+	}
+	s_wStripFirst = wFirst;
+	// (a mission's start is a heavy picture already, its colours and the logic's new
+	// start: the fill begins at the next one, unless the bitplanes are off)
+	if(s_ubStripFill < STRIP_SPAN && (!isJump || s_ubRasterOff)) {
+		// (with the bitplanes off after a world's load, nothing shows and the load's
+		// picture isn't timed: the whole span at once)
+		UBYTE ubN = s_ubRasterOff ? STRIP_SPAN : STRIP_FILL_PER_FRAME;
+		for(UBYTE k = 0; k < ubN && s_ubStripFill < STRIP_SPAN; ++k) stripColumn((WORD)(s_wStripLo + s_ubStripFill++));
+		// (the camera may have moved a few columns during the fill: no picture shows the
+		// strip yet, so the span is this picture's; queued after the fill's blits)
+		if(s_ubStripFill == STRIP_SPAN && wFirst != s_wStripLo) {
+			WORD wOld = s_wStripLo;
+			s_wStripLo = wFirst;
+			for(WORD j = wFirst; j < wFirst + STRIP_SPAN; ++j) if(j < wOld || j >= wOld + STRIP_SPAN) stripColumn(j);
+		}
+	}
+	// this list's strip lines: blank until the span is whole (it is drawn by the
+	// end of this picture), then the strip at the camera
+	UBYTE isLive = s_ubStripFill == STRIP_SPAN;
+	if(isLive == s_pStripLive[ubBfr] && (!isLive || wCam == s_pStripCam[ubBfr])) return;
+	s_pStripLive[ubBfr] = isLive;
+	s_pStripCam[ubBfr] = wCam;
+	const tCopSlots *pSlots = &s_sStripSlots[ubBfr];
+	if(isLive) {
+		bandSet(pList, pSlots, &s_sStrip, (UWORD)wCam);
+		copSetMoveVal(&pList[pSlots->uwCon1 + 1].sMove, STRIP_RB - FETCH_BYTES);
+	}
+	else {
+		for(UBYTE p = 0; p < 3; ++p) {
+			copSetMoveVal(&pList[pSlots->pPtr[p]].sMove, (ULONG)s_pBlankRow >> 16);
+			copSetMoveVal(&pList[pSlots->pPtr[p] + 1].sMove, (ULONG)s_pBlankRow & 0xFFFF);
+		}
+		copSetMoveVal(&pList[pSlots->uwCon1 + 1].sMove, (UWORD)-FETCH_BYTES);   // every line re-reads the blank row
+	}
+}
+
+// World 2's bands for the back list: the strip every picture (its columns, its
+// fill), the rest when the camera moved
+__attribute__((noinline, optimize("Os"))) static void w2Update(tCopCmd *pList, UBYTE ubBfr, WORD wCam, WORD *pCamShown) {
+	stripUpdate(pList, ubBfr, wCam);
+	if(wCam == *pCamShown) return;
+	*pCamShown = wCam;
+	seaSet(pList, ubBfr, wCam);
+	if(s_isAga) {
+		bandSet4(pList, &s_sCloudSlots[ubBfr], &s_sW2Clouds, wCam, 3, ART_W2_CLOUDS_LOOP_W);
+		s_uwMtnCon1 = bandSet4(pList, &s_sMtnSlots[0][ubBfr], &s_sW2Far, wCam, 2, ART_W2_FAR_LOOP_W);
+		return;
+	}
+	bandSet(pList, &s_sCloudSlots[ubBfr], &s_sW2Clouds, logicBandOffset(wCam, 3, ART_W2_CLOUDS_LOOP_W));
+	s_uwMtnX = logicBandOffset(wCam, 2, ART_W2_FAR_LOOP_W);
+	bandSet(pList, &s_sMtnSlots[0][ubBfr], &s_sW2Far, s_uwMtnX);
+	s_uwMtnCon1 = (UWORD)(logicScrollDelay(s_uwMtnX) << 4);
+	s_uwMtnX4 = (UWORD)(s_uwMtnX << 2);
+}
+
 // The back list: the jump to the title list or not; this mission's colours
 // (the game list rewritten once when it changes, the title list's patched),
 // then each band's scroll for the camera, in whichever list shows.
@@ -960,10 +1248,34 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 		pList = s_pTitleList[ubBfr];
 		if(s_pTitleListMission[ubBfr] != s_sGame.mission) titleListMission(ubBfr, s_sGame.mission);
 	}
-	else if(s_pListMission[ubBfr] != s_sGame.mission) {
-		s_pListMission[ubBfr] = s_sGame.mission;
+	else if(s_sGame.world != s_ubWorld) {
+		// (the other world's art loads at the next picture's start: no list for this one now)
+	}
+	else if(s_ubWorld && s_pListMission[ubBfr] != 0xFF && (s_pListMission[ubBfr] >> 2) == s_ubWorld &&
+		s_pListMission[ubBfr] != (UBYTE)((s_ubWorld << 2) | s_sGame.mission)) {
+		// world 2, another of its missions: the same layout, new colours
+		s_pListMission[ubBfr] = (UBYTE)((s_ubWorld << 2) | s_sGame.mission);
+		w2Mission(pList, ubBfr, s_sGame.mission);
+	}
+	else if(s_pListMission[ubBfr] != (UBYTE)((s_ubWorld << 2) | s_sGame.mission)) {
+		s_pListMission[ubBfr] = (UBYTE)((s_ubWorld << 2) | s_sGame.mission);
 		copperWriteList(pList, ubBfr, s_sGame.mission, 0);
 		pListCam[0][ubBfr] = -1;
+		s_pStripLive[ubBfr] = 0xFF;   // (its strip pointers: written again)
+		// (a whole list is about 1.3 A500 frames of CPU: the second list after a world's
+		// load is written with the bitplanes still off, a picture of the load, unseen)
+		if(s_ubRasterOff) agkPerfSkip();
+		if(s_ubWorld) {
+			// world 2's list (its size: genericCreate)
+			agkState("world2 copper_used", s_uwCopUsed);
+			agkState("copper_max", s_uwCopCount);
+			agkEnd();
+			if(s_uwCopUsed > s_uwCopCount) agkPrint("AGK ERR copper list overflow\n");
+		}
+	}
+	if(!isTitle && s_ubWorld) {
+		w2Update(pList, ubBfr, wCam, &pListCam[0][ubBfr]);
+		return;
 	}
 	if(wCam == pListCam[isTitle][ubBfr]) return;   // a still camera: nothing to scroll (chip RAM writes are slow)
 	pListCam[isTitle][ubBfr] = wCam;
@@ -1631,6 +1943,26 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 	UBYTE *pRow[RADAR_H];
 	UBYTE *pTop = s_pRadarArea[ubBfr].pD;
 	for(UBYTE y = 0; y < RADAR_H; ++y, pTop += HUD_ROW_BYTES) pRow[y] = pTop;
+	if(g->world) {
+		// world 2's display slice: its 4608 px at a 24th (no buildings or enemies yet)
+		if(s_pRadarBuildings[ubBfr] != 0xFE) {
+			s_pRadarBuildings[ubBfr] = 0xFE;   // (world 1's buildings off; they come back with it)
+			for(UBYTE y = 5; y < 7; ++y)
+				for(UBYTE i = 0; i < FB_BPP * RADAR_P1; i += RADAR_P1)
+					for(UBYTE k = 0; k < RADAR_W / 8 + 1; ++k) pRow[y][i + k] = 0;
+		}
+		UBYTE ubCam = logicRadarX2(g->cam);
+		radarDot(pRow[0], ubCam, 3);
+		radarDot(pRow[0], (UBYTE)(ubCam + SCREEN_W / 24), 3);
+		if(!logicIsMenu(g) && g->state != GS_ENTRY) {
+			UBYTE x = logicRadarX2(g->chop.x);
+			UBYTE y = (UBYTE)((g->chop.y - CEIL_Y) >> 5);
+			if(y > RADAR_DYN_H - 1) y = RADAR_DYN_H - 1;
+			radarDot(pRow[y], x, 6);
+			radarDot(pRow[y], (UBYTE)(x + 1), 6);
+		}
+		return;
+	}
 	// the buildings (rows 5-6): only when a barracks has opened since
 	UBYTE ubOpen = 0;
 	for(UBYTE b = 0; b < BARRACKS_COUNT; ++b) ubOpen |= (UBYTE)((g->pBarracks[b].hp == 0) << b);
@@ -1833,7 +2165,7 @@ static UWORD msgKeyNow(void) {
 			((s->name[0] * 37 + s->name[1] * 11 + s->name[2]) & 0xFFF));
 	}
 	UWORD uwKeyLow = g->state == GS_SCORES ? (UWORD)(s_ubDiskStatus << 1) : 0;
-	return (UWORD)(g->state << 8 | g->mission << 4 | uwKeyLow |
+	return (UWORD)(g->state << 8 | g->world << 6 | g->mission << 4 | uwKeyLow |
 		(g->state == GS_TITLE ? (g->frame >> 5) & 1 : 0) |
 		(g->state == GS_LOST && g->stateTimer < LOST_FRAMES - 40 ? 2 : 0));
 }
@@ -1877,6 +2209,15 @@ __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey) {
 			pText[1] = g_pMissionName[g->mission];
 			pText[2] = "64 HELD IN 4 BARRACKS";
 			pText[3] = logicBrief(g);
+			if(g->world) {
+				// world 2's display slice (no barracks, no route map yet)
+				static const char *const pW2Name[MISSION_COUNT] = {"REEF RUN", "TRADE WINDS", "TYPHOON STRAIT"};
+				szA[8] = (char)('4' + g->mission);
+				szA[9] = 0;
+				pText[1] = pW2Name[g->mission];
+				pText[2] = "CORAL ISLANDS";
+				pText[3] = "WORLD 2 DISPLAY PREVIEW";
+			}
 		} break;
 		case GS_LOST:
 			if(g->stateTimer < LOST_FRAMES - 40) {
@@ -2084,7 +2425,7 @@ __attribute__((noinline)) static void routeShow(UBYTE ubBfr) {
 
 // Queued before the objects: the map cleared once the card's over
 __attribute__((noinline)) static void routeClear(UBYTE ubBfr) {
-	if(!s_pRouteLit[ubBfr] || s_sGame.state == GS_INTRO) return;
+	if(!s_pRouteLit[ubBfr] || (s_sGame.state == GS_INTRO && !s_sGame.world)) return;   // (world 2: none yet)
 	s_pRouteLit[ubBfr] = 0;
 	tAgkBlitArea sArea;
 	sArea.pD = s_pFb[ubBfr]->Planes[0] + s_pFbRowOffs[ROUTE_Y] + (FB_X0 + ROUTE_X0) / 8;
@@ -2137,6 +2478,89 @@ __attribute__((noinline, optimize("Os"))) static void diskArtLoad(void) {
 	if(agkLoadFile("diskart.bin.pk", s_pDiskArt, DISK_ART_BYTES) != DISK_ART_BYTES) agkPrint("AGK art missing\n");
 	bobsCrop();
 	agkPerfSkip();
+}
+
+// A world's display art into the arena, at its mission card (or back to world 1
+// for the title): the bitplanes and sprites are off from the start of this
+// picture (in the vertical blank, before any line shows) until both copper
+// lists are the new world's, two pictures later, so no picture of the arena
+// half-loaded or of a list for the other world's art is seen. World 2's strip
+// ring is allocated here and freed when the game leaves world 2.
+static void world2Gradients(void);
+__attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
+	systemSetDmaMask(DMAF_RASTER | DMAF_SPRITE, 0);
+	UBYTE *pArena = s_pDiskArt + ARENA_OFFS;
+	if(ubWorld) {
+		static UBYTE isGradients;
+		if(!isGradients) {
+			isGradients = 1;
+			world2Gradients();
+		}
+		if(!s_pStripMem) s_pStripMem = memAllocChipClear(3 * STRIP_PLANE_BYTES);
+		if(agkLoadFile("world2.bin.pk", pArena, ARENA_BYTES) != WORLD2_BYTES) agkPrint("AGK ERR world2 art missing\n");
+		s_pCloudsBm = &s_sW2Clouds;
+		s_pFarBm = &s_sW2Far;
+		s_wStripFirst = -100;   // (a jump: the span drawn again)
+	}
+	else {
+		if(s_pStripMem) memFree(s_pStripMem, 3 * STRIP_PLANE_BYTES);
+		s_pStripMem = 0;
+		if(agkLoadFile("world1.bin.pk", pArena, ARENA_BYTES) != WORLD1_BANDS_BYTES) agkPrint("AGK ERR world1 art missing\n");
+		s_pCloudsBm = s_pW1CloudsBm;
+		s_pFarBm = s_pMountains;
+	}
+	for(UBYTE p = 0; p < 3; ++p) s_sStrip.Planes[p] = s_pStripMem ? s_pStripMem + p * STRIP_PLANE_BYTES + 2 : 0;
+	s_ubWorld = ubWorld;
+	s_ubRasterOff = 2;   // (counted down at the start of each picture: on again when both lists are this world's)
+	s_pListMission[0] = s_pListMission[1] = 0xFF;   // both game lists written again
+	agkState("world", ubWorld + 1);
+	agkState("mission", ubWorld * MISSION_COUNT + s_sGame.mission + 1);
+	agkEnd();
+	agkPrint(ubWorld ? "AGK world 2 loaded\n" : "AGK world 1 loaded\n");
+	agkPerfSkip();
+}
+
+// At startup: world 2's bitmaps in the arena (blank until worldLoad)
+__attribute__((noinline, optimize("Os"))) static void world2Create(void) {
+	UBYTE *pArena = s_pDiskArt + ARENA_OFFS;
+	const struct { tBitMap *pBm; ULONG ulOffs; UWORD uwW, uwH; } pBands[3] = {
+		{&s_sW2Clouds, WORLD2_CLOUDS_OFFS, ART_W2_CLOUDS_BITMAP_W, ART_W2_CLOUDS_H},
+		{&s_sW2Far, WORLD2_FAR_OFFS, ART_W2_FAR_BITMAP_W, ART_W2_FAR_H},
+		{&s_sW2Sea, WORLD2_SEA_OFFS, ART_W2_SEA_BITMAP_W, ART_W2_SEA_H},
+	};
+	for(UBYTE b = 0; b < 3; ++b) {
+		tBitMap *pBm = pBands[b].pBm;
+		pBm->BytesPerRow = (UWORD)(pBands[b].uwW / 8 * 3);
+		pBm->Rows = pBands[b].uwH;
+		pBm->Flags = BMF_INTERLEAVED;
+		pBm->Depth = 3;
+		for(UBYTE p = 0; p < 3; ++p) pBm->Planes[p] = (void *)(pArena + pBands[b].ulOffs + p * (pBands[b].uwW / 8));
+	}
+	s_pW2Tiles = pArena + WORLD2_TILES_OFFS;
+	s_pW2Map = pArena + WORLD2_MAP_OFFS;
+	s_sStrip.BytesPerRow = STRIP_RB;
+	s_sStrip.Rows = STRIP_ROWS;
+	s_sStrip.Depth = 3;
+}
+
+// World 2's sky and sea gradients per mission (OCS line-dithered; AGA 24 bits from
+// STYLE-world2's own 24-bit ends, split into the high and low nibbles' words): at its
+// first load, not at boot (the boot's time to the first picture is tested on AROS)
+__attribute__((noinline, optimize("Os"))) static void world2Gradients(void) {
+	for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
+		logicGradFill(g_pW2SkyTop[m], g_pW2SkyH[m], FLOOR_Y - PLAY_TOP, s_pW2Sky[m]);
+		logicGradFill(g_pW2SkyH[m], g_pW2SeaC[m], SEA_LINES, s_pW2SeaBg[m]);
+		for(UBYTE y = 0; s_isAga && y < FLOOR_Y - PLAY_TOP; ++y) {
+			ULONG c = logicGrad24(g_pW2SkyTop24[m], g_pW2SkyH24[m], y, FLOOR_Y - PLAY_TOP);
+			s_pW2Sky[m][y] = (UWORD)(((c >> 12) & 0xF00) | ((c >> 8) & 0x0F0) | ((c >> 4) & 0x00F));
+			s_pW2SkyLo[m][y] = (UWORD)(((c >> 8) & 0xF00) | ((c >> 4) & 0x0F0) | (c & 0x00F));
+		}
+		for(UBYTE j = 0; s_isAga && j < SEA_LINES; ++j) {
+			ULONG c = logicGrad24(g_pW2SkyH24[m], g_pW2SeaC24[m], j, SEA_LINES);
+			s_pW2SeaBg[m][j] = (UWORD)(((c >> 12) & 0xF00) | ((c >> 8) & 0x0F0) | ((c >> 4) & 0x00F));
+			s_pW2SeaBgLo[m][j] = (UWORD)(((c >> 8) & 0xF00) | ((c >> 4) & 0x0F0) | (c & 0x00F));
+		}
+	}
 }
 
 __attribute__((noinline)) static void chopperUpdate(UBYTE ubBfr) {
@@ -2240,9 +2664,11 @@ __attribute__((noinline)) static void skyUpdate(UBYTE ubBfr) {
 	static WORD s_pShownKey[2] = {-1, -1};       // what each buffer's list holds (cam / 16, mission)
 	const tGame *g = &s_sGame;
 	UWORD uwX0 = (UWORD)(s_pView->ubPosX - 1), uwY0 = s_pView->ubPosY;
-	UBYTE isStars = logicSkyDotsAreStars(g->mission);
+	// (the world on screen: world 2's wisps by day, never stars)
+	UBYTE isW2 = s_ubWorld && g->state != GS_TITLE;
+	UBYTE isStars = !isW2 && logicSkyDotsAreStars(g->mission);
 	UWORD *pDots = s_pDotList[ubBfr][isStars];
-	const UWORD *pPal = g_pMissionSkyDotPal[g->mission];
+	const UWORD *pPal = isW2 ? g_pW2SkyDotPal[g->mission] : g_pMissionSkyDotPal[g->mission];
 	UWORD uwColor31 = isStars ? logicStarTwinkle(g) : pPal[2];   // (twinkles)
 	if(s_isAga) {
 		// colours 29-31 from the copper: a CPU write landing between a sky
@@ -2254,7 +2680,7 @@ __attribute__((noinline)) static void skyUpdate(UBYTE ubBfr) {
 		pCl[i + 2].ulCode = ((ULONG)(REG_COLOR00 + 2 * 31) << 16) | uwColor31;
 	}
 	else g_pCustom->color[31] = uwColor31;
-	WORD wKey = (WORD)(((g->cam >> 4) << 2) | g->mission);
+	WORD wKey = (WORD)(((g->cam >> 4) << 3) | (isW2 << 2) | g->mission);
 	if(wKey == s_pShownKey[ubBfr]) return;      // the dots move 1 px per 16 px of camera
 	s_pShownKey[ubBfr] = wKey;
 	for(UBYTE i = 0; i < SKYDOT_COUNT; ++i) {
@@ -2566,6 +2992,8 @@ __attribute__((noinline, optimize("Os"))) static void diskArtCreate(void) {
 	s_pTitleMtn = bandAt(2, DISK_ART_TITLEMTN_OFFS, ART_TITLE_MTN_BITMAP_W, ART_TITLE_MTN_H);
 	s_pHills = bandAt(3, DISK_ART_HILLS_OFFS, ART_HILLS_BITMAP_W, ART_HILLS_H);
 	s_pGround = bandAt(4, DISK_ART_GROUND_OFFS, ART_GROUND_BITMAP_W, ART_GROUND_H);
+	s_pFarBm = s_pMountains;   // (world 1's: worldLoad switches it)
+	s_pW1CloudsBm = s_pCloudsBm;
 }
 
 // The plain's floor (SPEC 8): its art, the hills' play view (from their row 2),
@@ -2584,7 +3012,7 @@ __attribute__((noinline, optimize("Os"))) static void floorCreate(void) {
 	}
 }
 
-void genericCreate(void) {
+__attribute__((optimize("Os"))) void genericCreate(void) {   // (startup: small beats fast, AROS loads ~3 frames a KB)
 	agkDebugInit();
 	agkPrint("AGK boot rotor-rescue\n");
 	s_isAga = agaDetect();
@@ -2599,12 +3027,13 @@ void genericCreate(void) {
 	joyOpen();
 
 	diskArtCreate();   // the bands and the chopper's frames: blank until diskArtLoad
+	world2Create();    // world 2's bitmaps in the same block's band region, its gradients
 	// The sky per mission and line: OCS line-dithered (a MOVE on most lines
 	// where the sky shows, down to the plain: the list grows by the changes
 	// beyond the plain gradient's, which COP_RAW_COUNT has room for), the
 	// A1200's 24-bit below
 	_Static_assert(SKY_END - PLAY_TOP == SKY_LINES, "the sky table is logic.c's");
-	WORD wSkyMoves = 0;
+	WORD pSkyMoves[WORLD_COUNT] = {0, 0};
 	for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
 		logicSkyFillDither(m, s_pSky[m]);
 		WORD wN = 0;
@@ -2616,12 +3045,23 @@ void genericCreate(void) {
 				uwPrev = uwColor;
 			}
 		}
-		if(wN > wSkyMoves) wSkyMoves = wN;
+		if(wN > pSkyMoves[0]) pSkyMoves[0] = wN;
 	}
+	pSkyMoves[1] = FLOOR_Y - PLAY_TOP;   // (world 2: a MOVE every sky line, one layout for its missions)
 	// (the rest of the list takes ~210 of COP_RAW_COUNT; chip RAM is tight on
-	// Kickstart 3.1, so no more slack than that)
-	if(!s_isAga) s_uwCopCount = (UWORD)(COP_RAW_COUNT - 120 + 2 * wSkyMoves + FLOOR_COP_OCS);   // (a WAIT and a MOVE each)
-	else s_ubFloorStride = 7;
+	// Kickstart 3.1, so no more slack than that.) Sized per world from its layout,
+	// the lists hold the bigger: world 2 has the sea's 9 more lines a block each
+	// and the island palette (7 MOVEs at line 207), not the hills' band (a WAIT,
+	// 8 MOVEs); its strip's switch takes the ground band's place
+	if(!s_isAga) {
+		UWORD uwW1 = (UWORD)(COP_RAW_COUNT - 120 + 2 * pSkyMoves[0] + FLOOR_COP_OCS);   // (a WAIT and a MOVE each)
+		UWORD uwW2 = (UWORD)(COP_RAW_COUNT - 120 + 2 * pSkyMoves[1] + W2_COP_OCS);
+		s_uwCopCount = uwW1 > uwW2 ? uwW1 : uwW2;
+	}
+	else {
+		s_ubFloorStride = 7;
+		s_uwCopCount = (UWORD)(COP_RAW_COUNT_AGA + W2_COP_AGA_MORE);
+	}
 
 	s_pView = viewCreate(0,
 		TAG_VIEW_GLOBAL_PALETTE, 1,
@@ -2820,6 +3260,15 @@ __attribute__((noinline, optimize("Os"))) static void bootReady(void) {
 void genericProcess(void) {
 	agkPerfBegin();
 	s_ulFrameVbl = timerGet();
+	// A world's art, at its mission card (and world 1's back for the title): in the
+	// vertical blank, first thing, so the bitplanes are off before a line shows
+	if(s_ubRasterOff && !--s_ubRasterOff) systemSetDmaMask(DMAF_RASTER | DMAF_SPRITE, 1);
+	if(s_sGame.world != s_ubWorld && !s_isSplash && !s_isArtPending) {
+#ifdef W2_COP_PROBE
+		s_ubFloorStride = (UBYTE)((s_isAga ? 7 : 4) + (s_sGame.world ? 1 : 0));
+#endif
+		worldLoad(s_sGame.world);
+	}
 	// the weather first, in the vertical blank (last frame's positions: a frame
 	// behind the ground, unseen in rain and dust)
 	if(!s_isSplash) weatherUpdate();
@@ -2911,7 +3360,7 @@ void genericProcess(void) {
 	hudDraw(ubBfr);
 
 	agkBlitqFinish();
-	if(s_sGame.state == GS_INTRO && !s_pRouteLit[ubBfr]) routeShow(ubBfr);
+	if(s_sGame.state == GS_INTRO && !s_pRouteLit[ubBfr] && !s_sGame.world) routeShow(ubBfr);
 	else msgUpdate(ubBfr);   // (not both in one picture)
 	msgCoverAll(ubBfr);
 	if(s_ubOverrun) {
@@ -2966,6 +3415,7 @@ void genericDestroy(void) {
 	skyDestroy();
 	weatherDestroy();
 	chopperDestroy();
+	if(s_pStripMem) memFree(s_pStripMem, 3 * STRIP_PLANE_BYTES);
 	memFree(s_pDiskArt, DISK_ART_BYTES);   // (the bands, the BOBs and the chopper's frames)
 	for(UBYTE b = 0; b < 2; ++b) memFree(s_pTitleList[b], s_uwTitleCopCount * sizeof(tCopCmd));
 	if(s_pTitleLogo) memFree(s_pTitleLogo, s_ulTitleLogoBytes);
