@@ -1,0 +1,9 @@
+# World 2 sea palette, mission 5 Trade Winds (midday haze). PF2 pens 1-7, dark to light; 0 is transparent.
+0  0x000  transparent
+1  0x035  s1
+2  0x057  s2
+3  0x17A  s3
+4  0x3AC  s4
+5  0x5BE  s5
+6  0x9EF  s6
+7  0xFFF  s7

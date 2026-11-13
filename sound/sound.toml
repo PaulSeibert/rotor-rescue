@@ -102,11 +102,14 @@ priority = 3
 [music.theme]
 source = "theme.mml"
 volume = 50
+disk = true
 
 [music.fanfare]
 source = "fanfare.mml"
 volume = 52
+disk = true
 
 [music.gameover]
 source = "gameover.mml"
 volume = 50
+disk = true

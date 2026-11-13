@@ -27,6 +27,7 @@ wait 60
 press down 70
 wait-serial "lives=0" 2000
 wait-serial "state=5" 300
+expect-serial "AGK music gameover"   # (loaded at boot, plays here with no load pause)
 wait 120
 press fire 1
 wait-serial "state=8" 10

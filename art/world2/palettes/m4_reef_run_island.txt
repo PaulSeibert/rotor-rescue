@@ -1,0 +1,9 @@
+# World 2 island palette, mission 4 Reef Run (morning). PF2 pens 1-7, dark to light; 0 is transparent.
+0  0x000  transparent
+1  0x023  i1
+2  0x142  i2
+3  0x4A3  i3
+4  0x975  i4
+5  0xED9  i5
+6  0x8DE  i6
+7  0xFFF  i7

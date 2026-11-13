@@ -39,7 +39,9 @@
 #include <ace/managers/system.h>
 #include <ace/managers/timer.h>
 #include <ace/utils/custom.h>
+#include <ace/utils/disk_file.h>
 #include <ace/utils/extview.h>
+#include <ace/utils/file.h>
 #include <hardware/dmabits.h>
 #include <stddef.h>
 #include <agk/asm.h>
@@ -178,6 +180,7 @@ static tCopSlots s_sCloudSlots[2], s_sMtnSlots[2][2], s_sHillSlots[2][2], s_sGnd
 static tBitMap *s_pCloudsBm;        // the far clouds band (PF2, camera / 8)
 static UBYTE *s_pTitleLogo;         // chip RAM: the logo (from the floppy)
 static UBYTE s_isTitlePending, s_isTitleLogo;   // to load; loaded
+static UBYTE s_ubSongsPending;      // songs on the floppy still to load (songsLoad), one a frame
 static UBYTE s_isArtPending;        // the art on the floppy to load (diskArtLoad)
 static UBYTE *s_pDiskArt;           // (chip) that art: disk/diskart.bin (diskArtCreate)
 static UBYTE s_isTitleLogo8;        // A1200: the logo loaded is the 8-plane one
@@ -572,6 +575,9 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 static void musicFor(UBYTE ubState);
 static void routeCreate(void);
 static void diskArtLoad(void);
+static void songsLoad(void);
+static void songStart(UBYTE ubSong);
+static void songsFree(void);
 
 // The title logo from the floppy (10 KB packed; ACE switches the OS on for the
 // file), the title's copper lists, then the music (the OS stops it while it
@@ -598,8 +604,112 @@ static void titleLoad(void) {
 		copperWriteList(s_pTitleList[b], b, s_sGame.mission, 1);
 		s_pTitleListMission[b] = s_sGame.mission;
 	}
-	musicFor(s_sGame.state);
 	agkPerfSkip();
+}
+
+// The songs from the floppy (sound/sound.toml disk = true: 33 KB, 3 files), one
+// a frame because each load is a few seconds of OS time on a slow loader (the
+// harness gives a frame 250). In the splash's black start, after the title:
+// the fanfare and the game over first, the theme last, which then starts. Music
+// plays nowhere else but the title, the cards and the cleared / over screens,
+// so nothing is loaded later (a load stops the music and freezes the picture).
+//
+// Our own loader, not soundMusicLoad: that puts the whole file in chip RAM, and
+// a song's patterns (10 KB of the 33) are read by the CPU, so here only the
+// samples go to chip and the patterns to fast RAM (as in the program before).
+// Order, names and volumes are sound.toml's (theme, fanfare, gameover).
+#define SONG_COUNT 3
+static const char *const s_pSongFile[SONG_COUNT] = {"m_theme.mod.pk", "m_fanfare.mod.pk", "m_gameover.mod.pk"};
+static const char *const s_pSongName[SONG_COUNT] = {"AGK music theme\n", "AGK music fanfare\n", "AGK music gameover\n"};
+static const UBYTE s_pSongVolume[SONG_COUNT] = {50, 52, 50};
+_Static_assert(SOUND_MUSIC_COUNT == SONG_COUNT && SOUND_MUSIC_THEME == 0 && SOUND_MUSIC_FANFARE == 1 && SOUND_MUSIC_GAMEOVER == 2,
+	"sound.toml's song order");
+static tPtplayerMod s_pSongMod[SONG_COUNT];
+static UBYTE *s_pSongPat[SONG_COUNT], *s_pSongSmp[SONG_COUNT];   // fast (patterns), chip (samples)
+static ULONG s_pSongPatBytes[SONG_COUNT], s_pSongSmpBytes[SONG_COUNT];
+
+static void songLoad(UBYTE ubSong) {
+	tPtplayerMod *pMod = &s_pSongMod[ubSong];
+	UBYTE *pFile = 0;
+	ULONG ulFile = 0;
+	ptplayerEnableMusic(0);   // (AmigaDOS takes the interrupts for the read)
+	// the packed file is read, then unpacked into a scratch block (any RAM)
+	tFile *pF = diskFileOpen(s_pSongFile[ubSong], DISK_FILE_MODE_READ, 1);
+	if(pF) {
+		LONG lPacked = fileGetSize(pF);
+		UBYTE *pPacked = lPacked >= 8 ? memAlloc((ULONG)lPacked, MEMF_ANY) : 0;
+		ULONG ulRead = pPacked ? fileReadBytes(pF, pPacked, (ULONG)lPacked) : 0;
+		fileClose(pF);
+		if(pPacked) {
+			ulFile = agkUnpackedSize(pPacked);
+			if(ulRead == (ULONG)lPacked && ulFile > 1084) {
+				pFile = memAlloc(ulFile, MEMF_ANY);
+				if(pFile) agkUnpack(pPacked, pFile);
+			}
+			memFree(pPacked, (ULONG)lPacked);
+		}
+	}
+	if(!pFile) {
+		agkPrint("AGK song missing\n");
+		return;
+	}
+	for(UWORD b = 0; b < 1084; ++b) ((UBYTE*)pMod)[b] = pFile[b];   // (the file's header is the player's)
+	ULONG ulSmp = 0;
+	for(UBYTE i = 0; i < PTPLAYER_MOD_SAMPLE_COUNT; ++i) ulSmp += (ULONG)pMod->pSampleHeaders[i].uwLength * 2;
+	if(1084 + ulSmp <= ulFile) {
+		ULONG ulPat = ulFile - 1084 - ulSmp;
+		UBYTE *pPat = memAlloc(ulPat ? ulPat : 2, MEMF_ANY);
+		UBYTE *pSmp = ulSmp ? memAllocChip(ulSmp) : 0;
+		if(pPat && (pSmp || !ulSmp)) {
+			for(ULONG i = 0; i < ulPat; ++i) pPat[i] = pFile[1084 + i];
+			for(ULONG i = 0; i < ulSmp; ++i) pSmp[i] = pFile[1084 + ulPat + i];
+			pMod->pPatterns = pPat;
+			pMod->ulPatternsSize = ulPat;
+			pMod->isOwningSamples = 0;
+			UBYTE *pS = pSmp;
+			for(UBYTE i = 0; i < PTPLAYER_MOD_SAMPLE_COUNT; ++i) {
+				UWORD uwWords = pMod->pSampleHeaders[i].uwLength;
+				pMod->pSampleStarts[i] = uwWords ? (UWORD*)pS : 0;
+				pS += uwWords * 2;
+			}
+			s_pSongPat[ubSong] = pPat;
+			s_pSongPatBytes[ubSong] = ulPat ? ulPat : 2;
+			s_pSongSmp[ubSong] = pSmp;
+			s_pSongSmpBytes[ubSong] = ulSmp;
+			pPat = pSmp = 0;
+		}
+		if(pPat) memFree(pPat, ulPat ? ulPat : 2);
+		if(pSmp) memFree(pSmp, ulSmp);
+	}
+	memFree(pFile, ulFile);
+	if(!s_pSongPat[ubSong]) agkPrint("AGK song missing\n");
+}
+
+static void songsLoad(void) {
+	static const UBYTE s_pSongOrder[SONG_COUNT] = {SOUND_MUSIC_FANFARE, SOUND_MUSIC_GAMEOVER, SOUND_MUSIC_THEME};
+	songLoad(s_pSongOrder[SONG_COUNT - s_ubSongsPending]);
+	if(--s_ubSongsPending == 0) {
+		agkPrint("AGK songs loaded\n");
+		musicFor(s_sGame.state);
+	}
+	agkPerfSkip();
+}
+
+static void songStart(UBYTE ubSong) {
+	if(!s_pSongPat[ubSong]) return;   // (not on the floppy: no music)
+	ptplayerLoadMod(&s_pSongMod[ubSong], 0, 0);
+	ptplayerSetMasterVolume(s_pSongVolume[ubSong]);   // music only, not the effects
+	ptplayerConfigureSongRepeat(1, 0);
+	ptplayerEnableMusic(1);
+	agkPrint(s_pSongName[ubSong]);
+}
+
+static void songsFree(void) {
+	for(UBYTE i = 0; i < SONG_COUNT; ++i) {
+		if(s_pSongPat[i]) memFree(s_pSongPat[i], s_pSongPatBytes[i]);
+		if(s_pSongSmp[i]) memFree(s_pSongSmp[i], s_pSongSmpBytes[i]);
+		s_pSongPat[i] = s_pSongSmp[i] = 0;
+	}
 }
 
 // (no loop unswitching: the AGA branches would copy whole loops - code size
@@ -2331,6 +2441,7 @@ static void rotorDestroy(void) {
 // ---------------------------------------------------------------- sound ---
 
 static void musicFor(UBYTE ubState) {
+	if(s_ubSongsPending) return;   // (songsLoad starts the music once they're in)
 	UBYTE ubSong = 0xFF;
 	if(ubState == GS_TITLE || ubState == GS_INTRO || ubState == GS_SCORES || ubState == GS_ENTRY) ubSong = SOUND_MUSIC_THEME;
 	else if(ubState == GS_CLEAR || ubState == GS_VICTORY) ubSong = SOUND_MUSIC_FANFARE;
@@ -2339,7 +2450,7 @@ static void musicFor(UBYTE ubState) {
 	if(ubSong == s_ubSong) return;
 	s_ubSong = ubSong;
 	if(ubSong == 0xFF) soundMusicStop();
-	else soundMusicStart(ubSong);
+	else songStart(ubSong);
 }
 
 // (SPEC 9, rotor v3: logicSfxAllow keeps one effect from repeating inside its gap)
@@ -2526,9 +2637,11 @@ void genericCreate(void) {
 	// the music. Without it, now.
 	s_isTitlePending = 1;
 	s_isArtPending = 1;
+	s_ubSongsPending = 3;
 	if(!s_isSplash) {
 		diskArtLoad();
 		titleLoad();
+		while(s_ubSongsPending) songsLoad();
 	}
 
 	viewLoad(s_pView);
@@ -2692,11 +2805,13 @@ void genericProcess(void) {
 		// few seconds of OS time on AROS, and the harness gives a frame 250)
 		else if(s_isArtPending) diskArtLoad();
 		else if(s_isTitlePending) titleLoad();   // the splash is still black
+		else if(s_ubSongsPending) songsLoad();   // (a frame each)
 		else if(s_isRotorPending) rotorSetup();  // (a frame later)
 		return;
 	}
 	if(s_isArtPending) diskArtLoad();   // (not loaded during the splash: now)
 	if(s_isTitlePending) titleLoad();
+	else if(s_ubSongsPending) songsLoad();
 	if(s_isRotorPending) rotorSetup();
 	if(s_ubAfterSplash < 3 && ++s_ubAfterSplash == 2) {
 		// the game's copper list is showing now: its colours back, the logo freed
@@ -2787,6 +2902,7 @@ void genericDestroy(void) {
 	splashDestroy();
 	rotorDestroy();
 	soundDestroy();
+	songsFree();
 	systemSetDmaBit(DMAB_SPRITE, 0);
 	spriteManagerDestroy();
 	skyDestroy();

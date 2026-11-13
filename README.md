@@ -232,7 +232,9 @@ cp build/demo.mp4 demo/rotor-rescue.mp4
 The sprites and parallax bands are text art in `art/*.txt` (the Desert Palms
 art pilot's approved set; `art/tools/draw.py` is the old drawing code, kept for
 reference, and only writes the palettes), and all the music samples are made by
-`sound/tools/make_samples.py`. `art/tools/make_mountain_caps.py` points every
+`sound/tools/make_samples.py`. The three songs (`sound/*.mml`, compiled by `agk sound`) are floppy
+files (`sound/sound.toml`, `disk = true`: `m_theme.mod.pk` and two more), loaded during the splash
+by `songsLoad` in `src/main.c`, so they are not program data. `art/tools/make_mountain_caps.py` points every
 summit of `art/mountains.txt` (nothing touches the band's top edge) and
 `art/tools/make_title_mtn.py` cuts the title's mountain strip from it, fading
 into the haze at its foot. Also
