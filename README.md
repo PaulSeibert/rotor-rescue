@@ -242,7 +242,12 @@ into the haze at its foot. Also
 (`art/src/rotor_rescue_title_source.png`) into `disk/titlelogo.bin`
 (preview: `art/title_logo_amiga.png`), and `art/tools/make_title_logo8.py`
 the A1200's version into `disk/titlelogo8.bin` (preview:
-`art/title_logo8_amiga.png`).
+`art/title_logo8_amiga.png`). The chopper and the parallax bands are floppy
+files too, not program data: they are listed in `art/disk_art.toml`, and
+`art/tools/make_disk_art.py` converts them with agk's own converter into
+`disk/diskart.bin` and `src/disk_art.h` (previews in `build/art-disk/preview/`).
+Run it after editing `chopper.txt` or a band; `--check` says whether the
+committed files are stale.
 
 ## Credits
 

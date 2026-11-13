@@ -6,7 +6,7 @@
 # frame, line 197 35/24 - next to the mountains' 3/4 and the hills' 3/2, two
 # speeds no band has. The far strip (the mountains band's last rows, lines
 # 170-179) moves as one block at the mountains' 3/4: it doesn't shear.
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 press fire 2
 wait 125
 press up 80

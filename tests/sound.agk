@@ -1,5 +1,5 @@
 # The title theme plays; in the air the rotor chops and the cannon fires.
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 mark title
 wait 50
 mark title_end

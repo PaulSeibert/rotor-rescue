@@ -1,5 +1,5 @@
 # The title screen: the logo over the sky, the author's credit, the land, the HUD.
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 wait 60
 screenshot title
 expect-serial "AGK ready"

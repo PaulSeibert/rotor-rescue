@@ -1,6 +1,6 @@
 # A whole trip: fly to the nearest barracks, land, shoot it open, take 16
 # people aboard, fly home, land on the pad, they run into the hangar.
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 press fire 2
 wait 125
 press up 30

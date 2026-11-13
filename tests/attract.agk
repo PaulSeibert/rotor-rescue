@@ -2,7 +2,7 @@
 # a self-playing demo (DEMO where the skill shows; it starts with the preview
 # card) of the first trip: off to the nearest barracks, shoot it open, take 16
 # aboard. Fire ends the demo: back to the title, the score bar on the hi-score.
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 wait-serial "state=7" 700
 wait 130
 screenshot scores

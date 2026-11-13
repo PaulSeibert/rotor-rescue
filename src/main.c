@@ -48,6 +48,7 @@
 #include <agk/perf.h>
 #include <agk/text.h>
 #include "art.h"        // generated from art/ by agk (agk help-art)
+#include "disk_art.h"   // art/tools/make_disk_art.py: the art on the floppy
 #include "sound.h"      // generated from sound/ by agk (agk help-sound)
 #include "logic.h"
 #include "splash.h"
@@ -175,6 +176,8 @@ static tCopSlots s_sCloudSlots[2], s_sMtnSlots[2][2], s_sHillSlots[2][2], s_sGnd
 static tBitMap *s_pCloudsBm;        // the far clouds band (PF2, camera / 8)
 static UBYTE *s_pTitleLogo;         // chip RAM: the logo (from the floppy)
 static UBYTE s_isTitlePending, s_isTitleLogo;   // to load; loaded
+static UBYTE s_isArtPending;        // the art on the floppy to load (diskArtLoad)
+static UBYTE *s_pDiskArt;           // (chip) that art: disk/diskart.bin (diskArtCreate)
 static UBYTE s_isTitleLogo8;        // A1200: the logo loaded is the 8-plane one
 static UWORD s_uwCopCount = COP_RAW_COUNT, s_uwTitleCopCount = TITLE_COP_COUNT;   // (more on AGA)
 static ULONG s_ulTitleLogoBytes = TITLE_LOGO_BYTES;
@@ -554,6 +557,7 @@ static void cwTitleLogo(tAgkCopWriter *pW, UWORD y, const tBitMap *pFb) {
 static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE isTitle);
 static void musicFor(UBYTE ubState);
 static void routeCreate(void);
+static void diskArtLoad(void);
 
 // The title logo from the floppy (10 KB packed; ACE switches the OS on for the
 // file), the title's copper lists, then the music (the OS stops it while it
@@ -900,21 +904,39 @@ static void bobAdd(UBYTE ubBob, tBitMap *pBm, tBitMap *pMask, UBYTE ubW, UBYTE u
 	}
 }
 
-static void bobsCreate(void) {
-	bobAdd(BOB_HANGAR, artHangarCreate(), artHangarCreateMask(), ART_HANGAR_W, ART_HANGAR_H, ART_HANGAR_FRAMES);
-	bobAdd(BOB_FENCE, artFenceCreate(), artFenceCreateMask(), ART_FENCE_W, ART_FENCE_H, ART_FENCE_FRAMES);
-	bobAdd(BOB_BARRACKS, artBarracksCreate(), artBarracksCreateMask(), ART_BARRACKS_W, ART_BARRACKS_H, ART_BARRACKS_FRAMES);
-	bobAdd(BOB_TANK, artTankCreate(), artTankCreateMask(), ART_TANK_W, ART_TANK_H, ART_TANK_FRAMES);
-	bobAdd(BOB_HOSTAGE, artHostageCreate(), artHostageCreateMask(), ART_HOSTAGE_W, ART_HOSTAGE_H, ART_HOSTAGE_FRAMES);
-	bobAdd(BOB_JET, artJetCreate(), artJetCreateMask(), ART_JET_W, ART_JET_H, ART_JET_FRAMES);
-	bobAdd(BOB_MINE, artMineCreate(), artMineCreateMask(), ART_MINE_W, ART_MINE_H, ART_MINE_FRAMES);
-	bobAdd(BOB_SHOT, artShotCreate(), artShotCreateMask(), ART_SHOT_W, ART_SHOT_H, ART_SHOT_FRAMES);
-	bobAdd(BOB_BOMB, artBombCreate(), artBombCreateMask(), ART_BOMB_W, ART_BOMB_H, ART_BOMB_FRAMES);
-	bobAdd(BOB_SHELL, artShellCreate(), artShellCreateMask(), ART_SHELL_W, ART_SHELL_H, ART_SHELL_FRAMES);
-	bobAdd(BOB_BOOM, artBoomCreate(), artBoomCreateMask(), ART_BOOM_W, ART_BOOM_H, ART_BOOM_FRAMES);
-	bobAdd(BOB_FLAG, artFlagCreate(), artFlagCreateMask(), ART_FLAG_W, ART_FLAG_H, ART_FLAG_FRAMES);
-	bobAdd(BOB_SHADOW, artShadowCreate(), artShadowCreateMask(), ART_SHADOW_W, ART_SHADOW_H, ART_SHADOW_FRAMES);
-	bobAdd(BOB_SMOKE, artSmokeCreate(), artSmokeCreateMask(), ART_SMOKE_W, ART_SMOKE_H, ART_SMOKE_FRAMES);
+// A BOB's image and mask: bitmaps in the floppy art's block (diskArtCreate),
+// blank until diskArtLoad; the blit templates only need their addresses
+#define BOB_AT(B, N) bobAdd(B, bobBm(DISK_ART_##N##_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
+	bobBm(DISK_ART_##N##MASK_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
+	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)
+static tBitMap s_pBobBmStore[2 * BOB_TYPES];
+static UBYTE s_ubBobBms;
+
+static tBitMap *bobBm(ULONG ulOffs, UWORD uwW, UWORD uwRows) {
+	tBitMap *pBm = &s_pBobBmStore[s_ubBobBms++];
+	pBm->BytesPerRow = (UWORD)(uwW / 8 * 3);
+	pBm->Rows = uwRows;
+	pBm->Flags = BMF_INTERLEAVED;
+	pBm->Depth = 3;
+	for(UBYTE p = 0; p < 3; ++p) pBm->Planes[p] = (void *)(s_pDiskArt + ulOffs + p * (uwW / 8));
+	return pBm;
+}
+
+__attribute__((optimize("Os"))) static void bobsCreate(void) {
+	BOB_AT(BOB_HANGAR, HANGAR);
+	BOB_AT(BOB_FENCE, FENCE);
+	BOB_AT(BOB_BARRACKS, BARRACKS);
+	BOB_AT(BOB_TANK, TANK);
+	BOB_AT(BOB_HOSTAGE, HOSTAGE);
+	BOB_AT(BOB_JET, JET);
+	BOB_AT(BOB_MINE, MINE);
+	BOB_AT(BOB_SHOT, SHOT);
+	BOB_AT(BOB_BOMB, BOMB);
+	BOB_AT(BOB_SHELL, SHELL);
+	BOB_AT(BOB_BOOM, BOOM);
+	BOB_AT(BOB_FLAG, FLAG);
+	BOB_AT(BOB_SHADOW, SHADOW);
+	BOB_AT(BOB_SMOKE, SMOKE);
 	UBYTE t = 0;
 	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
 		s_pTplFirst[b] = t;
@@ -1585,16 +1607,47 @@ __attribute__((noinline)) static void routeClear(UBYTE ubBfr) {
 }
 
 // ---------------------------------------------------------------- chopper ---
-// Two sets of the chopper's sprite bitmaps, one per copper buffer: the back
-// set gets the new position (its control words) and the back copper list
-// points channels 0-3 at it.
+// Every frame's sprite rows are in one chip block from the floppy (the art's
+// block: frame, part, ART_CHOPPER_H rows of 2 words, no control words), loaded
+// during the splash. Sprite DMA reads small blocks: per copper buffer and rotor
+// phase the four parts one after another, each its control words, its rows
+// and two end words. The rotor phase alternates every 2 pictures, so each
+// buffer holds the pose in both phases (frames 2k and 2k + 1, next to each
+// other in the store as their blocks are next to each other): one blit, queued
+// with the BOBs, only when that buffer's pose changes, not every picture
+// (every picture cost 1% of a frame: the CPU is slow in the 6-plane display).
+// Per picture the back buffer's phase block gets the new position (its
+// control words) and the back copper list points channels 0-3 at it. Two
+// resident sets of every frame, as before, cost 22.5 KB of chip RAM; this is
+// 10.0 KB (the store, in the art's block) + 1.4 KB.
+#define CHOP_PART_BYTES ((ART_CHOPPER_H + 2) * 4)   // control words, rows, end words
+#define CHOP_DMA_BYTES (ART_CHOPPER_PARTS * CHOP_PART_BYTES)
+#define CHOP_FRAME_BYTES (ART_CHOPPER_PARTS * ART_CHOPPER_H * 4)
+_Static_assert(DISK_ART_CHOPPER_BYTES == ART_CHOPPER_FRAMES * CHOP_FRAME_BYTES, "diskart.bin's chopper layout");
+_Static_assert(!(ART_CHOPPER_MIRROR & 1), "a pose's two rotor phases are frames 2k and 2k + 1");
 
-static tBitMap *s_pChopFrames[2][ART_CHOPPER_FRAMES][ART_CHOPPER_PARTS];
+static UBYTE *s_pChopStore;       // (chip) every frame: in the floppy art's block (diskArtCreate)
+static UBYTE *s_pChopDma[2];      // (chip) what sprite DMA reads, per copper buffer: phase 0, phase 1
+static UBYTE s_pChopDmaPose[2];   // the pose (frame / 2) each buffer holds (0xFF: none yet)
 
 static void chopperCreate(void) {
-	for(UBYTE b = 0; b < 2; ++b)
-		for(UBYTE f = 0; f < ART_CHOPPER_FRAMES; ++f)
-			for(UBYTE p = 0; p < ART_CHOPPER_PARTS; ++p) s_pChopFrames[b][f][p] = artChopperCreate(f, p);
+	for(UBYTE b = 0; b < 2; ++b) {
+		s_pChopDma[b] = memAllocChipClear(2 * CHOP_DMA_BYTES);
+		s_pChopDmaPose[b] = 0xFF;
+	}
+}
+
+static void chopperDestroy(void) {
+	for(UBYTE b = 0; b < 2; ++b) memFree(s_pChopDma[b], 2 * CHOP_DMA_BYTES);
+}
+
+// The art on the floppy into its chip block (art/disk_art.toml, diskArtCreate):
+// one file, the OS back for it (agkLoadFile). Without it (a hard-disk copy
+// that lacks the file) the bands and the chopper stay blank.
+__attribute__((noinline, optimize("Os"))) static void diskArtLoad(void) {
+	s_isArtPending = 0;
+	if(agkLoadFile("diskart.bin.pk", s_pDiskArt, DISK_ART_BYTES) != DISK_ART_BYTES) agkPrint("AGK art missing\n");
+	agkPerfSkip();
 }
 
 __attribute__((noinline)) static void chopperUpdate(UBYTE ubBfr) {
@@ -1606,14 +1659,33 @@ __attribute__((noinline)) static void chopperUpdate(UBYTE ubBfr) {
 	if(!logicChopperVisible(g) || wX < -32 || wX > SCREEN_W) wY = -64;
 	UWORD uwVStart = (UWORD)(s_pView->ubPosY + wY), uwVStop = (UWORD)(uwVStart + ART_CHOPPER_H);
 	tCopCmd *pList = s_pView->pCopList->pBackBfr->pList;
+	UBYTE ubPair = (UBYTE)(ubFrame >> 1);
+	if(s_pChopDmaPose[ubBfr] != ubPair) {
+		// the pose's two frames' parts' rows (contiguous in the store) into the
+		// eight parts' row areas (each between its control words and its end
+		// words): A -> D, one blit of 8 x ART_CHOPPER_H * 2 words
+		s_pChopDmaPose[ubBfr] = ubPair;
+		tAgkBlit *pB = agkBlitqSlot();
+		pB->uwCon0 = USEA | USED | MINTERM_A;
+		pB->uwCon1 = 0;
+		pB->uwAlwm = 0xFFFF;
+		pB->pA = s_pChopStore + (UWORD)(ubPair * (2 * CHOP_FRAME_BYTES));
+		pB->pB = 0;
+		pB->pCD = s_pChopDma[ubBfr] + 4;
+		pB->wSrcMod = 0;
+		pB->wDstMod = CHOP_PART_BYTES - ART_CHOPPER_H * 4;
+		pB->uwSize = (UWORD)(((2 * ART_CHOPPER_PARTS) << 6) | (ART_CHOPPER_H * 2));
+		agkBlitqPush();
+	}
+	UBYTE *pDma = s_pChopDma[ubBfr] + ((ubFrame & 1) ? CHOP_DMA_BYTES : 0);
 	for(UBYTE p = 0; p < ART_CHOPPER_PARTS; ++p) {
-		tBitMap *pBm = s_pChopFrames[ubBfr][ubFrame][p];
+		UBYTE *pPart = pDma + p * CHOP_PART_BYTES;
 		UWORD uwHStart = (UWORD)(s_pView->ubPosX - 1 + wX + (p >> 1) * 16);
-		UWORD *pHead = (UWORD *)pBm->Planes[0];
+		UWORD *pHead = (UWORD *)pPart;
 		pHead[0] = (UWORD)((uwVStart << 8) | ((uwHStart >> 1) & 0xFF));
 		pHead[1] = (UWORD)((uwVStop << 8) | ((p & 1) << 7) | (((uwVStart >> 8) & 1) << 2) |
 			(((uwVStop >> 8) & 1) << 1) | (uwHStart & 1));
-		ULONG ulPtr = (ULONG)pBm->Planes[0];
+		ULONG ulPtr = (ULONG)pPart;
 		copSetMoveVal(&pList[COP_SPRITES_POS + 2 * (ART_CHOPPER_CHANNEL + p)].sMove, ulPtr >> 16);
 		copSetMoveVal(&pList[COP_SPRITES_POS + 2 * (ART_CHOPPER_CHANNEL + p) + 1].sMove, ulPtr & 0xFFFF);
 	}
@@ -1972,6 +2044,32 @@ static void readInput(tInput *pIn) {
 	pIn->fire2 = !(g_pCustom->potinp & (1 << 14)) || keyCheck(KEY_X);
 }
 
+// The art on the floppy (art/disk_art.toml, disk/diskart.bin): one chip block,
+// blank until diskArtLoad fills it, with the chopper's frame store and the
+// parallax bands' bitmaps in it (3 planes, interleaved: what agk's
+// artNAMECreate() made, here pointing into the block)
+static tBitMap s_pBandBm[5];
+
+static tBitMap *bandAt(UBYTE ubBand, ULONG ulOffs, UWORD uwW, UWORD uwH) {
+	tBitMap *pBm = &s_pBandBm[ubBand];
+	pBm->BytesPerRow = (UWORD)(uwW / 8 * 3);
+	pBm->Rows = uwH;
+	pBm->Flags = BMF_INTERLEAVED;
+	pBm->Depth = 3;
+	for(UBYTE p = 0; p < 3; ++p) pBm->Planes[p] = (void *)(s_pDiskArt + ulOffs + p * (uwW / 8));
+	return pBm;
+}
+
+__attribute__((noinline, optimize("Os"))) static void diskArtCreate(void) {
+	s_pDiskArt = memAllocChipClear(DISK_ART_BYTES);
+	s_pChopStore = s_pDiskArt + DISK_ART_CHOPPER_OFFS;
+	s_pCloudsBm = bandAt(0, DISK_ART_CLOUDS_OFFS, ART_CLOUDS_BITMAP_W, ART_CLOUDS_H);
+	s_pMountains = bandAt(1, DISK_ART_MOUNTAINS_OFFS, ART_MOUNTAINS_BITMAP_W, ART_MOUNTAINS_H);
+	s_pTitleMtn = bandAt(2, DISK_ART_TITLEMTN_OFFS, ART_TITLE_MTN_BITMAP_W, ART_TITLE_MTN_H);
+	s_pHills = bandAt(3, DISK_ART_HILLS_OFFS, ART_HILLS_BITMAP_W, ART_HILLS_H);
+	s_pGround = bandAt(4, DISK_ART_GROUND_OFFS, ART_GROUND_BITMAP_W, ART_GROUND_H);
+}
+
 // The plain's floor (SPEC 8): its art, the hills' play view (from their row 2),
 // the ground under it per mission and line (AGA: 24 bits, split as the sky's)
 __attribute__((noinline, optimize("Os"))) static void floorCreate(void) {
@@ -2002,8 +2100,7 @@ void genericCreate(void) {
 	keyCreate();
 	joyOpen();
 
-	s_pMountains = artMountainsCreate();   // (first: the copper list's length depends on it)
-	s_pTitleMtn = artTitleMtnCreate();
+	diskArtCreate();   // the bands and the chopper's frames: blank until diskArtLoad
 	// The sky per mission and line: OCS line-dithered (a MOVE on most lines
 	// where the sky shows, down to the plain: the list grows by the changes
 	// beyond the plain gradient's, which COP_RAW_COUNT has room for), the
@@ -2043,10 +2140,7 @@ void genericCreate(void) {
 	s_pTitleFixed = (const UWORD *)s_pTitleLogo;
 	s_pTitleRows = (const UWORD (*)[TITLE_LOGO_ROW_REGS])(s_pTitleLogo + TITLE_LOGO_ROWS_OFFS);
 	for(UBYTE b = 0; b < 2; ++b) s_pTitleList[b] = memAllocChip(s_uwTitleCopCount * sizeof(tCopCmd));
-	s_pCloudsBm = artCloudsCreate();
-	s_pHills = artHillsCreate();
 	floorCreate();
-	s_pGround = artGroundCreate();
 	bobsCreate();
 	hudInit();
 	hudPanelInit();
@@ -2090,7 +2184,11 @@ void genericCreate(void) {
 	// With the splash: the title logo once it's on screen (genericProcess), then
 	// the music. Without it, now.
 	s_isTitlePending = 1;
-	if(!s_isSplash) titleLoad();
+	s_isArtPending = 1;
+	if(!s_isSplash) {
+		diskArtLoad();
+		titleLoad();
+	}
 
 	viewLoad(s_pView);
 	systemUnuse();
@@ -2203,6 +2301,22 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	}
 }
 
+// The first picture is up: how long the boot took, then "AGK ready". CIA-A's
+// TOD counter counts vertical syncs, but not through the ROM's start-up, so
+// bootvbl trails the harness's frame count (its boot window is 3000 frames
+// from power-on) by a fixed amount per ROM: AROS 102, Kickstart 3.1 138,
+// Kickstart 1.3 333 (measured on vAmiga, 2026-11-12). tests/memory.agk keeps
+// the AROS boot's margin (it loads the program at ~10 frames a KB).
+__attribute__((noinline, optimize("Os"))) static void bootReady(void) {
+	volatile tCia *pCia = g_pCia[CIA_A];
+	ULONG ulHi = pCia->todhi;   // (reading the high byte latches the count)
+	ULONG ulMid = pCia->todmid;
+	ULONG ulLo = pCia->todlow;
+	agkState("bootvbl", (LONG)((ulHi << 16) | (ulMid << 8) | ulLo));
+	agkEnd();
+	agkReady();
+}
+
 void genericProcess(void) {
 	agkPerfBegin();
 	s_ulFrameVbl = timerGet();
@@ -2229,13 +2343,19 @@ void genericProcess(void) {
 		while(timerGet() - s_ulFrameVbl < 1) continue;
 		if(!s_isReady) {
 			s_isReady = 1;
-			agkReady();
+			bootReady();
 		}
+		// the art on the floppy: after the first picture ("AGK ready" goes out
+		// at the end of its frame: the boot window), before the title and its
+		// music (a load stops the music), in a frame of its own (each load is a
+		// few seconds of OS time on AROS, and the harness gives a frame 250)
+		else if(s_isArtPending) diskArtLoad();
 		else if(s_isTitlePending) titleLoad();   // the splash is still black
 		else if(s_isRotorPending) rotorSetup();  // (a frame later)
 		return;
 	}
-	if(s_isTitlePending) titleLoad();   // (not loaded during the splash: now)
+	if(s_isArtPending) diskArtLoad();   // (not loaded during the splash: now)
+	if(s_isTitlePending) titleLoad();
 	if(s_isRotorPending) rotorSetup();
 	if(s_ubAfterSplash < 3 && ++s_ubAfterSplash == 2) {
 		// the game's copper list is showing now: its colours back, the logo freed
@@ -2287,7 +2407,7 @@ void genericProcess(void) {
 		if(s_uwCopUsed > s_uwCopCount || s_uwTitleCopUsed > s_uwTitleCopCount) agkPrint("AGK ERR copper list overflow\n");
 		if(!s_isReady) {
 			s_isReady = 1;
-			agkReady();
+			bootReady();
 		}
 	}
 	if(s_sGame.frame == SYNC_FRAME) agkPrint("AGK t0\n");
@@ -2304,18 +2424,8 @@ void genericDestroy(void) {
 	spriteManagerDestroy();
 	skyDestroy();
 	weatherDestroy();
-	for(UBYTE b = 0; b < 2; ++b)
-		for(UBYTE f = 0; f < ART_CHOPPER_FRAMES; ++f)
-			for(UBYTE p = 0; p < ART_CHOPPER_PARTS; ++p) bitmapDestroy(s_pChopFrames[b][f][p]);
-	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
-		bitmapDestroy(s_pBobBm[b]);
-		bitmapDestroy(s_pBobMask[b]);
-	}
-	bitmapDestroy(s_pGround);
-	bitmapDestroy(s_pHills);
-	bitmapDestroy(s_pMountains);
-	bitmapDestroy(s_pTitleMtn);
-	bitmapDestroy(s_pCloudsBm);
+	chopperDestroy();
+	memFree(s_pDiskArt, DISK_ART_BYTES);   // (the bands, the BOBs and the chopper's frames)
 	for(UBYTE b = 0; b < 2; ++b) memFree(s_pTitleList[b], s_uwTitleCopCount * sizeof(tCopCmd));
 	if(s_pTitleLogo) memFree(s_pTitleLogo, s_ulTitleLogoBytes);
 	if(s_pSkyLo) memFree(s_pSkyLo, MISSION_COUNT * (SKY_END - PLAY_TOP) * sizeof(UWORD));

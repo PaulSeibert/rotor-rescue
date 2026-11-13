@@ -1,6 +1,6 @@
 # Turning: the second button (or X) cycles left -> front -> right; the stick held
 # down 20 frames and then fire faces front to bomb (a volley never does: tests/lean.agk).
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 press fire 2
 wait 125
 press up 40
