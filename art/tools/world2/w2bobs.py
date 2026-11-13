@@ -134,11 +134,13 @@ def barrel(c, x0, y0, ang_deg, length, face=-1):
 
 # ----------------------------------------------------------------------------------------- patrol boat
 def patrol(wake=0, flip=False):
+    """bow at the left (flip: right). Heading reads from three things: the deck sheers up toward the bow (raised bow and bow gun),
+    the masthead pennant streams toward the stern, and the wake trails only from the stern."""
     c = C(46, 18, flip)
     ox = 3
-    c.poly([(ox + 0, 8), (ox + 40, 9), (ox + 37, 14), (ox + 8, 14)], "O")
-    c.rect(ox + 1, 8, ox + 39, 8, "S")                       # lit deck edge
-    c.rect(ox + 4, 9, ox + 36, 9, "S")
+    c.poly([(ox + 0, 7), (ox + 40, 9), (ox + 37, 14), (ox + 8, 14)], "O")
+    c.line(ox + 1, 7, ox + 39, 9, "S")                       # lit deck edge, rising to the bow
+    c.line(ox + 4, 8, ox + 36, 10, "S")
     for x in range(ox + 9, ox + 36):                        # red stripe
         c.px(x, 12, "R")
     for x in range(ox + 9, ox + 37, 2):                     # shadow row dither
@@ -149,17 +151,17 @@ def patrol(wake=0, flip=False):
     for x in range(ox + 17, ox + 26, 2):
         c.px(x, 6, "Y")
     c.line(ox + 22, 4, ox + 22, 0, "K")                    # mast
-    c.px(ox + 23, 1, "S")
-    c.rect(ox + 5, 6, ox + 9, 7, "O")                       # bow gun
-    c.rect(ox + 5, 6, ox + 9, 6, "S")
-    c.line(ox + 5, 6, ox + 1, 5, "S")
+    for x in range(ox + 23, ox + 26):                       # pennant, streaming aft (away from the bow)
+        c.px(x, 2, "W")
+    for x in range(ox + 23, ox + 25):
+        c.px(x, 3, "W")
+    c.rect(ox + 5, 5, ox + 9, 6, "O")                       # bow gun, on the raised bow
+    c.rect(ox + 5, 5, ox + 9, 5, "S")
+    c.line(ox + 5, 5, ox + 1, 4, "S")
     c.rect(ox + 30, 7, ox + 35, 7, "S")                     # stern rail
     c.outline()
-    # bow wave and wake (cream), 2 frames
-    pts = [(ox + 0, 14), (ox + 1, 15), (ox + 2, 14), (ox + 4, 15), (ox + 6, 15)]
-    for x, y in pts:
-        c.px(x, y, "W")
-    wk = [(ox + 38, 15), (ox + 40, 15), (ox + 42, 16)] if wake == 0 else [(ox + 39, 15), (ox + 41, 16), (ox + 43, 15)]
+    # stern wake only (cream), 2 frames; the bow is clean
+    wk = [(ox + 38, 15), (ox + 40, 15), (ox + 42, 16), (ox + 41, 14)] if wake == 0 else [(ox + 39, 15), (ox + 41, 16), (ox + 43, 15), (ox + 42, 14)]
     for x, y in wk:
         c.px(x, y, "W")
     for x in range(ox + 10, ox + 36, 5):
