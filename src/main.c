@@ -213,9 +213,14 @@ static UBYTE s_ubFloorStride = 4;   // copper entries a floor line (7 on AGA)
 // when the game returns to world 1. The strip's ring is a chip block of its own
 // while the game is in world 2.
 #define ARENA_OFFS DISK_ART_CLOUDS_OFFS
-#define ARENA_BYTES ((ULONG)(DISK_ART_HANGAR_OFFS - DISK_ART_CLOUDS_OFFS))
-_Static_assert(ARENA_BYTES == WORLD1_BANDS_BYTES, "disk/world1.bin is the art block's band region");
-_Static_assert(WORLD2_BYTES <= ARENA_BYTES, "world 2's display art fits the world arena");
+#define ARENA_BYTES ((ULONG)(DISK_ART_FENCE_OFFS - DISK_ART_CLOUDS_OFFS))
+// World 2's BOBs (its "set", after its display art in disk/world2.bin) take the rest of the arena
+// and world 1's own BOBs' chip (they follow the bands: world 1's file, disk/world1.bin, brings
+// them back) and, where that is not enough, WORLD2_EXTRA bytes past the art block's end
+_Static_assert(WORLD1_BANDS_BYTES == DISK_ART_BYTES - ARENA_OFFS, "disk/world1.bin is the art block from its bands on");
+_Static_assert(WORLD2_DISPLAY_BYTES <= ARENA_BYTES, "world 2's display art fits the world arena");
+#define WORLD2_EXTRA ((ULONG)(WORLD2_BYTES > WORLD1_BANDS_BYTES ? WORLD2_BYTES - WORLD1_BANDS_BYTES : 0))
+#define DISK_ART_ALLOC (DISK_ART_BYTES + WORLD2_EXTRA + WORLD2_PAD_COMPOSED_BYTES)
 _Static_assert(SEA_Y == FLOOR_Y && STRIP_Y == 208 && ART_W2_SEA_H == SEA_LINES, "STYLE-world2's lines");
 _Static_assert(ART_W2_CLOUDS_H == ART_CLOUDS_H && ART_W2_FAR_H == ART_MOUNTAINS_H &&
 	ART_W2_CLOUDS_LOOP_W == ART_CLOUDS_LOOP_W && ART_W2_FAR_LOOP_W == ART_MOUNTAINS_LOOP_W,
@@ -772,6 +777,7 @@ static void cwTitleLogo(tAgkCopWriter *pW, UWORD y, const tBitMap *pFb) {
 static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE isTitle);
 static void musicFor(UBYTE ubState);
 static void routeCreate(void);
+static void bobsBind(UBYTE ubWorld);
 static void diskArtLoad(void);
 static void songsLoad(void);
 static void songStart(UBYTE ubSong);
@@ -1341,7 +1347,7 @@ static UBYTE s_pMsgAnyFix[2];
 static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
-#define TPL_MAX 52
+#define TPL_MAX 54
 static tAgkBlitArea s_pErase[2][DRAW_MAX];
 static UBYTE s_pErased[2];
 static UBYTE s_ubLastDrawn;          // objects in the last picture (the HUD types less after a busy one)
@@ -1405,6 +1411,14 @@ static void bobAdd(UBYTE ubBob, tBitMap *pBm, tBitMap *pMask, UBYTE ubW, UBYTE u
 	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)
 static tBitMap s_pBobBmStore[2 * BOB_TYPES];
 static UBYTE s_ubBobBms;
+// World 2's BOBs (art/tools/make_world_disk.py): its set follows the display art in disk/world2.bin
+#define BOB_W2(B, N) bobAdd(B, bobBm(ARENA_OFFS + WORLD2_##N##_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
+	bobBm(ARENA_OFFS + WORLD2_##N##MASK_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
+	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)
+static UBYTE s_ubTplWorld;           // the first blit template of the world's own BOBs (after the shared ones)
+static UBYTE s_ubDiskArtLoaded;      // diskArtLoad has run: the BOBs' art is in the block
+static void padCompose(void);
+static void bobsCrop(UBYTE b0, UBYTE b1);
 
 static tBitMap *bobBm(ULONG ulOffs, UWORD uwW, UWORD uwRows) {
 	tBitMap *pBm = &s_pBobBmStore[s_ubBobBms++];
@@ -1419,44 +1433,111 @@ static tBitMap *bobBm(ULONG ulOffs, UWORD uwW, UWORD uwRows) {
 // Shots and shells are small and solid: a plain copy (half the bus).
 // Buildings are drawn first, onto an empty buffer: a plain copy too
 static UBYTE bobIsCopy(UBYTE b) {
-	return b == BOB_SHOT || b == BOB_SHELL || b == BOB_HANGAR || b == BOB_FENCE || b == BOB_BARRACKS || b == BOB_FLAG;
+	return b == BOB_SHOT || b == BOB_SHELL || b == BOB_HANGAR || b == BOB_FENCE || b == BOB_BARRACKS || b == BOB_FLAG ||
+		b == BOB_W2_BARRACKS || (b >= BOB_PAD48 && b <= BOB_PAD96);
 }
 
+// A BOB's blit templates (from its frame 0 at template t on) and its tables for objectsQueue
+__attribute__((noinline, optimize("Os"))) static UBYTE bobFill(UBYTE b, UBYTE t) {
+	s_pTplFirst[b] = t;
+	for(UBYTE f = 0; f < g_pBobFrames[b] && t < TPL_MAX; ++f, ++t) {
+		agkBlitBob(s_pTpl[t], s_pBobBm[b], bobIsCopy(b) ? 0 : s_pBobMask[b], g_pBobW[b], g_pBobH[b], f, FB_PLANE_BYTES);
+	}
+	// objectsQueue's tables: in the buffer when x <= max x and y <= max y (the
+	// buffer's margins: no clipping); the template for one word more (agkBlitPlace's
+	// choice) when the shift is past the slack in the last word
+	UWORD uwW = g_pBobW[b];
+	tBobInfo *pI = &s_pBobInfo[b];
+	pI->pTpl = s_pTpl[s_pTplFirst[b]];
+	pI->uwMaxX = (UWORD)(FB_W - 16 - uwW);
+	pI->uwMaxY = (UWORD)(FB_H - g_pBobH[b]);
+	pI->ubSlack = (UBYTE)(((uwW + 15) & ~15) - uwW);
+	return t;
+}
+
+// The BOBs of both worlds (what the floppy art block holds at boot): the shared ones here, the
+// world's own by bobsBind(), whose templates take the same slots in either world
 __attribute__((optimize("Os"))) static void bobsCreate(void) {
-	BOB_AT(BOB_HANGAR, HANGAR);
-	BOB_AT(BOB_FENCE, FENCE);
-	BOB_AT(BOB_BARRACKS, BARRACKS);
-	BOB_AT(BOB_TANK, TANK);
 	BOB_AT(BOB_HOSTAGE, HOSTAGE);
-	BOB_AT(BOB_JET, JET);
-	BOB_AT(BOB_MINE, MINE);
 	BOB_AT(BOB_SHOT, SHOT);
 	BOB_AT(BOB_BOMB, BOMB);
 	BOB_AT(BOB_SHELL, SHELL);
 	BOB_AT(BOB_BOOM, BOOM);
-	BOB_AT(BOB_FLAG, FLAG);
 	BOB_AT(BOB_SHADOW, SHADOW);
 	BOB_AT(BOB_SMOKE, SMOKE);
+	BOB_AT(BOB_HANGAR, HANGAR);
 	UBYTE t = 0;
-	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
-		s_pTplFirst[b] = t;
-		for(UBYTE f = 0; f < g_pBobFrames[b] && t < TPL_MAX; ++f, ++t) {
-			agkBlitBob(s_pTpl[t], s_pBobBm[b], bobIsCopy(b) ? 0 : s_pBobMask[b], g_pBobW[b], g_pBobH[b], f, FB_PLANE_BYTES);
+	for(UBYTE b = 0; b < BOB_W1_FIRST; ++b) t = bobFill(b, t);
+	s_ubTplWorld = t;
+	bobsBind(0);
+	for(UWORD y = 0; y < FB_H; ++y) s_pFbRowOffs[y] = (UWORD)(y * FB_ROW_BYTES);
+}
+
+// The four widths of a pad, each one BOB (no mask: it is drawn as a plain copy), put together from the
+// pieces in the set: the left cap (frame 0 of the caps), n units, the H, n units, the right cap, rows
+// PAD_SLAB_ROW.. for the slab (the caps' pylons stand above it). A piece is 8 px: the high byte of the
+// 16 px word it is stored in (and the H two bytes). The chevrons point at the H, on every other unit.
+#define PAD_PIECE_ROW 6            // a piece's row: 2 bytes a plane, 3 planes
+__attribute__((noinline, optimize("Os"))) static void padCompose(void) {
+	UBYTE *pArena = s_pDiskArt + ARENA_OFFS;
+	const UBYTE *pCap = pArena + WORLD2_PAD_CAP_OFFS, *pSlab = pArena + WORLD2_PAD_SLAB_OFFS,
+		*pCentre = pArena + WORLD2_PAD_CENTRE_OFFS;
+	static const ULONG pOffs[4] = {WORLD2_PAD48_OFFS, WORLD2_PAD64_OFFS, WORLD2_PAD80_OFFS, WORLD2_PAD96_OFFS};
+	for(UBYTE k = 0; k < 4; ++k) {
+		UBYTE ubBytes = (UBYTE)((48 + 16 * k) >> 3);    // a plane's row of the pad
+		UBYTE ubUnits = (UBYTE)(k + 1);                  // 8 px units each side
+		UBYTE *pDst = pArena + pOffs[k];
+		tBitMap *pBm = bobBm(ARENA_OFFS + pOffs[k], (UWORD)(ubBytes << 3), PAD_ROWS);
+		bobAdd((UBYTE)(BOB_PAD48 + k), pBm, 0, (UBYTE)(ubBytes << 3), PAD_ROWS, 1);
+		for(UBYTE y = 0; y < PAD_ROWS; ++y) {
+			for(UBYTE p = 0; p < 3; ++p, pDst += ubBytes) {
+				for(UBYTE b = 0; b < ubBytes; ++b) pDst[b] = 0;
+				UWORD uwPlane = (UWORD)(p << 1);
+				pDst[0] = pCap[(UWORD)y * PAD_PIECE_ROW + uwPlane];                        // the left cap: frame 0
+				pDst[ubBytes - 1] = pCap[(UWORD)(PAD_ROWS + y) * PAD_PIECE_ROW + uwPlane];  // the right: frame 1
+				if(y < PAD_SLAB_ROW) continue;
+				UWORD r = (UWORD)((y - PAD_SLAB_ROW) * PAD_PIECE_ROW + uwPlane);
+				for(UBYTE u = 0; u < ubUnits; ++u) {
+					UBYTE ubFrom = (UBYTE)(ubUnits - 1 - u);   // its distance from the H
+					pDst[1 + u] = pSlab[(UWORD)((ubFrom & 1) ? 2 * 16 * PAD_PIECE_ROW : 0) + r];   // plain, or the chevron: frame 0 points right
+					pDst[3 + ubUnits + u] = pSlab[(UWORD)((u & 1) ? 2 * 16 * PAD_PIECE_ROW : 16 * PAD_PIECE_ROW) + r];   // plain, or frame 1: points left
+				}
+				pDst[1 + ubUnits] = pCentre[r];                // the H, two bytes
+				pDst[2 + ubUnits] = pCentre[r + 1];
+			}
 		}
 	}
-	if(t >= TPL_MAX) agkPrint("AGK ERR too many BOB frames: raise TPL_MAX\n");
-	for(UWORD y = 0; y < FB_H; ++y) s_pFbRowOffs[y] = (UWORD)(y * FB_ROW_BYTES);
-	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
-		// objectsQueue's tables: in the buffer when x <= max x and y <= max y (the
-		// buffer's margins: no clipping); the template for one word more (agkBlitPlace's
-		// choice) when the shift is past the slack in the last word
-		UWORD uwW = g_pBobW[b];
-		tBobInfo *pI = &s_pBobInfo[b];
-		pI->pTpl = s_pTpl[s_pTplFirst[b]];
-		pI->uwMaxX = (UWORD)(FB_W - 16 - uwW);
-		pI->uwMaxY = (UWORD)(FB_H - g_pBobH[b]);
-		pI->ubSlack = (UBYTE)(((uwW + 15) & ~15) - uwW);
+}
+
+// The world's own BOBs: world 1's (fence, barracks, tank, jet, mine, flag) or world 2's, over the
+// same chip and the same templates (worldLoad: after the world's art is in the block)
+__attribute__((noinline, optimize("Os"))) static void bobsBind(UBYTE ubWorld) {
+	s_ubBobBms = 2 * BOB_W1_FIRST;
+	UBYTE b0, b1;
+	if(ubWorld) {
+		BOB_W2(BOB_W2_BARRACKS, W2_BARRACKS);
+		BOB_W2(BOB_PATROL, PATROL);
+		BOB_W2(BOB_GUNBOAT, GUNBOAT);
+		padCompose();
+		BOB_W2(BOB_PAD_LAMP, PAD_LAMP);
+		BOB_W2(BOB_SPLASH, SPLASH);
+		b0 = BOB_W2_FIRST;
+		b1 = BOB_TYPES;
 	}
+	else {
+		BOB_AT(BOB_FENCE, FENCE);
+		BOB_AT(BOB_BARRACKS, BARRACKS);
+		BOB_AT(BOB_TANK, TANK);
+		BOB_AT(BOB_JET, JET);
+		BOB_AT(BOB_MINE, MINE);
+		BOB_AT(BOB_FLAG, FLAG);
+		b0 = BOB_W1_FIRST;
+		b1 = BOB_W2_FIRST;
+	}
+	UBYTE t = s_ubTplWorld;
+	for(UBYTE b = b0; b < b1; ++b) t = bobFill(b, t);
+	if(t >= TPL_MAX) agkPrint("AGK ERR too many BOB frames: raise TPL_MAX\n");
+	if(s_ubDiskArtLoaded) bobsCrop(b0, b1);   // (the art is in the block: at boot diskArtLoad crops them)
 }
 
 static UBYTE s_ubDraws;              // objects in s_pDraw this picture (objectsQueue)
@@ -1469,8 +1550,8 @@ static UBYTE s_ubDraws;              // objects in s_pDraw this picture (objects
 // The rows skipped at the top go in the template's (unused) destination, as
 // a byte offset objectsQueue adds. Plain copies (shots, shells, buildings)
 // write their blank rows too, so they stay whole.
-__attribute__((noinline, optimize("Os"))) static void bobsCrop(void) {
-	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
+__attribute__((noinline, optimize("Os"))) static void bobsCrop(UBYTE b0, UBYTE b1) {
+	for(UBYTE b = b0; b < b1; ++b) {
 		if(bobIsCopy(b)) continue;
 		const tBitMap *pMask = s_pBobMask[b];
 		UBYTE ubH = g_pBobH[b];
@@ -1575,7 +1656,8 @@ __attribute__((noinline)) static void erasesQueue(UBYTE ubBfr) {
 
 __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 	tBitMap *pFb = s_pFb[ubBfr];
-	UBYTE n = logicDraw(&s_sGame, s_pDraw);
+	// (the picture the world changes in: the new world's BOBs are loaded at the start of the next)
+	UBYTE n = s_sGame.world == s_ubWorld ? logicDraw(&s_sGame, s_pDraw) : 0;
 	tAgkBlitArea *pErase = s_pErase[ubBfr];
 	UBYTE ubDrawn = 0;
 	const tDraw *pD = s_pDraw;
@@ -1940,29 +2022,11 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 	UBYTE *pRow[RADAR_H];
 	UBYTE *pTop = s_pRadarArea[ubBfr].pD;
 	for(UBYTE y = 0; y < RADAR_H; ++y, pTop += HUD_ROW_BYTES) pRow[y] = pTop;
-	if(g->world) {
-		// world 2's display slice: its 4608 px at a 24th (no buildings or enemies yet)
-		if(s_pRadarBuildings[ubBfr] != 0xFE) {
-			s_pRadarBuildings[ubBfr] = 0xFE;   // (world 1's buildings off; they come back with it)
-			for(UBYTE y = 5; y < 7; ++y)
-				for(UBYTE i = 0; i < FB_BPP * RADAR_P1; i += RADAR_P1)
-					for(UBYTE k = 0; k < RADAR_W / 8 + 1; ++k) pRow[y][i + k] = 0;
-		}
-		UBYTE ubCam = logicRadarX2(g->cam);
-		radarDot(pRow[0], ubCam, 3);
-		radarDot(pRow[0], (UBYTE)(ubCam + SCREEN_W / 24), 3);
-		if(!logicIsMenu(g) && g->state != GS_ENTRY) {
-			UBYTE x = logicRadarX2(g->chop.x);
-			UBYTE y = (UBYTE)((g->chop.y - CEIL_Y) >> 5);
-			if(y > RADAR_DYN_H - 1) y = RADAR_DYN_H - 1;
-			radarDot(pRow[y], x, 6);
-			radarDot(pRow[y], (UBYTE)(x + 1), 6);
-		}
-		return;
-	}
+	UBYTE isW2 = g->world;   // (its 4608 px at a 24th, not a 16th)
 	// the buildings (rows 5-6): only when a barracks has opened since
 	UBYTE ubOpen = 0;
 	for(UBYTE b = 0; b < BARRACKS_COUNT; ++b) ubOpen |= (UBYTE)((g->pBarracks[b].hp == 0) << b);
+	ubOpen |= (UBYTE)(isW2 << 4);
 	if(ubOpen != s_pRadarBuildings[ubBfr]) {
 		s_pRadarBuildings[ubBfr] = ubOpen;
 		for(UBYTE y = 5; y < 7; ++y) {
@@ -1970,13 +2034,15 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 			for(UBYTE i = 0; i < FB_BPP * RADAR_P1; i += RADAR_P1)
 				for(UBYTE k = 0; k < RADAR_W / 8 + 1; ++k) p[i + k] = 0;
 		}
-		UBYTE ubBase = logicRadarX(HANGAR_X);
+		UBYTE ubBase = isW2 ? logicRadarX2(W2_HANGAR_X) : logicRadarX(HANGAR_X);
 		radarDot(pRow[6], ubBase, 7);
 		radarDot(pRow[6], (UBYTE)(ubBase + 1), 7);
-		radarDot(pRow[5], logicRadarX(BORDER_X), 3);
-		radarDot(pRow[6], logicRadarX(BORDER_X), 3);
+		if(!isW2) {
+			radarDot(pRow[5], logicRadarX(BORDER_X), 3);
+			radarDot(pRow[6], logicRadarX(BORDER_X), 3);
+		}
 		for(UBYTE b = 0; b < BARRACKS_COUNT; ++b) {
-			UBYTE x = logicRadarX(g->pBarracks[b].x);
+			UBYTE x = isW2 ? logicRadarX2(g->pBarracks[b].x) : logicRadarX(g->pBarracks[b].x);
 			UBYTE pen = (ubOpen >> b) & 1 ? 5 : 7;
 			radarDot(pRow[5], x, pen);
 			radarDot(pRow[5], (UBYTE)(x + 1), pen);
@@ -1984,21 +2050,25 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 			radarDot(pRow[6], (UBYTE)(x + 1), pen);
 		}
 	}
-	UBYTE ubCam = logicRadarX(g->cam);
+	UBYTE ubCam = isW2 ? logicRadarX2(g->cam) : logicRadarX(g->cam);
 	radarDot(pRow[0], ubCam, 3);
-	radarDot(pRow[0], (UBYTE)(ubCam + SCREEN_W / 16), 3);
+	radarDot(pRow[0], (UBYTE)(ubCam + (isW2 ? SCREEN_W / 24 : SCREEN_W / 16)), 3);
 	UBYTE *pPeople = pRow[3] + RADAR_P2;   // pen 4: plane 3 only
 	for(UBYTE k = 0; k < g->outCount; ++k) {
 		const tHostage *h = &g->pHostages[g->pOut[k]];
 		if(h->state != HS_DEAD) {
-			UWORD uwX = (UWORD)(((RADAR_X0 + 16) & 7) + logicRadarX(h->x));
+			UWORD uwX = (UWORD)(((RADAR_X0 + 16) & 7) + (isW2 ? logicRadarX2(h->x) : logicRadarX(h->x)));
 			pPeople[uwX >> 3] |= (UBYTE)(0x80 >> (uwX & 7));
 		}
 	}
-	for(UBYTE i = 0; i < TANK_MAX; ++i) {
+	for(UBYTE i = 0; !isW2 && i < TANK_MAX; ++i) {
 		if(g->pTanks[i].active) radarDot(pRow[4], logicRadarX(g->pTanks[i].x), 5);
 	}
-	for(UBYTE i = 0; i < JET_MAX; ++i) {
+	for(UBYTE i = 0; isW2 && i < BOAT_MAX; ++i) {
+		const tBoat *b = &g->pBoats[i];   // (world 2's boats: a gunboat red, a patrol boat stone)
+		if(b->active) radarDot(pRow[4], logicRadarX2(b->x), b->kind == BOAT_GUN ? 5 : 3);
+	}
+	for(UBYTE i = 0; !isW2 && i < JET_MAX; ++i) {
 		const tJet *pJet = &g->pJets[i];
 		WORD x = pJet->x;
 		if(!pJet->active) continue;
@@ -2017,12 +2087,12 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 		}
 		if(x >= 0 && x < WORLD_W) radarDot(pRow[1], logicRadarX(x), 5);
 	}
-	for(UBYTE i = 0; i < MINE_MAX; ++i) {
+	for(UBYTE i = 0; !isW2 && i < MINE_MAX; ++i) {
 		WORD x = g->pMines[i].x;
 		if(g->pMines[i].active && x >= 0 && x < WORLD_W) radarDot(pRow[1], logicRadarX(x), 3);
 	}
 	if(!logicIsMenu(g) && g->state != GS_ENTRY) {
-		UBYTE x = logicRadarX(g->chop.x);
+		UBYTE x = isW2 ? logicRadarX2(g->chop.x) : logicRadarX(g->chop.x);
 		UBYTE y = (UBYTE)((g->chop.y - CEIL_Y) >> 5);   // 0..6
 		if(y > RADAR_DYN_H - 1) y = RADAR_DYN_H - 1;
 		radarDot(pRow[y], x, 6);
@@ -2099,7 +2169,7 @@ static void msgCentre(char *szOut, const char *szText) {
 __attribute__((noinline, optimize("Os"))) static void scoreRow(char *p, UBYTE i) {
 	const tHiScore *s = &s_sGame.hi.pEntries[i];
 	char szReached[HI_REACHED_W + 1] = "ALL";
-	if(s->reached <= MISSION_COUNT) {
+	if(s->reached <= MISSIONS_TOTAL) {
 		szReached[0] = 'M'; szReached[1] = 'S'; szReached[2] = 'N'; szReached[3] = ' ';
 		szReached[4] = (char)('0' + s->reached);
 		szReached[5] = 0;
@@ -2207,13 +2277,12 @@ __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey) {
 			pText[2] = "64 HELD IN 4 BARRACKS";
 			pText[3] = logicBrief(g);
 			if(g->world) {
-				// world 2's display slice (no barracks, no route map yet)
+				// world 2: its islands (the strip map goes between lines 1 and 2, as world 1's)
 				static const char *const pW2Name[MISSION_COUNT] = {"REEF RUN", "TRADE WINDS", "TYPHOON STRAIT"};
 				szA[8] = (char)('4' + g->mission);
 				szA[9] = 0;
 				pText[1] = pW2Name[g->mission];
-				pText[2] = "CORAL ISLANDS";
-				pText[3] = "WORLD 2 DISPLAY PREVIEW";
+				pText[2] = "64 HELD ON 4 ISLANDS";
 			}
 		} break;
 		case GS_LOST:
@@ -2367,12 +2436,18 @@ __attribute__((noinline, optimize("Os"))) static void routeBox(UBYTE *pTop, UWOR
 	for(UBYTE y = y0; y <= y1; ++y) routeSpan(pTop, x0, w, y, ubPen, isHatch ? ((y & 1) ? 0x55 : 0xAA) : 0xFF);
 }
 
-// At startup (after logicInit): the map into s_pRouteImg
+// At startup (after logicInit), and at a world's load (worldLoad: making it takes a couple of
+// frames, which a card's picture can't spare): the map into s_pRouteImg
 __attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
 	UBYTE *pTop = s_pRouteImg;
-	for(UWORD i = 0; i < sizeof(s_pRouteImg); ++i) {
-		pTop[i] = (i / ROUTE_ROW_BYTES) % FB_BPP ? 0 : 0xFF;    // a dark panel (pen 1)
+	// a dark panel (pen 1: plane 0 set, the others clear), longs a row of a plane (no divides:
+	// the map is made at a world 2 card too)
+	ULONG *pL = (ULONG *)pTop;
+	for(UBYTE y = 0; y < ROUTE_H; ++y) {
+		for(UBYTE k = 0; k < ROUTE_ROW_BYTES / 4; ++k) *pL++ = 0xFFFFFFFFUL;
+		for(UBYTE k = 0; k < 2 * ROUTE_ROW_BYTES / 4; ++k) *pL++ = 0;
 	}
+
 	tRouteMark pMarks[ROUTE_MARKS];
 	UBYTE n = logicRouteMap(&s_sGame, pMarks);
 	for(UBYTE i = 0; i < n; ++i) {
@@ -2400,6 +2475,9 @@ __attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
 				routeBox(pTop, x, m->w, 3, 3, 4, 0);
 				routeBox(pTop, x, m->w, 4, 8, 7, 0);
 				break;
+			case ROUTE_ISLAND:                                  // world 2: land, olive, on the sea
+				routeBox(pTop, x, m->w, 8, 9, 2, 0);
+				break;
 			case ROUTE_HERE:                                    // you are here: a yellow arrow
 				routeBox(pTop, x - 2, 5, 0, 0, 6, 0);
 				routeBox(pTop, x - 1, 3, 1, 1, 6, 0);
@@ -2422,7 +2500,7 @@ __attribute__((noinline)) static void routeShow(UBYTE ubBfr) {
 
 // Queued before the objects: the map cleared once the card's over
 __attribute__((noinline)) static void routeClear(UBYTE ubBfr) {
-	if(!s_pRouteLit[ubBfr] || (s_sGame.state == GS_INTRO && !s_sGame.world)) return;   // (world 2: none yet)
+	if(!s_pRouteLit[ubBfr] || s_sGame.state == GS_INTRO) return;
 	s_pRouteLit[ubBfr] = 0;
 	tAgkBlitArea sArea;
 	sArea.pD = s_pFb[ubBfr]->Planes[0] + s_pFbRowOffs[ROUTE_Y] + (FB_X0 + ROUTE_X0) / 8;
@@ -2473,7 +2551,8 @@ static void chopperDestroy(void) {
 __attribute__((noinline, optimize("Os"))) static void diskArtLoad(void) {
 	s_isArtPending = 0;
 	if(agkLoadFile("diskart.bin.pk", s_pDiskArt, DISK_ART_BYTES) != DISK_ART_BYTES) agkPrint("AGK art missing\n");
-	bobsCrop();
+	s_ubDiskArtLoaded = 1;
+	bobsCrop(0, BOB_W2_FIRST);
 	agkPerfSkip();
 }
 
@@ -2494,7 +2573,7 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 			world2Gradients();
 		}
 		if(!s_pStripMem) s_pStripMem = memAllocChipClear(3 * STRIP_PLANE_BYTES);
-		if(agkLoadFile("world2.bin.pk", pArena, ARENA_BYTES) != WORLD2_BYTES) agkPrint("AGK ERR world2 art missing\n");
+		if(agkLoadFile("world2.bin.pk", pArena, WORLD2_BYTES) != WORLD2_BYTES) agkPrint("AGK ERR world2 art missing\n");
 		s_pCloudsBm = &s_sW2Clouds;
 		s_pFarBm = &s_sW2Far;
 		s_wStripFirst = -100;   // (a jump: the span drawn again)
@@ -2502,11 +2581,13 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 	else {
 		if(s_pStripMem) memFree(s_pStripMem, 3 * STRIP_PLANE_BYTES);
 		s_pStripMem = 0;
-		if(agkLoadFile("world1.bin.pk", pArena, ARENA_BYTES) != WORLD1_BANDS_BYTES) agkPrint("AGK ERR world1 art missing\n");
+		if(agkLoadFile("world1.bin.pk", pArena, WORLD1_BANDS_BYTES) != WORLD1_BANDS_BYTES) agkPrint("AGK ERR world1 art missing\n");
 		s_pCloudsBm = s_pW1CloudsBm;
 		s_pFarBm = s_pMountains;
 	}
 	for(UBYTE p = 0; p < 3; ++p) s_sStrip.Planes[p] = s_pStripMem ? s_pStripMem + p * STRIP_PLANE_BYTES + 2 : 0;
+	bobsBind(ubWorld);   // (the world's own BOBs: their art is loaded, their templates made)
+	routeCreate();   // (this world's card map)
 	s_ubWorld = ubWorld;
 	s_ubRasterOff = 2;   // (counted down at the start of each picture: on again when both lists are this world's)
 	s_pListMission[0] = s_pListMission[1] = 0xFF;   // both game lists written again
@@ -2945,6 +3026,9 @@ __attribute__((noinline)) static void playSounds(UBYTE ubStateBefore) {
 	if(e & EV_CANNON) soundPlay(SOUND_SFX_CANNON);
 	if(e & EV_BOMB) soundPlay(SOUND_SFX_BOMB);
 	if((e & EV_LAND) && logicSfxAllow(s_pSfxLast, uwNow, SFXK_LAND)) soundPlay(SOUND_SFX_LAND);
+	// world 2: the sea's soft stop sounds as skids touching down; a gunboat's shell as a tank's
+	if((g->events2 & EV2_SPLASH) && logicSfxAllow(s_pSfxLast, uwNow, SFXK_LAND)) soundPlay(SOUND_SFX_LAND);
+	if((g->events2 & EV2_BOATFIRE) && logicSfxAllow(s_pSfxLast, uwNow, SFXK_TANKFIRE)) soundPlay(SOUND_SFX_TANKFIRE);
 }
 
 // ---------------------------------------------------------------- setup ---
@@ -2982,7 +3066,7 @@ static tBitMap *bandAt(UBYTE ubBand, ULONG ulOffs, UWORD uwW, UWORD uwH) {
 }
 
 __attribute__((noinline, optimize("Os"))) static void diskArtCreate(void) {
-	s_pDiskArt = memAllocChipClear(DISK_ART_BYTES);
+	s_pDiskArt = memAllocChipClear(DISK_ART_ALLOC);
 	s_pChopStore = s_pDiskArt + DISK_ART_CHOPPER_OFFS;
 	s_pCloudsBm = bandAt(0, DISK_ART_CLOUDS_OFFS, ART_CLOUDS_BITMAP_W, ART_CLOUDS_H);
 	s_pMountains = bandAt(1, DISK_ART_MOUNTAINS_OFFS, ART_MOUNTAINS_BITMAP_W, ART_MOUNTAINS_H);
@@ -3144,6 +3228,9 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	if(g->events & EV_CRASH) agkPrint("AGK chopper lost\n");
 	if(g->events & EV_SHRUG) agkPrint("AGK hit ignored (invincible)\n");
 	if(g->events & EV_TANKTELL) agkPrint("AGK tank tell\n");
+	if(g->events2 & EV2_BOATTELL) agkPrint("AGK boat tell\n");
+	if(g->events2 & EV2_BOATFIRE) agkPrint("AGK boat fire\n");
+	if(g->events2 & EV2_SPLASH) agkPrint("AGK splash\n");
 	if(g->events2 & EV2_JETWARN) agkPrint("AGK jet warn\n");
 	if(g->events2 & EV2_JETTELL) agkPrint("AGK jet tell\n");
 	if(g->events2 & EV2_JETFIRE) agkPrint("AGK jet fire\n");
@@ -3338,7 +3425,7 @@ void genericProcess(void) {
 	hudDraw(ubBfr);
 
 	agkBlitqFinish();
-	if(s_sGame.state == GS_INTRO && !s_pRouteLit[ubBfr] && !s_sGame.world) routeShow(ubBfr);
+	if(s_sGame.state == GS_INTRO && !s_pRouteLit[ubBfr]) routeShow(ubBfr);
 	else msgUpdate(ubBfr);   // (not both in one picture)
 	msgCoverAll(ubBfr);
 	if(s_ubOverrun) {
@@ -3394,7 +3481,7 @@ void genericDestroy(void) {
 	weatherDestroy();
 	chopperDestroy();
 	if(s_pStripMem) memFree(s_pStripMem, 3 * STRIP_PLANE_BYTES);
-	memFree(s_pDiskArt, DISK_ART_BYTES);   // (the bands, the BOBs and the chopper's frames)
+	memFree(s_pDiskArt, DISK_ART_ALLOC);   // (the bands, the BOBs and the chopper's frames)
 	for(UBYTE b = 0; b < 2; ++b) memFree(s_pTitleList[b], s_uwTitleCopCount * sizeof(tCopCmd));
 	if(s_pTitleLogo) memFree(s_pTitleLogo, s_ulTitleLogoBytes);
 	if(s_pSkyLo) memFree(s_pSkyLo, MISSION_COUNT * (SKY_END - PLAY_TOP) * sizeof(UWORD));

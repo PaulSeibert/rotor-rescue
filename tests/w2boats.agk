@@ -1,0 +1,30 @@
+# World 2's gunboats (SPEC 6, docs/CONTENT-PLAN.md 4.1, 4.4): mission 4, skill 3. Fly low over
+# the sea toward the gunboat in the gap west of island 4 (it patrols x 2450-2900) and hover
+# there: its barrel rises and its lamp flashes (the tell), then a shell, and only then. The
+# unit tests (tests/unit/test_logic.c, testW2*) hold the rest: the tell table, no shot at a
+# high chopper, from off screen, point-blank, out of sight or just after take-off, a landed
+# chopper's grace, one attack at a time.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x04
+wait-serial "AGK world 2 loaded" 400
+press fire 2
+wait 40
+press up 20
+press left 395
+wait 60
+screenshot low
+wait-serial "boat tell" 900
+screenshot tell
+wait-serial "boat fire" 60
+wait 5
+screenshot fire
+expect-serial "boat tell[\s\S]*boat fire"
+expect-no-serial "chopper lost|ERR|missing"
+expect-no-dropped-frames
+expect-max-load 85
+expect-min-chip-free 96

@@ -7,6 +7,13 @@ endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DAMIGA -Wall -Wextra -fomit-frame-pointer")
+# Only the code that is used goes into the program (the unused ACE modules were 77 KB of it: AROS loads
+# ~4.4 frames a KB against the harness's boot window, tests/memory.agk). `agk profile` maps the code by
+# object file, so for it: agk build -D AGK_GC_SECTIONS=OFF
+option(AGK_GC_SECTIONS "link only the code that is used" ON)
+if(AGK_GC_SECTIONS)
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections")
+endif()
 
 # Build options (ACE and AGK) go in agk.toml under [cmake], e.g.
 #   [cmake]
@@ -56,3 +63,6 @@ if(EXISTS ${CMAKE_BINARY_DIR}/maps/maps.c)
 endif()
 add_executable(first ${SOURCES})
 target_link_libraries(first ace agk)
+if(AGK_GC_SECTIONS)
+	target_link_options(first PRIVATE -Wl,--gc-sections)
+endif()

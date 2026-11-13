@@ -175,3 +175,10 @@ slab units 8 x 16 (6), centre 16 x 16 (2), lamps 5 x 5 (2), radar 33 x 39 (4), w
 whitecap 34 x 10 (3). Chip total **78,720 B (76.9 KB)** against the pilot's 77,440 B (75.6 KB): +1,280 B, from the common frame boxes and
 the pad parts kept uncropped on the 8 px grid. Packed disk 34.1 KB by the pilot's flat 55 % rule (pilot 32.9 KB); 17 KB with each set's own
 zlib -9 + 12 %. `make_world2.py --convert` runs agk's converter over `art/world2/world2_art.toml`.
+
+## 10 Integration (2026-11-13, the gameplay slice)
+
+Measured, in `art/tools/make_world_disk.py` and `docs/SPEC.md` section 11 "World 2's gameplay":
+- the set (mission 4's objects, all three missions for now): barracks 4 frames 5,952 B, patrol boat 2 frames (one wake a facing) 1,224, gunboat 6 frames (idle, tell 1, tell 2 a facing; the fire frame is tell 2 held) 8,640, the pad's parts (lit phase only, no masks, 936) put together at the load into four widths of one BOB each (48 / 64 / 80 / 96 px, 4,976 B), lamps 120, splash 2,880: 20,704 B on the floppy (19.4 KB packed with the display art) and 25.7 KB of chip with the composed pads;
+- levers used: the gunboat's fire frame shared with tell 2 (-2.9 KB), one wake frame for the patrol boat (-1.2), the pad's dark phase dropped (-2.8 with masks gone), the pad as one BOB a width instead of fifteen (a frame budget lever, 30 points of an A500 frame, not a chip one), no destroyer or radar in the set; world 1's own BOBs' chip (9.8 KB) and the arena's spare 3.6 KB reused;
+- per-mission sets (the art as drawn is 48,240 B): mission 5 adds the radar (5,616) and windsock (480), mission 6 the destroyer (one facing 5,280; both 10,560), its turret (one facing 1,824; 3,648) and whitecaps (1,080). With the pads' composites that is 31.8 KB (M5) and 33.9 KB (M6) of chip against 25.7 KB for M4: the a500's free chip would be about 92 KB and 90 KB, under the asserted 96.

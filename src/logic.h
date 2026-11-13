@@ -41,14 +41,38 @@
 
 // The worlds (SPEC 4): g->world 0 is the Border Desert (missions 1-3, WORLD_W),
 // 1 the Coral Islands (missions 4-6, W2_W). g->mission is the mission within the
-// world (0-2), so every per-mission table keeps three rows. World 2 is the
-// display slice so far (docs/STYLE-world2.md): its sea, islands and strip, no
-// barracks, enemies or pads yet (they are the next slice); it is reached only by
-// the debug keys (Ctrl+L, W, 4-6) until then.
+// world (0-2), so every per-mission table keeps three rows. World 2 has its
+// islands, pads, barracks, water and boats (SPEC 4.4, 6; docs/STYLE-world2.md);
+// the mission after world 1's third is its first. MISSIONS_TOTAL: missions 1-6.
 #define WORLD_COUNT 2
+#define MISSIONS_TOTAL (WORLD_COUNT * MISSION_COUNT)
 #define W2_W 4608            // 288 tile columns of 16 px
 #define W2_START_X 4136      // on the base island's pad (art/world2/tilemap.txt: pad column 256, 80 px)
 #define W2_MAP_COLS (W2_W / 16)
+
+// World 2's islands (art/world2/tilemap.txt, "island" lines): the span of the land (a
+// whole number of 16 px tile columns; everything else is water), the barracks'
+// centre (the four flat tiles it stands on), the pad's centre and the widest pad its
+// bed takes (px). The last is the base island: pad, then the hangar; no barracks.
+#define W2_ISLANDS 5
+#define W2_BASE_ISLAND 4
+#define W2_HANGAR_X 4212     // the hangar's left edge on the base island, just past the widest pad's zone (the people run in here)
+typedef struct { int16_t x0, x1, barracksX, padX; uint8_t bedPx; } tIsland;
+extern const tIsland g_pIslands[W2_ISLANDS];
+// Pads (SPEC 4.4): the drawn pad is 32 + 16 n px (n 1-4: two 8 px end caps, the 16 px H,
+// n 8 px units a side), the widest the skill and the island's bed allow: 96 / 80 / 64 /
+// 56 / 48 by skill, so 96 / 96 / 80 / 64 / 48 on a wide bed. A landing counts within
+// PAD_TOLERANCE px outside its edge; on skill 1-3 the last PAD_ASSIST_PX of a descent
+// nudges the chopper 0.5 px a frame toward the centre
+#define PAD_TOLERANCE 6
+#define PAD_ASSIST_PX 12
+#define PAD_ASSIST_REACH 20  // px past the tolerance the nudge still works
+// How far the people hear a landed chopper in world 2 (their pad is up to 192 px from the barracks)
+#define W2_CALL_RANGE 160
+// How many of a barracks' people are out in the open at once in world 2: the rest wait inside and come
+// out as those boarded or killed leave the list. Every person on screen costs about 1.5 % of an A500
+// frame (draw, erase, update, the radar dot), and 16 on a beach beside a pad dropped frames.
+#define W2_OUT_MAX 6
 
 #define TANK_MAX 5
 #define JET_MAX 2
@@ -61,12 +85,18 @@
 
 // --------------------------------------------------------------- the BOBs ---
 // Sizes must match the art (main.c checks at startup).
+// (the order is the art block's and the blit templates' (main.c): the BOBs both worlds
+// use first, then world 1's own, whose chip and templates world 2's set takes over,
+// then world 2's)
 enum {
-	BOB_HANGAR, BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_HOSTAGE, BOB_JET,
-	BOB_MINE, BOB_SHOT, BOB_BOMB, BOB_SHELL, BOB_BOOM, BOB_FLAG, BOB_SHADOW,
-	BOB_SMOKE,
+	BOB_HOSTAGE, BOB_SHOT, BOB_BOMB, BOB_SHELL, BOB_BOOM, BOB_SHADOW, BOB_SMOKE, BOB_HANGAR,
+	BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_JET, BOB_MINE, BOB_FLAG,
+	BOB_W2_BARRACKS, BOB_PATROL, BOB_GUNBOAT, BOB_PAD48, BOB_PAD64, BOB_PAD80, BOB_PAD96,
+	BOB_PAD_LAMP, BOB_SPLASH,
 	BOB_TYPES
 };
+#define BOB_W1_FIRST BOB_FENCE       // world 1's own BOBs: BOB_FENCE .. BOB_FLAG
+#define BOB_W2_FIRST BOB_W2_BARRACKS // world 2's: BOB_W2_BARRACKS .. BOB_SPLASH
 // The chopper's shadow on the track: frame = size * 2 + dither phase (x & 1),
 // size 0 (on the ground) .. SHADOW_SIZES - 1 (high up)
 #define SHADOW_Y (GROUND_Y + 1)
@@ -81,6 +111,16 @@ enum { MAN_STAND, MAN_RUN0, MAN_RUN1, MAN_WAVE0, MAN_WAVE1, MAN_DEAD,
 	MAN_RUNL0, MAN_RUNL1 };
 enum { SMOKE_SMALL, SMOKE_BIG, SMOKE_THIN };   // a puff's life, in thirds
 enum { JET_L, JET_R, JET_FLASH_L, JET_FLASH_R };   // the tell: nose and engine glowing
+// World 2's BOB frames: a boat faces left or right (drawn, not mirrored); the gunboat's tell
+// is its barrel rising (TELL, then FIRE's flash, blinking), FIRE again for the shot's smoke
+enum { PATROL_L, PATROL_R };
+enum { GUNBOAT_L, GUNBOAT_TELL_L, GUNBOAT_FIRE_L, GUNBOAT_R, GUNBOAT_TELL_R, GUNBOAT_FIRE_R };
+enum { PAD_LAMP_RED, PAD_LAMP_YELLOW };                  // off the pad, over it (no green in PF1)
+// A pad is one BOB a width (BOB_PAD48 + (px - 48) / 16: PAD_ROWS tall, an end cap with its pylon, the
+// units with their chevrons, the H, the other cap: main.c puts it together at the card, padCompose); its
+// slab's top row is PAD_Y, the cap's top PAD_SLAB_ROW rows above
+#define PAD_ROWS 46
+#define PAD_SLAB_ROW 30
 
 // The chopper's sprite poses (art/chopper.txt), right-facing. Art frame =
 // pose * 2 + rotor phase; main.c adds ART_CHOPPER_MIRROR for left-facing.
@@ -139,10 +179,24 @@ typedef struct {
 
 typedef struct {
 	int16_t x;
+	int16_t wx;          // where its people wander about: x, or in world 2 halfway to the pad
 	uint8_t hp;          // 0 = open
 	uint8_t released;    // how many have come out
 	uint8_t timer;
 } tBarracks;
+
+// World 2's boats (SPEC 6): placed on a stretch of sea, they patrol it. A patrol boat is
+// unarmed (its art has no tell frame: the bow gun waits for one); a gunboat shells a low or
+// landed chopper in range, after a tell, under the shared ground-threat rules.
+#define BOAT_MAX 6
+enum { BOAT_PATROL, BOAT_GUN };
+typedef struct {
+	int16_t x, x0, x1;   // centre, and the stretch it patrols
+	uint8_t kind, active, hp;
+	int8_t dir;
+	uint8_t tell;        // frames left in the wind-up before a shell (0: none)
+	uint8_t fireAnim, cool, phase;
+} tBoat;
 
 typedef struct {
 	int16_t x;
@@ -255,6 +309,13 @@ typedef struct {
 	tTank pTanks[TANK_MAX];
 	tJet pJets[JET_MAX];
 	tMine pMines[MINE_MAX];
+	uint8_t padPx[W2_ISLANDS];   // each island's pad width by the skill (logicPadPx)
+	tBoat pBoats[BOAT_MAX];
+	uint8_t atkWait;     // frames until another boat may start a tell (one attack at a time, 3 s apart)
+	uint8_t atkLast;     // the boat that started the latest one (it may go on by its own gap)
+	uint8_t wet;         // the skids are in the water (a splash made; rises again when they lift)
+	uint8_t splashTimer; // frames left of the splash drawn at splashX
+	int16_t splashX;
 	tShot pShots[SHOT_MAX];
 	tShot pEShots[ESHOT_MAX];
 	tBoom pBooms[BOOM_MAX];
@@ -293,6 +354,9 @@ typedef struct {
 #define EV2_DAMAGE   0x04     // the chopper took its first hit
 #define EV2_REPAIR   0x08     // landing on the pad mended it
 #define EV2_JETWARN  0x10     // a jet appeared: the incoming-jet warning (a radar flash, an alert)
+#define EV2_SPLASH   0x20     // the skids touched the water (world 2): a soft stop
+#define EV2_BOATTELL 0x40     // a gunboat started its wind-up (a shell follows)
+#define EV2_BOATFIRE 0x80     // a gunboat fired
 
 // --------------------------------------------------------------- tuning ---
 #define VX_MAX 48            // 3 px/frame
@@ -394,6 +458,27 @@ uint8_t logicTankTell(const tGame *g);
 // table as the tank's: 16 on normal, 12 on the hardest), and only while the
 // whole jet is on screen
 uint8_t logicJetTell(const tGame *g);
+// Gunboats (world 2): the barrel rises and the lamp flashes this many frames before every
+// shell: 22 / 18 / 16 / 14 / 12 by skill (16 for GODMODE), longer than a tank's on the low skills
+uint8_t logicBoatTell(const tGame *g);
+#define BOAT_RANGE 220       // a gunboat's sight: no longer than its shell flies (SHELL_LIFE at 1.5 px a frame)
+#define BOAT_MIN_RANGE 56    // and no shot from closer than this
+#define BOAT_ATTACK_GAP 150  // 3 s between one boat's tell starting and the next boat's
+#define BOAT_BOTTOM_Y 248    // the waterline: a boat's last row
+#define BOAT_MUZZLE_Y 224    // where a gunboat's shell leaves
+#define SPLASH_FRAMES 20     // the splash's life (5 frames of 4)
+#define PAD_Y (GROUND_Y - 2) // a pad's slab, its top row (the skids rest on the second row below)
+// Water (world 2): x is over open sea, not an island
+uint8_t logicOnWater(int16_t x);
+// The island whose pad x is over (the pad's width by skill, TOLERANCE px outside its edge), or
+// 0xFF: the base island is W2_BASE_ISLAND
+uint8_t logicPadAt(const tGame *g, int16_t x);
+// The pad's drawn width, px: by the skill and the island's bed, worked out when a mission starts and
+// when the skill changes (it is asked every frame, by the landing, the unloading and the drawing)
+static inline uint8_t logicPadPx(const tGame *g, uint8_t ubIsland) { return g->padPx[ubIsland]; }
+// World 2's hangar and base pad, or world 1's: where the people run to, and the unloading
+static inline int16_t logicHangarX(const tGame *g) { return g->world ? W2_HANGAR_X : HANGAR_X; }
+uint8_t logicOnBasePad(const tGame *g, int16_t x);
 // Jets and a chopper on the ground: frames it must have sat landed (without a
 // break) before a jet may bomb it; GROUND_NEVER on skill 1-2 (they overfly it)
 uint16_t logicGroundDwell(const tGame *g);
@@ -592,9 +677,11 @@ uint8_t logicIsMenu(const tGame *g);                        // the title or the 
 const char *logicBrief(const tGame *g);
 #define ROUTE_SCALE 12
 #define ROUTE_W (WORLD_W / ROUTE_SCALE)   // 256 px
-enum { ROUTE_ENEMY, ROUTE_HOME, ROUTE_FENCE, ROUTE_BARRACKS, ROUTE_PAD, ROUTE_HANGAR, ROUTE_HERE };
+// (World 2's map is world x / 18: ROUTE_ISLAND the land)
+enum { ROUTE_ENEMY, ROUTE_HOME, ROUTE_FENCE, ROUTE_BARRACKS, ROUTE_PAD, ROUTE_HANGAR, ROUTE_HERE,
+	ROUTE_ISLAND };
 typedef struct { uint8_t kind, x, w; } tRouteMark;   // x, w in map px
-#define ROUTE_MARKS (6 + BARRACKS_COUNT)
+#define ROUTE_MARKS (6 + 4 * BARRACKS_COUNT)
 uint8_t logicRouteMap(const tGame *g, tRouteMark *pOut);   // back to front
 
 #endif // _LOGIC_H_

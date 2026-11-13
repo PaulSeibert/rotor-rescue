@@ -50,7 +50,7 @@ pressure, then it ramps. Terrain never kills: it is a wall to route around.
 
 | machine | what it gets |
 |---|---|
-| **A500 OCS, PAL 50 Hz, Kickstart 1.3** | the whole game. README and `agk.toml` state **1 MB (512K chip + 512K slow)**: the 318.2 KB program lives in slow RAM. 50 fps, worst frame 80% (section 11). |
+| **A500 OCS, PAL 50 Hz, Kickstart 1.3** | the whole game. README and `agk.toml` state **1 MB (512K chip + 512K slow)**: the 248.5 KB program (v1.13: 325 KB before the unused ACE code was linked out) lives in slow RAM. 50 fps, worst frame 80% (section 11). |
 | 512K chip, no expansion | **does not boot: AmigaDOS says "Unable to load first: Error code 103"** (no free store). Measured 2026-11-11 on vAmiga with an A500 OCS, Kickstart 1.3 and no slow RAM (decision E, decided by Paul, 2026-11-11: measure only, nothing shrunk); the numbers are under the table. |
 | **A1200 AGA** (found at boot: Lisa's DENISEID low byte `$F8`, `agaDetect` in `main.c`) | a 24-bit copper sky on all 172 sky lines (4 MOVEs a line via BPLCON3 LOCT), a 224-colour title logo (8 planes, `titlelogo8.bin`), quarter-pixel parallax (BPLCON1 35 ns bits) for the clouds, mountains and hills. The game itself is the OCS game. |
 | Kickstart 3.1, AROS ROM | tested profiles `a500-ks31`, `a500-aros`. AROS loads the program at about 5 frames a KB; the first picture arrives at frame 2590 against the harness's 3000-frame boot window (2983 before phase 0's memory pay-back moved the chopper, the BOBs and the bands to a floppy file, section 11). `tests/memory.agk` keeps it at about 2692 or less (the game prints `bootvbl`, CIA-A's TOD count at the first picture, which trails the harness's frames by the ROM's start-up: AROS 102, Kickstart 3.1 138, Kickstart 1.3 333). |
@@ -208,7 +208,7 @@ from "Mountain Night" and "Coastal Dawn" (studio default). Pressure is a plannin
 - **World 1, Border Desert (missions 1-3):** flat desert, dusk / night / dawn, the shipped parallax and perspective plain.
   New: missile trucks and AA guns, garrisons at each barracks, the border convoy (a column crosses the road at about 50%;
   destroying the lead truck stops it; reward: a repair crate and a bonus).
-- **World 2, Coral Islands (4-6):** (*v1.11: the display is built, section 11 "World 2's display"; the gameplay is not.*) bright sea in morning, midday and storm dusk. Sky; clouds /8; distant volcanic islands /4;
+- **World 2, Coral Islands (4-6):** (*v1.11: the display, section 11 "World 2's display". v1.13: the gameplay slice, section 11 "World 2's gameplay": islands, pads and their guide, barracks and people, water, patrol boats and gunboats, the way in from mission 3 and out after mission 6. Not built yet: wind, the winch, radar and jets, the timed freighter, the destroyer. Until the winch is, missions 5 and 6 are mission 4's islands with more gunboats and four barracks of 16.*) bright sea in morning, midday and storm dusk. Sky; clouds /8; distant volcanic islands /4;
   **the sea is the perspective floor** (re-cut to lines 180-207, wave rows in perspective, a 1 px shimmer by time); hills
   dropped; terrain strip from line 208 (48 rows, island height at most about 40 px). Water is not landable (touching it is a soft
   stop with a splash, no damage; decided by Paul). Pads (4.4), wind gusts, ship-deck winch, gunboats, radar sites, a timed
@@ -251,10 +251,9 @@ from "Mountain Night" and "Coastal Dawn" (studio default). Pressure is a plannin
 - **Continue:** a checksummed save file (world, mission, lives, merit, upgrades; about 24 bytes) is written at each world card.
 - The long maps need a per-world radar scale (the HUD radar is 256 px wide; today `ROUTE_SCALE` is 12).
 
-**4.4 Pads and landing aids** (approved, not built)
-- Pad width by skill 96 / 80 / 64 / 56 / 48 px (studio default). Touch-down tolerance 6 px outside the edge. On skill 1-3 an
-  assist nudges you 0.5 px/frame toward the pad's centre during the last 12 px of descent. Two lamps blink (green once your skids
-  are over the pad, red when not), the shadow falls on the pad, the HUD shows a PAD tick.
+**4.4 Pads and landing aids** (approved; *pads, the guide and water built, v1.13*; wind, winch and timed rescues not built)
+- Pad width by skill 96 / 80 / 64 / 56 / 48 px (studio default), on the art's 16 px grid (32 + 16 n: 48, 64, 80 or 96) and cut down to the island's bed (64, 64, 56, 96 px, the base 80): so 96 / 96 / 80 / 64 / 48 on the widest bed and 48 px everywhere on skill 4-5. GODMODE plays as skill 3. Touch-down tolerance 6 px outside the edge. On skill 1-3 an
+  assist nudges you 0.5 px/frame toward the pad's centre during the last 12 px of descent (within 20 px beyond the tolerance). Two lamps blink over the pad's ends (**yellow** once your skids are over the pad, red when not: PF1 has no green) once you are within 150 px, the shadow falls on the pad (and is not drawn over water). *Not built:* the HUD's PAD tick. **Landing is on pads only** in world 2: the beach, a barracks roof and the sea are floors you stop on, not land on. **Water** is a soft stop with a splash: the skids stop at the surface (y 236), one splash a touch (a new one after lifting 6 px), no damage, no life lost.
 - **Wind gusts** (world 2 M5 on): 0.25 px/frame sideways for 3 s every 12-20 s; tell 50 frames before (windsock, spray or snow
   streaks, a rising howl). None while landed; none on skill 1; none within 100 px of a barracks on skill 2-3.
 - **Winch** (world 2 M5 on): hover in a 24 x 20 px box above a ledge, deck or roof; 8 people take 8 s on normal; the climb is
@@ -430,7 +429,8 @@ do not call the pacing "tuned".
 | barracks | 2 (cannon 1 each; a bomb within 30 px does 2) | static; releases 1 person per 8 frames after a 20-frame delay | none; roofs stop bombs and the chopper | burning frames | 25 |
 | *missile truck* (approved, not built; world 1 M2 on) | 3 (cannon); a bomb kills | drives 0.4 px/frame on flat ground, stops to fire | a lobbed missile at your position when you are landed or below 30 px; 1.25 px/frame, flight 80-100 frames, blast radius 20 px; 150 frames reload | stops, rails rise, launcher flashes; **a ground marker blinks from launch**; 36 / 32 / 28 / 24 / 20 frames by skill | 75 |
 | *AA gun site* (world 1 M3 on) | 3; a bomb kills | static | flak burst at your position when you are more than 24 px above the ground, within 260 px; gap 120 / 100 / 85 / 70 / 60 frames; 1 burst live (skill 1-3), 2 (4-5); radius 18 px; **cannot fire at a chopper below 24 px** | barrel swings, muzzle flash, a **ranging puff** at the aim point; 26 / 22 / 18 / 15 / 12 frames | 100 |
-| *gunboat* (world 2 M4 on) | 3; a bomb kills (20 px) | 0.6 px/frame along its sea segment | a shell like a tank's (1.5 px/frame), 85-frame gap on normal; range 220 px, minimum 56 | turret swings up and flashes; 22 / 18 / 16 / 14 / 12 frames | 100 |
+| *gunboat* (world 2 M4 on; *built, v1.13*) | 3 (cannon 1 each); a bomb within 30 px kills | 0.6 px/frame along its sea stretch, braced while it tells | a shell like a tank's (1.5 px/frame, aimed with the chopper's drift and the tank's aim error by skill), the tank's gap (85 on normal, less by mission and skill), only at a chopper that is **low (skids y > 150)**, 56-220 px away, with the **whole boat on screen**, landed only after the ground dwell (R1), not for 2 s after take-off (R2), one tell at a time 150 frames apart (R3); the chopper may have gone when the tell ends: then no shell | barrel rises and the lamp flashes, blinking tell 1 / tell 2; 22 / 18 / 16 / 14 / 12 frames (16 for GODMODE) | 100 |
+| *patrol boat* (world 2 M4 on; *built, v1.13*) | 2 (cannon 1 each); a bomb kills | 0.8 px/frame along its stretch | **none**: its art has no tell frame, and a shot without a tell is not allowed; the bow gun waits for one (question to Paul, section "Open questions") | n/a | 50 |
 | *radar site* (world 2 M5 on) | 4; a bomb kills | static (island, peak or roof) | no shot. While alive, its 1200 px coverage zone (red on the HUD radar and the strip map) is where jets may appear; destroying it ends jets there for the mission. Outside any live zone no jets appear (world 1 has no radar: today's rule). The jet budget per trip stays the cap | the dish turns | 150 |
 | *searchlight tower* (world 4 M10 on) | 4 | beam sweeps in 90 frames | the beam must rest on you; then a flare, then nearby AA and guns fire a volley of 2-3 shots at your lit position, each with its own tell and marker | the beam, the chopper flashing, the flare 12 frames later; beam dwell 60 / 50 / 40 / 34 / 28 frames | 100 |
 | *enemy helicopter* (world 3 M9 on) | 4 (cannon 1 each; a bomb 3) | follows your height at 0.6 px/frame, 3 px/frame horizontal, keeps 80-160 px away, never within 56 | a burst of 3 shots at 1.5 px/frame, 40-frame gap between bursts; 1 helicopter at a time on skill 1-3 | nose swings to you, nose and rotor glow blinks; 24 / 20 / 16 / 14 / 12 frames | 200 |
@@ -824,6 +824,49 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
     start and the route card), a500-aros 63 %, a1200 27 %. The game's start from the title writes nothing (the lists
     are mission 1's), worst 57 %; world 2's load 60 % and the way back to world 1 62 % (both lists written with the
     bitplanes off, pictures not counted). Same pictures as the full rewrite (pixel-compared).
+- **World 2's gameplay** (v1.13; `docs/CONTENT-PLAN.md` sections 2-4; *built*; unit tests `testW2*`, scenarios `tests/w2play.agk`, `tests/w2boats.agk`).
+  - **The land**: `g_pIslands` (`logic.c`) is the tile map's five "island" lines (span, barracks centre, pad centre, widest bed); a unit test
+    checks every column against `logicTerrainFloorY` on `art/world2/tilemap.bin`, so `logicOnWater` (the logic has no map: it lives in the arena)
+    and the tile classes cannot drift apart. Barracks x 160, 1232, 2080, 3120 (mission 4's four islands); pads 256, 1392, 2220, 3312 and the
+    base 4136; the hangar 4212 (past the widest pad's zone). `floorAt` is the old hook: barracks and hangar roofs, then a pad (`logicPadAt`: the
+    pad's width, cached per skill in `g->padPx` and cut to the bed, plus the 6 px) is ground, anything else on the island or the sea a floor
+    to stop on. The base pad is the unloading, the repair and the jet budget's reset (`onBasePad`).
+  - **People**: they wander about half way from the barracks to its pad (`tBarracks.wx`), hear a landed chopper within 160 px (`W2_CALL_RANGE`:
+    a pad is up to 192 px from its barracks), at most `W2_OUT_MAX` (6) are out on the beach at once (the rest come out as those board or die),
+    and unloading runs at 2 px a frame into the hangar (a person on screen is about 1.5 % of an A500 frame: 16 on a beach beside a pad
+    dropped frames, measured in `tests/w2play.agk`).
+  - **Boats** (`tBoat`, `BOAT_MAX` 6, placed by `s_pBoatPlace` per mission, slot kept when a lower skill leaves a gunboat out): mission 4 has
+    two patrol boats and gunboats in the gaps west of islands 2 and 3 (the second from skill 2); missions 5 and 6 have more gunboats (skill 1 /
+    3 / 2 / 4 extras). Rules above (section 6); tests: `testW2BoatsArePlaced`, `testW2BoatTellTable`, `testW2GunboatTellsBeforeItShoots` (every
+    shell after the table's tell, braced), `testW2GunboatFairness` (high chopper, off screen, point-blank, out of sight, take-off grace),
+    `testW2LandedChopperHasGrace` (dwell by skill, never on 1-2), `testW2OneBoatAttackAtATime`, `testW2BoatsCanBeShot`. Boats are on the radar
+    (row 4: gunboat red, patrol boat stone).
+  - **The way through the game**: mission 3's clear goes on to world 2's first mission (lives refill to 3, the score is kept); world 2's third
+    clear is the end (`GS_VICTORY`, "ALL MISSIONS COMPLETE") until world 3 exists. The hall of fame's `reached` is the mission 1-6 (7 = all done:
+    `g_sHiConfig` max 7, the file format unchanged, an old table reads as it was). The card: "MISSION 4 / REEF RUN / 64 HELD ON 4 ISLANDS / PATROL
+    BOATS AND GUNBOATS" and a strip map of the 4608 px at an 18th (the islands, barracks, pads, hangar, the base ours, "you are here"), made at
+    the world's load (making it costs about two frames: not in a card's picture; the boats are in the brief, not on the map).
+  - **Memory** (measured): world 2's BOBs are `disk/world2.bin`'s tail, 20,704 bytes after the 42,720 of display art: the island barracks (4 frames),
+    patrol boat (2: a facing each, one wake), gunboat (6: idle, tell 1, tell 2 a facing, the fire frame is tell 2 held), the pad's parts (lit
+    phase only, no masks: they are put together at the load), lamps, splash. They load over the arena's spare 3,600 bytes and **world 1's own
+    BOBs' chip** (fence, barracks, tank, jet, mine, flag, 9,792 bytes, loaded back from `world1.bin`, now 56,112 bytes, on the way home), and the
+    art block grew by 11,352 bytes for the rest (6,376 for the set, 4,976 for the pads' four composed widths, one BOB each: **a pad is 1 BOB**, not
+    15, which cost 30 points of frame). `diskart.bin`'s layout is now chopper, the BOBs both worlds use, the bands, world 1's BOBs. Chip free
+    in play, lowest (`tests/memory.agk`, `tests/w2play.agk`, asserted 96): world 1 a500 107 KB, a500-ks31 142, a500-aros 148, a1200 1223; world 2 a500 99 KB (was 110: 11 KB
+    for the set; 14 KB was spare). **Per-mission sets, measured** (`tools` sizes of the art as drawn, 48,240 bytes in all): mission 5 adds the radar
+    (5,616) and windsock (480), mission 6 the destroyer (one facing 5,280, both 10,560), its turret (4 frames 1,824, 8: 3,648) and the
+    whitecaps (1,080): a set of 31.8 KB (M5) or 33.9 KB (M6) with the pads' composites, against 25.7 KB today: chip free would be about **92 KB (M5) and 90 KB
+    (M6) on the a500, below the asserted 96**. Levers left: compose only the pad widths the skill uses (1.9 KB at skill 3 for 5.0), no patrol boat in M5/M6
+    (1.2), one destroyer facing, load a mission's own set at its card (the loader is `bobsBind`), or lower the floor (SPEC 2: 64).
+  - **The program**: the unused ACE code was in the executable (the tile and scroll buffers, pak files, chunky and fix-point maths: 77 KB);
+    `-ffunction-sections -fdata-sections` and `-Wl,--gc-sections` (CMakeLists.txt, `-D AGK_GC_SECTIONS=OFF` for `agk profile`, which maps code by
+    object file) drop it: 325,364 -> 248,464 bytes with all of this gameplay in it (332,536 without the link change). AROS's first picture
+    1976 (2347): `tests/memory.agk` now asserts 2100. The new setup code is compiled for size (`COLD`, `-Os`: `bobsBind`, `padCompose`, the
+    routes, `boatsPlace`), and the pad and boat functions called every frame are small, not inlined.
+  - **Frame** (`tests/w2play.agk`, asserted: no dropped frames, worst 85; the game's meter, a500): the walk to a pad and back worst **81 %**
+    (boarding 73 %, unloading 81 %), flight over islands and boats `tests/world2.agk` worst 63 % (card window 63 %: the same as before this slice,
+    the strip map made at the load), average 37-53 %; the game's world-2 numbers grew by the objects (a barracks 3 %, a pad 5 %, a boat 2 %).
+    World 1 (`tests/perf.agk`): worst 68 % (67 before; the world and boat tests in the hot paths).
 - **Sprites:** 0-3 the chopper (32 px, 15 colours, attached pairs, a pose per frame: its 32 frames sit in
   chip once, in the floppy art's block; sprite DMA reads 4 blocks of 352 bytes, one per copper buffer and
   rotor phase, which one queued blit refills only when that buffer's pose changes); 4-5 weather
@@ -913,6 +956,8 @@ writable disk.)
 | shell and missile speeds | WinUAE, play: shells (1.5 px/frame) and missiles (2.5) read as dodgeable but still threatening; the tank gap 85 and the jet gap 40 keep the game hard enough | Paul | unproven; the compensation is a guess |
 | the tank quota | WinUAE, GODMODE 5 or normal: after 10 kills in a mission QUOTA 10 shows on the HUD and further tanks score nothing | Paul | scenario-tested in vAmiga only |
 | world 2's display (v1.11) | WinUAE A500 (Kickstart 1.3 and 3.1, cycle-exact) and A1200: Ctrl+L, W, 4 / 5 / 6, fly the whole map both ways at full speed: no strip column popping in at either edge, no tear or wrong colour on lines 179-180 and 207-208 (the copper's palette and pointer switches), the sea's rows lean and shear smoothly, no seam between the sea and the strip, the islands appear whole under the card; on a real floppy, how long the card's load takes | Paul | **unproven**: vAmiga only (`tests/world2.agk`, `tests/world2pal.agk`; copper timing by a COLOR00 probe, `W2_COP_PROBE`) |
+| world 2's gameplay (v1.13) | WinUAE A500 (Kickstart 1.3 and 3.1, cycle-exact) and A1200, Ctrl+L, W, 4 at skills 1, 3 and 5: the card's strip map reads; the pad's H, chevrons and lamps read at 1x from landing height and the landing feels forgiving (6 px tolerance, the nudge on skill 1-3, a 48 px pad on skill 4-5); the splash and the soft stop at the water; a gunboat's barrel rising and its lamp flashing are noticed 12-22 frames before the shell on a real display; the people come out six at a time without the rescue feeling slow; the unloading run into the hangar; no stutter with a pad, a barracks, six people and a boat on screen (real A500 timing: the game's meter is vAmiga's); the whole of missions 4-6 on the floppy with the card's load (how long it takes) | Paul | **unproven**: vAmiga only (`tests/w2play.agk`, `tests/w2boats.agk`) |
+| the program without the unused ACE code (v1.13) | the game on a real A500 and on WinUAE: nothing the linker dropped was in use (the title, a mission, the hall of fame, the demo, both worlds, the music, all effects; `-Wl,--gc-sections` can only drop what nothing references, but a code path the scenarios never take is the risk) | Paul, WinUAE | **unproven**: all 4 profiles pass their scenarios; no real hardware |
 | the approved new art (landed 567e6c5) | the scrolled bands show no seam at 1x on a real display; the palette reads on all three missions | Paul after the art merge | pending: Paul on WinUAE/real display |
 
 ## Open questions for Paul
@@ -926,6 +971,10 @@ writable disk.)
    skill 4; the warning (radar flash and alert). Studio decision: skill 1-2 never get pairs, skill 3 gets them in mission 3. Is that wanted, or should skill 3 stay single there too?
 6. Add `docs/STYLE.md` (a copy of the pilot's) after the art lands?
 8. Decided in v1.5: a credits screen and an animated ending are in the plan (section 10).
+11. **Patrol boats** (v1.13) are unarmed: their art has no tell frame and a shot needs a tell. Should `amiga-art` draw one (a bow gun flash, 2 frames, about 0.5 KB) so they can shoot, or stay scenery and targets (50 points)?
+12. **People out at once** (v1.13): world 2's barracks release at most 6 at a time and the unloading run is 2 px a frame, because 16 on a beach beside a pad dropped frames. Does the rescue still feel like a rescue at 6, or is a bigger crowd worth a cheaper pad (art) or a cheaper person (the radar dot, the erase)?
+13. **Pad width on skill 4-5** (v1.13): 48 px on every island (the 56 and 48 of the table land on the 16 px grid at 48), 6 px of tolerance, no nudge. Too tight, or the intended edge? And the HUD's PAD tick (not built): wanted, given the lamps?
+14. **Missions 5 and 6** (v1.13) are mission 4's four islands with more gunboats until the winch, the deck, the freighter, wind, radar and the destroyer are built: is that a fair interim for a playtest gate, or should they wait?
 10. Studio defaults awaiting a playtest gate (v1.5): the upgrade list and currency (4.5); the field pad on maps over 4000 px; world and mission names; the ending thresholds (90% / 60%) and tone, no named villain; music (own themes on cards, ending, credits); the tunnel; the scoring caps (first 6 kills a mission for trucks, AA and boats).
 
 ## Version history
@@ -945,3 +994,4 @@ writable disk.)
 | v1.9 | 2026-11-13 | the frame-budget pass (section 11): skill-5 crash 180% -> 96%, hall of fame 135% -> 83%, perf 81% -> 70%; hovering damaged, a smoke puff every 6 frames, and the puffs go in the crash's explosion (section 3); the wait for the vertical blank after the swap (review A3); the land palette at the start of line 179 (review A2) |
 | v1.11 | 2026-11-13 | world 2's display engine (section 11, "World 2's display"): `g->world`, the sea (28 perspective lines), the terrain strip, the per-mission palettes, the world arena and its loads, copper lists sized per world, the debug keys Ctrl+L, W, 1-6; measured copper timing, chip and frame. Not a design change (STYLE-world2, approved) |
 | v1.12 | 2026-11-13 | world 1's mission cards patch the copper lists' colours instead of writing them again (section 11, "Copper lists", "The copper writer"): 4 dropped pictures per card -> none, worst 250 % -> 82 %; world 1's list has a sky MOVE on every line (596 of 661 entries); `tests/w1card.agk`. Not a design change |
+| v1.13 | 2026-11-13 | world 2's gameplay slice (section 11, "World 2's gameplay"; sections 4.1, 4.4, 6, 2, 12): islands and pads and their guide, the island barracks and people (at most 6 out at once), water as a soft stop with a splash, patrol boats (unarmed: no tell frame) and gunboats under the shared ground-threat rules, mission 3 on to mission 4 and mission 6 to the end, the card's brief and strip map, the hall of fame's six missions; the BOB set on the floppy over world 1's BOB chip; **the unused ACE code linked out (325 -> 248 KB)**; not built: wind, winch, radar and jets, the timed freighter, the destroyer (missions 5-6 are mission 4's islands with more gunboats until then) |
