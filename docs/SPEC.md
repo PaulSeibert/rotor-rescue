@@ -13,7 +13,7 @@ for it; text marked *approved, not built* is the contract for work to come. Wher
 not chosen it: revisit at a playtest gate.
 
 Sources, used throughout: `src/logic.c` / `src/logic.h` (rules, tuning, tables), `src/main.c`
-(display, sound, input, text), `src/hiscore.c`, `sound/sound.toml`, `art/art.toml`,
+(display, sound, input, text), `src/hiscore*.c` (the kit's `hiscore` technique, v1.10), `sound/sound.toml`, `art/art.toml`,
 `art/palette.txt`, `agk.toml`, `tests/*.agk`, `tests/unit/test_logic.c`, and the art pilot's
 `~/art-pilot/first/STYLE.md` and `NOTES.md` (approved 2026-11-11). References like `logic.c:454`
 are line numbers at 2c0c4f9. "Derived" means worked out from the code's tables, not measured in
@@ -108,7 +108,7 @@ and the AROS margin.
 | up + fire, facing the screen | turn back to the side you came from: the cannon (so: bomb the tank, up + fire, shoot the jet) |
 | left / right, facing the screen | a sidestep: 2.5 px/frame, full speed in ~5 frames |
 | fire 2, or X | turn: left, front, right, front... (always allowed, never times out) |
-| keys | arrows, Space fire, X turn, P pause (in play), M music, Esc quit |
+| keys | arrows, Space fire, X turn, P pause (in play), M music, Esc quit. While the hall-of-fame initials are up the keyboard types instead: only the stick's button is fire, and Space, P, M, Esc and Ctrl+L are not read (section 10) |
 | Ctrl+L, then 0-5 | difficulty (section 7); Ctrl+L, T / H: debug dumps (parallax fine scroll, hall-of-fame file read-back) |
 | fire on the mission card | skip it |
 
@@ -736,7 +736,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 | in play | HUD: SAVED / ABOARD / LOST / score; choppers left; a radar of the whole battlefield |
 | end of mission | MISSION COMPLETE, SAVED n OF 64, 250 frames, then the next card |
 | game over | GAME OVER, total saved, rank, score; 300 frames, fire skips after 100; then the hall of fame if the score ranks |
-| high scores | a hall of fame of 5 (initials, score, mission reached, rank), saved to the floppy as `rrscores` (56 bytes, checksummed, read at boot); name entry with the stick, 30 s limit; defaults DPS 5000, PRS 4000, ACE 3000, AGK 2000, RTR 1000. A write-protected disk is found with `Info()` before any write; the table still shows with "DISK WRITE-PROTECTED: NOT SAVED". Never brings up a requester |
+| high scores | a hall of fame of 5 (initials, score, mission reached, rank), saved to the floppy as `rrscores` (56 bytes, checksummed, read at boot); name entry **with the stick or typed on the keyboard** (v1.10, the kit's `hiscore` technique, a DPS requirement): stick as before (up/down letter, repeating every 8 frames; fire the next; left back one), keyboard A-Z, 0-9 (the digit row and the keypad), Space, Backspace (blanks the place before the cursor) and Return or keypad Enter (confirms at once: places not reached stay as they were); raw keycodes, so Shift makes no difference; the two can be mixed in one entry; 30 s limit, restarted by any key. Entry is a state of its own: the game's keys (Esc, M, P, Ctrl+L, Space as fire) are not read in it, so typing an M does not mute the music. The file is unchanged (magic `RRH1`, same 56 bytes, so old disks' tables read as they are; a name may now hold digits, which the kit's first copy refused to read back). The table lines are the kit's `hiRow`: `- 1  ABC  012345  MSN 2  CAPTAIN  -` (35 columns; was 31 with `M2`), rebuilt only when the table or the new entry changes; defaults DPS 5000, PRS 4000, ACE 3000, AGK 2000, RTR 1000. A write-protected disk is found with `Info()` before any write; the table still shows with "DISK WRITE-PROTECTED: NOT SAVED". Never brings up a requester |
 | ending | *shipped:* ALL MISSIONS COMPLETE: the tally and a rank. *Approved, not built (v1.5):* an **animated ending of 25-35 s in three outcomes**, by people saved of 768: **90% or more** a sunrise flight home, the crowd waving, the flag raised, the fanfare, credits over the dawn; **60-89%** dusk, empty seats, the names of those saved scroll; **under 60%** night, a lone chopper, a memorial and a silent beat. Built from the engine's bands, sprites and copper sky plus two large stills (studio default thresholds and tone). A game over with no lives left is not an ending: it goes to the hall of fame, as before |
 | credits | *shipped:* the author and publisher lines on the title. *Approved, not built (v1.5):* a **credits screen** (code, art, music, sound, the art tools used, third-party licences; the `modcredits` pattern), a page in the attract loop and after the ending |
 
@@ -845,6 +845,7 @@ writable disk.)
 | line-dithered OCS sky | by eye on a CRT and an LCD: half steps read as a smooth gradient, no visible flicker or lines | Paul | unproven (`tools/checksky.py` checks the table, not the look) |
 | tank tell (16 frames) readable in play | played: the barrel-up flash is noticed before the shell on a real display | Paul playtest | unproven by a person |
 | deep rotor thump by ear | listened to on speakers and on headphones in WinUAE: a heavy whop-whop at 5 a second, faster with speed and climb, a louder spin-up at lift-off, full not thin, no clicks at the loop; with the A500's LED filter on and off | Paul | unproven (agk records it; previews in `sound-preview/rotor`; nobody has judged it by ear) |
+| initials typed on a real keyboard (v1.10) | WinUAE (and a real A500 if possible), a PC keyboard through the host-to-Amiga key map: a score that ranks, then letters with and without Shift, digits on the row and on the keypad, Space, Backspace, Return; P, M and Esc in the middle of an entry type or do nothing, never pause, mute or quit; German-layout Y/Z swap noted (US positions); the stick still works and mixes with the keys | Paul, WinUAE with a real keyboard | **unproven** (vAmiga injects raw codes: `tests/hiscorekeys.agk`) |
 | attract loop and demo | left alone 12 s + 8 s: the hall of fame, then the demo plays the same trip and ends with 16 aboard; fire returns to the title | Paul in WinUAE | scenario-tested in vAmiga only |
 | boot time from a real floppy | fire-to-play measured with a stopwatch on a real A500 or WinUAE at floppy speed | Paul | **not measured** |
 | damage and its blink (decided by Paul, 2026-11-11) | WinUAE, play: take one hit and see the smoke, the slower flight, DAMAGED in the HUD and 2 s of blinking; take a second hit during the blink (nothing happens) and after it (the chopper is lost); land on the pad and see it repaired | Paul | unproven by a person (scenarios check state, the first picture and the HUD pixels) |
@@ -879,4 +880,5 @@ writable disk.)
 | v1.6 | 2026-11-12 | (Paul's playtest, 2026-11-12; studio proposal, pending his playtest): volleys never become bombs (the bomb stance needs a 20-frame down hold with no fire, section 3), eased turn through front with lean frames and a front-facing sway |
 | v1.8 | 2026-11-13 | content plan phase 0, songs (T26), not a design change: the three songs are floppy files loaded a frame each at boot, the theme starting after them (50-200 frames later); program 348,940 -> 318,184 bytes; sections 2, 4, 9, 10, 11; `tests/songs.agk` |
 | v1.7 | 2026-11-12 | content plan phase 0 (T25, program diet), not a design change: the chopper's frames, the BOBs and the bands are a floppy file loaded during the splash; the chopper's sprite DMA reads small per-buffer blocks; chip free in play and the boot times in sections 2, 4 and 11; `tests/memory.agk` |
+| v1.10 | 2026-11-13 | the hall of fame moves to the kit's `hiscore` technique (`src/hiscore.c/.h`, `hiscore_disk.c`, `hiscore_keys.c`): keyboard initials entry (section 10), the game's keys not read in the entry, the table lines from `hiRow`; file format and floppy save unchanged; `tests/hiscorekeys.agk`, `tests/unit/test_logic.c` |
 | v1.9 | 2026-11-13 | the frame-budget pass (section 11): skill-5 crash 180% -> 96%, hall of fame 135% -> 83%, perf 81% -> 70%; hovering damaged, a smoke puff every 6 frames, and the puffs go in the crash's explosion (section 3); the wait for the vertical blank after the swap (review A3); the land palette at the start of line 179 (review A2) |
