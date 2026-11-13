@@ -150,7 +150,9 @@ and the AROS margin.
 - Enemy shots are 4 x 4, mines 12 x 12 (a 14 x 12 target for the cannon), the jet 28 x 10 for a ram
   and 32 x 12 for the cannon. The cannon's box is 6 x 3.
 - **Damage instead of instant loss** (decided by Paul, 2026-11-11; the hero device). The first hit **damages** the
-  chopper: it trails smoke, flies about 20 % slower (`VX_MAX` 48 to 38, the sidestep 40 to 32, climb
+  chopper: it trails smoke (a puff every 3 frames in flight; every 6 landed or hovering, under half a pixel a
+  frame, where they would pile up on one spot; the puffs go with the chopper in the explosion that ends it:
+  v1.9, frame budget), flies about 20 % slower (`VX_MAX` 48 to 38, the sidestep 40 to 32, climb
   28 to 22, descent 32 to 26), everyone aboard is kept, and the HUD's right slot reads DAMAGED in
   place of the skill. The hit is followed by `INVULN_FRAMES` = 100 frames (2 s) in which nothing
   hurts the chopper (shots and mines pass through, a ram does nothing) and it blinks (4 frames
@@ -776,13 +778,22 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   back without changing what is played or heard: last picture's BOBs are erased in the top border
   while the HUD types, the HUD's numbers take one DIVU a digit, and the pacing sample never shares
   a picture with the status line. No dropped frames. Target (average <= 70%, worst < 100%): met.
+  v1.9 (the frame-budget pass, measured on a500 and a500-ks31): `tests/perf.agk` 81% -> 70%; the skill-5
+  loss among explosions (`tests/jets.agk`, now asserted: no dropped frames, `expect-max-load 97`) 180% with
+  11 dropped -> 96% at the crash's first two pictures, 82% before it, the jet's warning 98% -> 57%;
+  `tests/hiscore.agk` (asserted, 90) 135% -> 83%. In the 6-plane lines the bus is full and the program
+  runs from slow RAM, so CPU instructions and blitter words share one budget: the per-picture BOB loop is
+  68000 assembly, the message and HUD text draw only the letters that change, sounds and the serial report
+  run after the swap, the wreck's sprite refill is half. A picture waits for the vertical blank after its
+  swap (review A3), so an overrun costs a frame, never a torn one. The ~90% target at the crash is not met.
 - **Memory:** executable 318.2 KB in slow RAM (phase 0 and songs pay-back; 425.6 KB at `b9d5987`); `expect-min-chip-free 64` (KB) on every
   profile, and 96 in `tests/memory.agk`. Kickstart 3.1's chip RAM was the binding limit when it dipped below 64 KB; earlier
   builds measured lowest chip free 95 / 88 / 155 KB (a500 / ks31 / aros); at v1.2 85 / 83 / 158 KB (a1200 1075 KB); at
   v1.6 73 / 66 / 149 KB (a1200 1058 KB); after the pay-back 119 / 153 / 159 KB (a1200 1153 KB). While the program fills
   the 512K slow RAM, every KB it grows is a KB of chip RAM: watch `fast=` in the `AGK mem` lines (49 KB a500, 8 KB ks31).
 - **Kit techniques used:** `blitq` (blit queue), `copw` (raw copper writer), `text`, `pack` (the
-  packed logos), `perf`, ACE's ptplayer for the music mask; our own splash and title copper
+  packed logos), `perf`, `asmmodule` (the per-picture BOB loop, `src/objblits.s`, its C version kept
+  beside it as `OBJ_BLITS_C`), ACE's ptplayer for the music mask; our own splash and title copper
   pictures. Not used: `wavescript`, `longmap`, `modcredits`, `agahud`.
 - **A1200 extras** (chosen at runtime, A500 unchanged): the 24-bit sky (4 MOVEs a line, all 172
   lines, also on the title); the 224-colour title logo (8 planes at 1x fetch, palette loaded in the
@@ -868,3 +879,4 @@ writable disk.)
 | v1.6 | 2026-11-12 | (Paul's playtest, 2026-11-12; studio proposal, pending his playtest): volleys never become bombs (the bomb stance needs a 20-frame down hold with no fire, section 3), eased turn through front with lean frames and a front-facing sway |
 | v1.8 | 2026-11-13 | content plan phase 0, songs (T26), not a design change: the three songs are floppy files loaded a frame each at boot, the theme starting after them (50-200 frames later); program 348,940 -> 318,184 bytes; sections 2, 4, 9, 10, 11; `tests/songs.agk` |
 | v1.7 | 2026-11-12 | content plan phase 0 (T25, program diet), not a design change: the chopper's frames, the BOBs and the bands are a floppy file loaded during the splash; the chopper's sprite DMA reads small per-buffer blocks; chip free in play and the boot times in sections 2, 4 and 11; `tests/memory.agk` |
+| v1.9 | 2026-11-13 | the frame-budget pass (section 11): skill-5 crash 180% -> 96%, hall of fame 135% -> 83%, perf 81% -> 70%; hovering damaged, a smoke puff every 6 frames, and the puffs go in the crash's explosion (section 3); the wait for the vertical blank after the swap (review A3); the land palette at the start of line 179 (review A2) |

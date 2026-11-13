@@ -22,3 +22,10 @@ wait 600
 expect-no-serial "\A(?:(?!jet tell)[\s\S])*AGK jet fire"
 expect-no-serial "AGK jet fire(?:(?!jet tell)[\s\S])*AGK jet fire"
 expect-no-serial "AGK ERR"
+# The frame budget at skill 5 (SPEC 11: worst < 100% on the A500): the jets'
+# warning, tell and fire, the damage smoke, the chopper lost among explosions and
+# CHOPPER DOWN typing over them. Was 180% worst with 11 dropped (b5333a3); now
+# 96% at the crash's first two pictures (blitter-bound: 9 people, the booms, the
+# barracks), 82% before it. (A picture starts at line 3, so ~98% is the edge.)
+expect-no-dropped-frames
+expect-max-load 97
