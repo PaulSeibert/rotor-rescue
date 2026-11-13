@@ -786,10 +786,12 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
     sea's empty last row, where no PF2 pen shows; the strip's switch at 207 `$D8` is done before line 208's first
     pixel on both.
   - **Copper lists**, sized per world from the layout, both buffers at the larger (measured, `copper_used`): OCS
-    world 1 560, world 2 629 (every mission) of **661** allocated (was 633: +224 bytes of chip for both lists; the
-    art pilot's estimate was "about 500 of 496" from the old 465 count); AGA world 1 1127, world 2 1187 of **1339**
-    (was 1278). World 2's list has a sky MOVE on every line, so its three missions share one layout: a new
-    mission patches its colours (`w2Mission`) instead of writing the list again.
+    world 1 596 (v1.12; 560 before), world 2 629 (every mission) of **661** allocated (was 633: +224 bytes of chip
+    for both lists; the art pilot's estimate was "about 500 of 496" from the old 465 count); AGA world 1 1127, world 2
+    1187 of **1339** (was 1278). Both worlds' lists have a sky MOVE on every line (v1.12: world 1's had one only where
+    the colour changed), so a world's three missions share one layout: a new mission in the same world patches its
+    colours into both lists (`copperMission`: the sky, the floor's or sea's ground, the PF2 palettes) instead of
+    writing them again; only a world's load writes them, with the bitplanes off.
   - **The sea's art** is 768 px wide on the floppy (`make_world_disk.py` widens the 640 px art by its own loops):
     row j loops every 4 (28 + 3 j) px, up to 436, and a row's 336 px fetch starts anywhere in its first loop.
   - **The strip**: a pointer-creep ring (the spike's), 3 separate planes of 44-byte rows (2,734 bytes each, 8.2 KB),
@@ -815,9 +817,13 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
     gameplay slice's objects come on top of these numbers. World 1 unchanged (`tests/perf.agk` 67 %).
   - **The copper writer** writes whole longs (`cwFastWait`, `cwFastMove`: the same bits as ACE's bitfield setters,
     which read-modify-write chip RAM a field at a time). A whole game list still costs most of an A500 frame (the sky
-    loop, the CPU in slow RAM under 6-plane DMA; measured in world 2 before `w2Mission`: 200-277 % pictures, 2-4
-    dropped at each mission card). **World 1's mission starts rewrite both lists on the card the same way and very
-    likely drop pictures there**: not measured (no scenario times a world-1 mission change), not changed here.
+    loop, the CPU in slow RAM under 6-plane DMA; measured in world 2 before its mission patch: 200-277 % pictures,
+    2-4 dropped at each mission card). **World 1's mission cards** (v1.12, `tests/w1card.agk`, asserted: no dropped
+    frames, worst 90): the cards of missions 2 and 3 dropped 4 pictures each, worst 250 %, on a500 and a500-ks31
+    (both lists written again); patched, worst 81-82 % (the patch is ~17 % of that picture, the rest the mission's
+    start and the route card), a500-aros 63 %, a1200 27 %. The game's start from the title writes nothing (the lists
+    are mission 1's), worst 57 %; world 2's load 60 % and the way back to world 1 62 % (both lists written with the
+    bitplanes off, pictures not counted). Same pictures as the full rewrite (pixel-compared).
 - **Sprites:** 0-3 the chopper (32 px, 15 colours, attached pairs, a pose per frame: its 32 frames sit in
   chip once, in the floppy art's block; sprite DMA reads 4 blocks of 352 bytes, one per copper buffer and
   rotor phase, which one queued blit refills only when that buffer's pose changes); 4-5 weather
@@ -938,3 +944,4 @@ writable disk.)
 | v1.10 | 2026-11-13 | the hall of fame moves to the kit's `hiscore` technique (`src/hiscore.c/.h`, `hiscore_disk.c`, `hiscore_keys.c`): keyboard initials entry (section 10), the game's keys not read in the entry, the table lines from `hiRow`; file format and floppy save unchanged; `tests/hiscorekeys.agk`, `tests/unit/test_logic.c` |
 | v1.9 | 2026-11-13 | the frame-budget pass (section 11): skill-5 crash 180% -> 96%, hall of fame 135% -> 83%, perf 81% -> 70%; hovering damaged, a smoke puff every 6 frames, and the puffs go in the crash's explosion (section 3); the wait for the vertical blank after the swap (review A3); the land palette at the start of line 179 (review A2) |
 | v1.11 | 2026-11-13 | world 2's display engine (section 11, "World 2's display"): `g->world`, the sea (28 perspective lines), the terrain strip, the per-mission palettes, the world arena and its loads, copper lists sized per world, the debug keys Ctrl+L, W, 1-6; measured copper timing, chip and frame. Not a design change (STYLE-world2, approved) |
+| v1.12 | 2026-11-13 | world 1's mission cards patch the copper lists' colours instead of writing them again (section 11, "Copper lists", "The copper writer"): 4 dropped pictures per card -> none, worst 250 % -> 82 %; world 1's list has a sky MOVE on every line (596 of 661 entries); `tests/w1card.agk`. Not a design change |
