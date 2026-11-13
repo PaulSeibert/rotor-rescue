@@ -1,0 +1,95 @@
+# World 2 (Coral Islands) art, in art/disk_art.toml's format. Not merged into disk_art.toml yet (integration is a separate step):
+# paste these tables there (the paths are relative to art/, as disk_art.toml's are). `make_world2.py --convert` runs agk's converter on this file.
+# The bands' `palette` is mission 4's; missions 5 and 6 load their own from palettes/ (copper moves, no new art).
+[art]
+depth = 3
+
+[w2_tiles]                  # 36 tile columns 16 x 48 stacked (frame i = tile i), PF2 island pens
+source = "world2/terrain_tiles.txt"
+kind = "bitmap"
+depth = 3
+palette = "world2/palettes/m4_reef_run_island.txt"
+
+[w2_clouds]                  # 320 x 40, camera / 8
+source = "world2/clouds.txt"
+kind = "bitmap"
+depth = 3
+palette = "world2/palettes/m4_reef_run_clouds.txt"
+wrap_x = 320
+
+[w2_far]                  # 320 x 60, camera / 4: the far islands + the far strip
+source = "world2/far_islands.txt"
+kind = "bitmap"
+depth = 3
+palette = "world2/palettes/m4_reef_run_far.txt"
+wrap_x = 320
+
+[w2_sea]                  # 640 x 28, a loop per row (W_j = 4 (28 + 3 j))
+source = "world2/sea_floor.txt"
+kind = "bitmap"
+depth = 3
+palette = "world2/palettes/m4_reef_run_sea.txt"
+
+[w2_patrol_boat]                  # 4 frame(s) 43 x 17
+source = "world2/patrol_boat.txt"
+kind = "bob"
+
+[w2_gunboat]                  # 8 frame(s) 61 x 30
+source = "world2/gunboat.txt"
+kind = "bob"
+
+[w2_destroyer_hull]                  # 2 frame(s) 154 x 44
+source = "world2/destroyer_hull.txt"
+kind = "bob"
+
+[w2_destroyer_turret]                  # 8 frame(s) 32 x 19
+source = "world2/destroyer_turret.txt"
+kind = "bob"
+
+[w2_barracks]                  # 4 frame(s) 51 x 31
+source = "world2/barracks.txt"
+kind = "bob"
+
+[w2_pad_cap]                  # 4 frame(s) 8 x 46
+source = "world2/pad_cap.txt"
+kind = "bob"
+
+[w2_pad_slab]                  # 6 frame(s) 8 x 16
+source = "world2/pad_slab.txt"
+kind = "bob"
+
+[w2_pad_centre]                  # 2 frame(s) 16 x 16
+source = "world2/pad_centre.txt"
+kind = "bob"
+
+[w2_pad_lamp]                  # 2 frame(s) 5 x 5
+source = "world2/pad_lamp.txt"
+kind = "bob"
+
+[w2_radar]                  # 4 frame(s) 33 x 39
+source = "world2/radar.txt"
+kind = "bob"
+
+[w2_windsock]                  # 2 frame(s) 10 x 20
+source = "world2/windsock.txt"
+kind = "bob"
+
+[w2_splash]                  # 5 frame(s) 24 x 24
+source = "world2/splash.txt"
+kind = "bob"
+
+[w2_bow_spray]                  # 2 frame(s) 12 x 8
+source = "world2/bow_spray.txt"
+kind = "bob"
+
+[w2_whitecap]                  # 3 frame(s) 34 x 10
+source = "world2/whitecap.txt"
+kind = "bob"
+
+# Destroyer turret mounts: the turret frame's top-left on the hull frame, in px (one turret art, two mounts).
+# left-facing, aft turret: x 122, y 11
+# left-facing, forward turret: x -7, y 11
+# right-facing, aft turret: x 0, y 11
+# right-facing, forward turret: x 129, y 11
+# Pad: assemble from 8 px units on a 46-row canvas: cap (rows 0-45), then slab units at row 30 (cap, chevron or plain units
+# pointing in, the 16 px centre H, units, cap): 48, 64, 80 or 96 px; lit and dark phases blink.

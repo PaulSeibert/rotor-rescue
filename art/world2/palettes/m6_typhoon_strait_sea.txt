@@ -1,0 +1,9 @@
+# World 2 sea palette, mission 6 Typhoon Strait (storm dusk). PF2 pens 1-7, dark to light; 0 is transparent.
+0  0x000  transparent
+1  0x022  s1
+2  0x033  s2
+3  0x145  s3
+4  0x367  s4
+5  0x588  s5
+6  0x9BB  s6
+7  0xDEE  s7

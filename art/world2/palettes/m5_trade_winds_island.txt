@@ -1,0 +1,9 @@
+# World 2 island palette, mission 5 Trade Winds (midday haze). PF2 pens 1-7, dark to light; 0 is transparent.
+0  0x000  transparent
+1  0x023  i1
+2  0x153  i2
+3  0x5B3  i3
+4  0x985  i4
+5  0xEDA  i5
+6  0x9EF  i6
+7  0xFFF  i7

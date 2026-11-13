@@ -1,0 +1,63 @@
+# Tile map: 288 columns of 16 px = 4608 px, one byte each (index into terrain_tiles.txt). Same map in all three missions.
+# index  tile
+ 0  water0
+ 1  water1
+ 2  water2
+ 3  water3
+ 4  water4
+ 5  water5
+ 6  water6
+ 7  water7
+ 8  flat0
+ 9  flat1
+10  flat2
+11  flat3
+12  shoreL0_0
+13  shoreL0_1
+14  shoreR0_0
+15  shoreR0_1
+16  shoreL1_0
+17  shoreL1_1
+18  shoreR1_0
+19  shoreR1_1
+20  palmA_0
+21  palmA_1
+22  palmB_0
+23  palmB_1
+24  palmC_0
+25  palmC_1
+26  bush0
+27  bush1
+28  rock0_0
+29  rock0_1
+30  rock1_0
+31  rock1_1
+32  reef0
+33  reef1
+34  padbed0
+35  padbed1
+# islands, in tile columns: first column, count, the 4 flat tiles under the barracks, the pad bed (pad width in px)
+island first=4 columns=28 barracks=8 pad=14 pad_px=64
+island first=66 columns=38 barracks=75 pad=85 pad_px=64
+island first=120 columns=30 barracks=128 pad=137 pad_px=56
+island first=184 columns=40 barracks=193 pad=204 pad_px=96
+island first=250 columns=36 barracks=None pad=256 pad_px=80 base
+# the map: tile index per column, 16 columns a line (first column number on the left)
+  0:  0  6  5  4 16 17  8 24  9 10 11  8 11 24 34 35
+ 16: 34 35 34 35 23 10 28 29 30 29 11  8 27 27 18 19
+ 32:  1  5  1  1  0  7  1  1  3  2  2  2  2  3  5 33
+ 48:  4  1  4  6 32  0  7  3  3  0  7  3  5  0  2  0
+ 64:  5  6 12 13 28 29 11  8 10 20 21 10 11  8  9 10
+ 80: 11  8 27 20 21 34 35 34 35 34 35 20 21 22 23 10
+ 96: 26 27  8 26 11 10 14 15  1  3  6  7  1  3 32  2
+112:  1  1  4  6  4  1  6  5 16 17 20 21  9  8  8 10
+128: 11  8  9 10 27 26  8 10  8 34 35 34 35 34 10  9
+144: 24 25 26 10 18 19  2  6  6  6  7  0  1  1  6  2
+160: 32  7  4  4  3  5  0  4  4  3  6 33  2  4  1  6
+176:  1  6  1  7  6  6  4  0 12 13 10 26 22 23 26 26
+192:  9  8  9 10 11 27 10 22 23 26  9 22 34 35 34 35
+208: 34 35 34 35  8 10 11 27 24 25 27 22 23 11 14 15
+224:  5  5  3  4  3  6  3  5  0  0  1  0 32  0  4  5
+240:  7  1  6  1  4  3  1  0  0  7 16 17  8  8 30 29
+256: 34 35 34 35 34 35 34 21 11  8  8 27 24 25 10 10
+272: 22 23 27 22 23 10 24 25 24 25 10 11 18 19  0  0

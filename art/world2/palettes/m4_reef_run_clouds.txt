@@ -1,0 +1,9 @@
+# World 2 clouds palette, mission 4 Reef Run (morning). PF2 pens 1-7, dark to light; 0 is transparent.
+0  0x000  transparent
+1  0x59B  c1
+2  0x7BC  c2
+3  0x9CD  c3
+4  0xBDE  c4
+5  0xDEE  c5
+6  0xFEE  c6
+7  0xFFF  c7
