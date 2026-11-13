@@ -1093,6 +1093,113 @@ static void testFloorCopper(void) {
 	}
 }
 
+// World 2's sea (STYLE-world2 section 2): line j at (28 + 3 j) / 112 of the
+// camera, so line 180 moves at 1/4 and line 207 at 109/112; each row loops in
+// its own 4 (28 + 3 j) px; logicSeaScroll's copper values equal the exact
+// reference at every camera of the period (and past it), OCS and AGA
+static void testSeaCopper(void) {
+	enum { STRIDE = 7, ROW = 288, BASE = ROW - 42 };
+	uint16_t pOut[SEA_LINES * STRIDE];
+	CHECK(logicSeaX4(4, 0) == 4);                       // 1/4: 1 px for 4 of camera (4 quarters)
+	CHECK(logicSeaX4(112, SEA_LINES - 1) == 436);       // 109/112: 109 px for 112
+	for(uint8_t j = 0; j < SEA_LINES; ++j) {
+		CHECK(logicSeaX4(SEA_PERIOD - 1, j) < 16u * (28u + 3u * j));   // inside its loop
+		CHECK(logicSeaX4(SEA_PERIOD, j) == 0);                          // the period
+	}
+	for(uint8_t isAga = 0; isAga < 2; ++isAga) {
+		uint16_t uwMask = isAga ? 0xFFFF : 0xFFFC;
+		for(int16_t c = 0; c < W2_W - SCREEN_W; c = (int16_t)(c + (c < SEA_PERIOD ? 1 : 13))) {
+			for(uint16_t i = 0; i < SEA_LINES * STRIDE; ++i) pOut[i] = 0xDEAD;
+			int16_t wOff0 = logicSeaScroll(c, uwMask, BASE, pOut, STRIDE);
+			int16_t pOff[SEA_LINES];
+			for(uint8_t j = 0; j < SEA_LINES; ++j) {
+				uint16_t x4 = (uint16_t)(logicSeaX4(c, j) & uwMask);
+				pOff[j] = logicScrollByteOffset4(x4);
+				CHECK(pOut[j * STRIDE] == logicScrollCon1Pf2Aga(x4));
+				CHECK(pOut[j * STRIDE + 1] == 0xDEAD && pOut[j * STRIDE + 3] == 0xDEAD);
+				// the fetch (21 words from the row's offset) stays inside a 768 px row
+				CHECK(pOff[j] >= -2 && pOff[j] + 42 <= 96);
+			}
+			CHECK(wOff0 == pOff[0]);
+			for(uint8_t j = 0; j + 1 < SEA_LINES; ++j) CHECK(pOut[j * STRIDE + 2] == (uint16_t)(BASE + pOff[j + 1] - pOff[j]));
+			CHECK(pOut[(SEA_LINES - 1) * STRIDE + 2] == 0xDEAD);   // the last line's modulo: the list's own
+		}
+	}
+}
+
+// A 24-bit gradient: its ends exact, every channel monotonic between them
+static void testGrad24(void) {
+	CHECK(logicGrad24(0x2488CC, 0xCCFFEE, 0, 156) == 0x2488CC);
+	CHECK(logicGrad24(0x2488CC, 0xCCFFEE, 155, 156) == 0xCCFFEE);
+	CHECK(logicGrad24(0xCCFFEE, 0x1A7C9A, 27, 28) == 0x1A7C9A);
+	uint32_t ulPrev = logicGrad24(0xCCFFEE, 0x1A7C9A, 0, 28);
+	for(uint8_t i = 1; i < 28; ++i) {
+		uint32_t ul = logicGrad24(0xCCFFEE, 0x1A7C9A, i, 28);
+		for(uint8_t s = 0; s < 24; s = (uint8_t)(s + 8)) CHECK(((ul >> s) & 0xFF) <= ((ulPrev >> s) & 0xFF));
+		ulPrev = ul;
+	}
+	uint16_t pSea[SEA_LINES];
+	logicGradFill(0xCFE, 0x179, SEA_LINES, pSea);
+	CHECK(pSea[0] == 0xCFE && pSea[SEA_LINES - 1] == 0x179);
+}
+
+// World 2's display slice: the debug start puts a game on world 2's map, at its
+// base pad, with no barracks, enemies or weather, the camera free over all
+// 4608 px; a new game is world 1 again, unchanged
+static void testWorld2Start(void) {
+	logicInit(&g);
+	logicStartAt(&g, 1, 0);
+	CHECK(g.world == 1 && g.mission == 0 && g.state == GS_INTRO && g.lives == LIVES_START);
+	CHECK(g.chop.x == W2_START_X && logicWorldW(&g) == W2_W);
+	step(NONE, INTRO_FRAMES + 1);
+	CHECK(g.state == GS_PLAY);
+	g.spawnTimer = 1;
+	tInput left = {0};
+	left.dx = -1;
+	tInput up = {0};
+	up.dy = -1;
+	step(up, 40);
+	for(int i = 0; i < 2000; ++i) {
+		step(left, 1);
+		for(uint8_t t = 0; t < TANK_MAX; ++t) CHECK(!g.pTanks[t].active);
+		for(uint8_t t = 0; t < JET_MAX; ++t) CHECK(!g.pJets[t].active);
+		for(uint8_t t = 0; t < MINE_MAX; ++t) CHECK(!g.pMines[t].active);
+	}
+	CHECK(g.cam == 0 && g.chop.x < 100);
+	tWeatherFrame w;
+	CHECK(!logicWeather(&g, &w));
+	tDraw pDraw[DRAW_MAX];
+	uint8_t n = logicDraw(&g, pDraw);
+	for(uint8_t i = 0; i < n; ++i) CHECK(pDraw[i].bob != BOB_HANGAR && pDraw[i].bob != BOB_BARRACKS && pDraw[i].bob != BOB_FENCE);
+	tInput right = {0};
+	right.dx = 1;
+	step(right, 1800);
+	CHECK(g.cam == W2_W - SCREEN_W && g.chop.x <= W2_W - 24 && g.chop.x > W2_W - 200);
+	CHECK(logicRadarX2(0) == 0 && logicRadarX2(W2_W - 1) == RADAR_W - 1 && logicRadarX2(2400) == 100);
+	logicStartAt(&g, 1, 2);   // mission 6, from play: lives and score kept
+	CHECK(g.world == 1 && g.mission == 2 && g.chop.x == W2_START_X);
+	logicStartGame(&g);
+	CHECK(g.world == 0 && g.chop.x == START_X && logicWorldW(&g) == WORLD_W);
+	CHECK(logicTankLimit(&g) >= 1);
+	logicStartAt(&g, 1, 0);
+	g.state = GS_OVER;
+	g.stateTimer = 1;
+	step(NONE, 2);
+	CHECK(g.world == 0);   // the title / hall of fame are world 1's
+}
+
+// World 2's floor hook: island tiles are ground, water and reef are not
+static void testTerrainFloor(void) {
+	uint8_t pMap[W2_MAP_COLS];
+	for(uint16_t i = 0; i < W2_MAP_COLS; ++i) pMap[i] = (uint8_t)(i % 36);
+	CHECK(logicTerrainFloorY(pMap, 0) == TERRAIN_WATER);            // water0
+	CHECK(logicTerrainFloorY(pMap, 7 * 16 + 15) == TERRAIN_WATER);  // water7
+	CHECK(logicTerrainFloorY(pMap, 8 * 16) == GROUND_Y);            // flat0
+	CHECK(logicTerrainFloorY(pMap, 32 * 16 + 3) == TERRAIN_WATER);  // reef0
+	CHECK(logicTerrainFloorY(pMap, 34 * 16) == GROUND_Y);           // pad bed
+	CHECK(logicTerrainFloorY(pMap, -1) == TERRAIN_WATER && logicTerrainFloorY(pMap, W2_W) == TERRAIN_WATER);
+}
+
 // The plain's ground under the floor (COLOR00): from the sky's own colour at
 // the floor's first line (no seam with the haze above) to C, the land
 // palette's pen 6, at its last (the hills stand on it), line-dithered
@@ -2469,6 +2576,10 @@ int main(void) {
 	testScrollMathsAga();
 	testFloorSpeeds();
 	testFloorCopper();
+	testSeaCopper();
+	testGrad24();
+	testWorld2Start();
+	testTerrainFloor();
 	testFloorGround();
 	testSkyGradient();
 	testSkyDither();

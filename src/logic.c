@@ -93,7 +93,7 @@ static void weatherUpdate(tGame *g) {
 }
 
 uint8_t logicWeather(const tGame *g, tWeatherFrame *pW) {
-	if(g->state != GS_PLAY && g->state != GS_LOST) return 0;
+	if((g->state != GS_PLAY && g->state != GS_LOST) || g->world) return 0;   // (world 2's weather: the gameplay slice)
 	uint16_t uwPos = (uint16_t)(g->wxFall >> 2);
 	pW->off = (uint8_t)(uwPos & (WX_PITCH - 1));
 	pW->wraps = (uint8_t)(uwPos >> 4);
@@ -196,6 +196,8 @@ static void boomAt(tGame *g, int16_t x, int16_t y) {
 }
 
 static void setState(tGame *g, uint8_t ubState, uint16_t uwTimer) {
+	// (the title, the hall of fame and a new entry are world 1's: main.c loads its art back)
+	if(ubState == GS_TITLE || ubState == GS_SCORES || ubState == GS_ENTRY) g->world = 0;
 	g->state = ubState;
 	g->stateTimer = uwTimer;
 	g->events |= EV_STATE;
@@ -404,7 +406,7 @@ COLD void logicChopperRespawn(tGame *g) {
 	tChopper *c = &g->chop;
 	uint8_t *p = (uint8_t *)c;
 	for(uint16_t i = 0; i < sizeof(*c); ++i) p[i] = 0;
-	c->x = START_X;
+	c->x = g->world ? W2_START_X : START_X;
 	c->y = GROUND_Y;
 	c->landed = 1;
 	c->alive = 1;
@@ -428,8 +430,11 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->spawnTimer = (uint16_t)(700 - ubMission * 150);   // a quiet start
 	g->wxFall = 0x8000;
 	g->wxDrift = 0;
+	// (world 2's display slice has no barracks yet: world 1's stand far off its map,
+	// where no shot or bomb reaches and nothing is drawn)
+	int16_t wBarracksOff = g->world ? -4000 : 0;
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
-		g->pBarracks[b].x = s_pBarracksX[b];
+		g->pBarracks[b].x = (int16_t)(s_pBarracksX[b] + wBarracksOff);
 		g->pBarracks[b].hp = 2;
 		g->pBarracks[b].released = 0;
 		g->pBarracks[b].timer = 0;
@@ -438,7 +443,7 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 		tHostage *h = &g->pHostages[i];
 		h->home = (int8_t)(i / HOSTAGES_PER_BARRACKS);
 		h->state = HS_INSIDE;
-		h->x = s_pBarracksX[h->home];
+		h->x = g->pBarracks[h->home].x;
 		h->anim = 0;
 		h->timer = 0;
 		h->dir = 1;
@@ -460,7 +465,20 @@ COLD void logicStartGame(tGame *g) {
 	g->lives = LIVES_START;
 	g->score = 0;
 	g->savedTotal = 0;
+	g->world = 0;
 	logicStartMission(g, 0);
+}
+
+COLD void logicStartAt(tGame *g, uint8_t ubWorld, uint8_t ubMission) {
+	if(g->demo || ubWorld >= WORLD_COUNT || ubMission >= MISSION_COUNT) return;
+	if(logicIsMenu(g) || g->state == GS_ENTRY || g->state == GS_OVER || g->state == GS_VICTORY) {
+		g->lives = LIVES_START;
+		g->score = 0;
+		g->savedTotal = 0;
+		g->titleArmed = 0;
+	}
+	g->world = ubWorld;
+	logicStartMission(g, ubMission);
 }
 
 // ---------------------------------------------------------- difficulty ---
@@ -515,17 +533,19 @@ void logicSetDifficulty(tGame *g, uint8_t ubLevel) {
 	if(ubLevel <= DIFFICULTY_MAX) g->difficulty = ubLevel;
 }
 
+// (world 2: no enemies in its display slice; the gameplay slice gives it its own)
 uint8_t logicTankLimit(const tGame *g) {
+	if(g->world) return 0;
 	int16_t n = (int16_t)(1 + g->trip + g->mission + s_pTankExtra[g->difficulty]);
 	return (uint8_t)(n < 1 ? 1 : n > TANK_MAX ? TANK_MAX : n);
 }
 
 uint8_t logicJetsOn(const tGame *g) {
-	return g->trip + g->mission >= s_pJetsFrom[g->difficulty];
+	return !g->world && g->trip + g->mission >= s_pJetsFrom[g->difficulty];
 }
 
 uint8_t logicMinesOn(const tGame *g) {
-	return g->trip + g->mission >= s_pMinesFrom[g->difficulty];
+	return !g->world && g->trip + g->mission >= s_pMinesFrom[g->difficulty];
 }
 
 uint8_t logicTankTell(const tGame *g) {
@@ -745,7 +765,7 @@ static int16_t floorAt(const tGame *g, int16_t x, uint8_t *pIsGround) {
 			return FEET_Y - 28;
 		}
 	}
-	if(x + 14 > HANGAR_X && x - 14 < HANGAR_X + 64) {
+	if(!g->world && x + 14 > HANGAR_X && x - 14 < HANGAR_X + 64) {
 		*pIsGround = 0;
 		return FEET_Y - 40;
 	}
@@ -915,7 +935,7 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 	subStep(&c->x, c->vx, &c->fx);
 	subStep(&c->y, c->vy, &c->fy);
 	if(c->x < 24) { c->x = 24; c->vx = 0; }
-	if(c->x > WORLD_W - 24) { c->x = WORLD_W - 24; c->vx = 0; }
+	if(c->x > logicWorldW(g) - 24) { c->x = (int16_t)(logicWorldW(g) - 24); c->vx = 0; }
 	if(c->y < CEIL_Y) { c->y = CEIL_Y; c->vy = 0; }
 	uint8_t isGround;
 	int16_t wFloor = floorAt(g, c->x, &isGround);
@@ -1106,7 +1126,7 @@ __attribute__((noinline)) static void shotsUpdate(tGame *g) {
 				continue;
 			}
 		}
-		if(!--s->life || s->x < 0 || s->x >= WORLD_W) s->active = 0;
+		if(!--s->life || s->x < 0 || s->x >= logicWorldW(g)) s->active = 0;
 	}
 }
 
@@ -1137,7 +1157,7 @@ __attribute__((noinline)) static void eshotsUpdate(tGame *g) {
 			hostagesBlast(g, s->x, 8);   // shells landing among people
 			continue;
 		}
-		if(!--s->life || s->y < PLAY_TOP || s->x < 0 || s->x >= WORLD_W) s->active = 0;
+		if(!--s->life || s->y < PLAY_TOP || s->x < 0 || s->x >= logicWorldW(g)) s->active = 0;
 	}
 }
 
@@ -1450,7 +1470,7 @@ static int16_t leadTarget(const tGame *g) {
 static int16_t cameraWanted(const tGame *g) {
 	// whole pixels on both sides: the chopper's screen x is exactly
 	// SCREEN_W / 2 - lead, whatever its own sub-pixel is doing
-	return clampw((int16_t)(g->chop.x - SCREEN_W / 2 + (g->camLead >> 4)), 0, WORLD_W - SCREEN_W);
+	return clampw((int16_t)(g->chop.x - SCREEN_W / 2 + (g->camLead >> 4)), 0, (int16_t)(logicWorldW(g) - SCREEN_W));
 }
 
 static void cameraPlace(tGame *g) {
@@ -1477,11 +1497,11 @@ static void cameraPlace(tGame *g) {
 		if(aw <= 1) g->camPan = 0;                     // arrived: follow again
 	}
 	int16_t as = s < 0 ? (int16_t)-s : s;
-	int16_t room = s > 0 ? (int16_t)(WORLD_W - SCREEN_W - g->cam) : (int16_t)g->cam;
+	int16_t room = s > 0 ? (int16_t)(logicWorldW(g) - SCREEN_W - g->cam) : (int16_t)g->cam;
 	if(as > 1 && room < (int16_t)((uint16_t)((uint16_t)as * (uint16_t)(as + 1)) >> 1)) {
 		s = (int16_t)(s > 0 ? s - 1 : s + 1);   // brake for the edge
 	}
-	g->cam = clampw((int16_t)(g->cam + s), 0, WORLD_W - SCREEN_W);
+	g->cam = clampw((int16_t)(g->cam + s), 0, (int16_t)(logicWorldW(g) - SCREEN_W));
 	g->camStep = s;
 }
 
@@ -1852,10 +1872,12 @@ static uint8_t drawAdd(tDraw *pOut, uint8_t n, int16_t sx, int16_t sy, uint8_t b
 uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 	uint8_t n = 0;
 	int16_t cam = g->cam;
-	// structures
-	n = drawAdd(pOut, n, (int16_t)(HANGAR_X - cam), FEET_Y - 40, BOB_HANGAR, 0);
-	n = drawAdd(pOut, n, (int16_t)(BASE_PAD_X0 - 20 - cam), FEET_Y - 24, BOB_FLAG, (uint8_t)((g->frame >> 4) & 1));
-	n = drawAdd(pOut, n, (int16_t)(BORDER_X - 8 - cam), FEET_Y - 32, BOB_FENCE, 0);
+	// structures (world 1's base and fence)
+	if(!g->world) {
+		n = drawAdd(pOut, n, (int16_t)(HANGAR_X - cam), FEET_Y - 40, BOB_HANGAR, 0);
+		n = drawAdd(pOut, n, (int16_t)(BASE_PAD_X0 - 20 - cam), FEET_Y - 24, BOB_FLAG, (uint8_t)((g->frame >> 4) & 1));
+		n = drawAdd(pOut, n, (int16_t)(BORDER_X - 8 - cam), FEET_Y - 32, BOB_FENCE, 0);
+	}
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
 		const tBarracks *pB = &g->pBarracks[b];
 		uint8_t f = pB->hp == 2 ? BARRACKS_OK : pB->hp == 1 ? BARRACKS_HIT :
@@ -2014,6 +2036,56 @@ int16_t logicFloorScroll(int16_t wCam, uint16_t uwX4Mask, uint16_t uwModBase, ui
 	return wOff0;
 }
 
+// World 2's sea (logic.h). Row j at camera c (mod 448): c (28 + 3 j) / 28
+// quarters = c + 3 c j / 28; with 3 c = 28 q + b that is c + q j + (b j) / 28,
+// so each line adds q and b (a carry when the 28ths pass a whole). Its loop
+// is 16 (28 + 3 j) quarters, the same 448 px of camera for every row.
+_Static_assert(SEA_PERIOD == 4 * 112, "every sea row's loop is whole pixels");
+#ifndef __m68k__
+uint16_t logicSeaX4(int16_t wCam, uint8_t j) {
+	uint16_t c = (uint16_t)wCam % SEA_PERIOD;
+	return (uint16_t)((uint32_t)c * (28u + 3u * j) / 28u);
+}
+#endif
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("Os")))
+#endif
+int16_t logicSeaScroll(int16_t wCam, uint16_t uwX4Mask, uint16_t uwModBase, uint16_t *pOut, uint8_t ubStride) {
+	uint16_t c = (uint16_t)wCam;
+	while(c >= SEA_PERIOD) c = (uint16_t)(c - SEA_PERIOD);
+	uint16_t uw3c = (uint16_t)(3 * c);
+	// q = 3c / 28: 2341 = 65536 / 28 rounded up is exact for 3c < 1344 (the error stays
+	// under 1/28); a 16 x 16 multiply (mulu.w), no divide
+	uint16_t q = (uint16_t)(((uint32_t)uw3c * (uint16_t)2341u) >> 16);
+	uint16_t b = (uint16_t)(uw3c - 28 * q), r = 0;
+	uint16_t x4 = c;
+	uint16_t x4m = x4 & uwX4Mask;
+	int16_t wOff0 = (int16_t)((((int16_t)x4m - 1) >> 5) & ~1), wPrev = wOff0;
+	pOut[0] = s_pFloorCon1[x4m & 63];
+	uint16_t *pMod = pOut + 2;
+	for(uint8_t j = 1; j < SEA_LINES; ++j) {
+		pOut += ubStride;
+		x4 = (uint16_t)(x4 + q);
+		r = (uint16_t)(r + b);
+		if(r >= 28) { r = (uint16_t)(r - 28); ++x4; }
+		x4m = x4 & uwX4Mask;
+		int16_t wOff = (int16_t)((((int16_t)x4m - 1) >> 5) & ~1);
+		pOut[0] = s_pFloorCon1[x4m & 63];
+		*pMod = (uint16_t)(uwModBase + wOff - wPrev);
+		pMod = pOut + 2;
+		wPrev = wOff;
+	}
+	return wOff0;
+}
+
+// World 2's terrain: tile classes of art/world2/tilemap.txt (0-7 water, 32-33 reef)
+uint8_t logicTerrainFloorY(const uint8_t *pMap, int16_t x) {
+	if(x < 0 || x >= W2_W) return TERRAIN_WATER;
+	uint8_t t = pMap[(uint16_t)x >> 4];
+	return (t < 8 || t == 32 || t == 33) ? TERRAIN_WATER : GROUND_Y;
+}
+
 // ----------------------------------------------------------------- colours ---
 
 static uint16_t mix(uint16_t a, uint16_t b, uint16_t t, uint16_t n) {
@@ -2075,6 +2147,26 @@ COLD static void ditherFill(uint16_t uwA, uint16_t uwB, uint8_t ubLines, uint16_
 COLD void logicSkyFillDither(uint8_t ubMission, uint16_t *pOut) {
 	// logicSkyColorDither line by line
 	ditherFill(s_pSkyTop[ubMission], s_pSkyLow[ubMission], SKY_LINES, pOut);
+}
+
+COLD void logicGradFill(uint16_t uwA, uint16_t uwB, uint8_t ubLines, uint16_t *pOut) {
+	ditherFill(uwA, uwB, ubLines, pOut);
+}
+
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("Os")))   // (A1200 startup only)
+#endif
+COLD uint32_t logicGrad24(uint32_t ulA, uint32_t ulB, uint8_t ubLine, uint8_t ubLines) {
+	// per 8-bit channel a + (b - a) line / (lines - 1), rounded to nearest (32-bit maths: startup)
+	const int32_t n = (int32_t)ubLines - 1;
+	uint32_t ulOut = 0;
+	for(uint8_t s = 0; s < 24; s = (uint8_t)(s + 8)) {
+		int32_t a = (int32_t)((ulA >> s) & 0xFF), b = (int32_t)((ulB >> s) & 0xFF);
+		int32_t num = (b - a) * (int32_t)ubLine;
+		int32_t c = a + (num >= 0 ? (num + n / 2) / n : -((-num + n / 2) / n));
+		ulOut |= (uint32_t)c << s;
+	}
+	return ulOut;
 }
 
 // The plain's ground: the haze (the sky's own colour on the floor's first line,
