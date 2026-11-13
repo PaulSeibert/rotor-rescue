@@ -1,7 +1,7 @@
 # Moving the mouse (port 1) must not move the chopper: the game reads only
 # the joystick in port 2 (ACE JOY1). Reading JOY2 too turns mouse movement
 # into phantom joystick input.
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 press fire 2
 wait-serial "state=2"
 mouse 40 0

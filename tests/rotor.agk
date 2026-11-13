@@ -1,7 +1,7 @@
 # The rotor in the game (SPEC section 9): idling on the skids, then lift-off
 # spins it up (faster and louder), then it settles to the hover.
 # The rotor's period is printed with the state lines (every 32 frames).
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 press fire 2
 wait 125
 mark idle

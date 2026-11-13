@@ -3,7 +3,7 @@
 # barracks, our pad and hangar, a yellow "you are here" arrow over the
 # chopper - and a one-line brief. A fresh press of fire skips it; the map is
 # gone once play starts.
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 press fire 2
 wait 70
 screenshot card

@@ -3,7 +3,7 @@
 # X from the left side: three-quarter view (5 frames), a lean to the right (6), the front.
 # Then on to the right: a lean, the three-quarter view, the side. Then back through
 # the front, leaning left. A volley with the stick down never turns to the bombs.
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 press fire 2
 wait 125
 press up 60

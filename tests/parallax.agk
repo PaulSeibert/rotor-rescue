@@ -2,7 +2,7 @@
 # three PF2 bands scroll at 1/4, 1/2 and 1 of it (the picture moves right).
 # (The mountains band, with the plain's far strip, ends at line 179; the
 # floor below it has a speed per line: tests/floor.agk.)
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 press fire 2
 wait 125
 press up 80

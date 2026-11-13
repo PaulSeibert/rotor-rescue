@@ -16,7 +16,7 @@ expect-color logo 100 252 0x001
 expect-color logo 300 252 0x001
 press fire 2
 wait-serial "splash done"
-wait-serial "AGK t0"
+wait-serial "AGK t0" 1000
 wait 60
 screenshot title
 # "(c) 2026 DESERT PALMS SOFTWARE" under the logo and the author: the
