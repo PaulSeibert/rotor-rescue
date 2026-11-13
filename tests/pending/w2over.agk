@@ -8,15 +8,15 @@ wait-serial "AGK t0" 1000
 key 0x63
 key 0x28
 wait 5
-key 0x05
-wait 5
-key 0x63
-key 0x28
-wait 5
 key 0x11
 wait 5
 key 0x04
 wait-serial "AGK world 2 loaded" 400
+key 0x63
+key 0x28
+wait 5
+key 0x05
+wait 5
 press fire 2
 wait 40
 press up 20
