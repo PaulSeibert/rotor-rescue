@@ -1,6 +1,9 @@
 # Boot: the Desert Palms Software logo (loaded from the floppy, its own
 # copper lists: 16 colours, 4 of them reloaded line by line) fades in and
 # holds; fire skips to the title, which credits the author and the publisher.
+# (the art, the title and the songs load a frame each in the black start: the
+# wait for 60 frames counts from the last of them)
+wait-serial "AGK songs loaded" 1000
 wait 60
 screenshot logo
 expect-serial "splash_colors=837"

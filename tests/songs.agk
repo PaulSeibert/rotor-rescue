@@ -1,0 +1,9 @@
+# The songs are floppy files (sound/sound.toml disk = true), loaded one a frame
+# in the splash's black start, before the title theme starts: all three are in
+# chip RAM when the title comes up, so nothing loads later (a load in play or on
+# a card would freeze the picture for seconds and stop the music).
+wait-serial "AGK t0" 1000
+expect-serial "AGK songs loaded"
+expect-serial "AGK music theme"
+expect-no-serial "too little chip|ERR|missing"
+expect-min-chip-free 96
