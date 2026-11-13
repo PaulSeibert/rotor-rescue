@@ -50,7 +50,7 @@ pressure, then it ramps. Terrain never kills: it is a wall to route around.
 
 | machine | what it gets |
 |---|---|
-| **A500 OCS, PAL 50 Hz, Kickstart 1.3** | the whole game. README and `agk.toml` state **1 MB (512K chip + 512K slow)**: the 340.8 KB program lives in slow RAM. 50 fps, worst frame 80% (section 11). |
+| **A500 OCS, PAL 50 Hz, Kickstart 1.3** | the whole game. README and `agk.toml` state **1 MB (512K chip + 512K slow)**: the 318.2 KB program lives in slow RAM. 50 fps, worst frame 80% (section 11). |
 | 512K chip, no expansion | **does not boot: AmigaDOS says "Unable to load first: Error code 103"** (no free store). Measured 2026-11-11 on vAmiga with an A500 OCS, Kickstart 1.3 and no slow RAM (decision E, decided by Paul, 2026-11-11: measure only, nothing shrunk); the numbers are under the table. |
 | **A1200 AGA** (found at boot: Lisa's DENISEID low byte `$F8`, `agaDetect` in `main.c`) | a 24-bit copper sky on all 172 sky lines (4 MOVEs a line via BPLCON3 LOCT), a 224-colour title logo (8 planes, `titlelogo8.bin`), quarter-pixel parallax (BPLCON1 35 ns bits) for the clouds, mountains and hills. The game itself is the OCS game. |
 | Kickstart 3.1, AROS ROM | tested profiles `a500-ks31`, `a500-aros`. AROS loads the program at about 5 frames a KB; the first picture arrives at frame 2590 against the harness's 3000-frame boot window (2983 before phase 0's memory pay-back moved the chopper, the BOBs and the bands to a floppy file, section 11). `tests/memory.agk` keeps it at about 2692 or less (the game prints `bootvbl`, CIA-A's TOD count at the first picture, which trails the harness's frames by the ROM's start-up: AROS 102, Kickstart 3.1 138, Kickstart 1.3 333). |
@@ -86,7 +86,7 @@ raised slightly in the test harness if the program needs it; that is a test sett
 bands left the program for one floppy file (`diskart.bin`, 74.5 KB, 23 KB packed), and the chopper's sprite DMA reads two
 small blocks per copper buffer instead of two resident sets of all 32 frames. The program went from 424,432 to 348,940
 bytes. On the A500 profiles the program had filled the 512K slow RAM (0 KB free), so allocations spilled into chip RAM:
-every KB taken out of the program came back as chip. Lowest chip free in play (`perf`, `memory`), before -> after:
+every KB taken out of the program came back as chip. (v1.8: the songs left the program too, 348,940 -> 318,184 bytes, now as floppy files; section 9. Chip free stays as below, slow RAM free 49 -> 70 KB on a500, 8 -> 29 KB on a500-ks31.) Lowest chip free in play (`perf`, `memory`), before -> after:
 a500 73 -> 119 KB, a500-ks31 66 -> 153 KB, a500-aros 149 -> 159 KB, a1200 1058 -> 1153 KB; slow RAM free 0 -> 49 KB
 (a500), 0 -> 8 KB (a500-ks31). First picture (harness frames from power-on): a500 2640 -> 2196, a500-ks31 2202 -> 1820,
 a500-aros 2983 -> 2590, a1200 1788 -> 1468. `tests/memory.agk` asserts at least 96 KB of chip free in play on every profile
@@ -288,13 +288,14 @@ y197.
 
 - **No tile map and no per-mission load:** the world is rules plus four looping parallax bands, all
   resident once loaded. Only boot loads from the floppy (logos, the art, hall of fame).
-- **Disk:** one 880 KB floppy (`first.adf`, 901,120 bytes). Files: the executable (340.8 KB), `dpslogo.bin`
+- **Disk:** one 880 KB floppy (`first.adf`, 901,120 bytes). Files: the executable (318.2 KB), `dpslogo.bin`
   (22.2 KB packed), `titlelogo.bin` (10.4 KB packed), `titlelogo8.bin` (18.8 KB packed), `plainfloor.bin`
   (the plain's floor, 1.2 KB packed), `diskart.bin` (the chopper's frames, the BOBs and the bands, 74.5 KB,
-  about 23 KB packed: `art/disk_art.toml`, `art/tools/make_disk_art.py`), and the
+  about 23 KB packed: `art/disk_art.toml`, `art/tools/make_disk_art.py`), the three songs `m_theme.mod.pk` (17.9 KB), `m_fanfare.mod.pk` (5.3 KB)
+  and `m_gameover.mod.pk` (0.7 KB), 33 KB unpacked (`sound/sound.toml` `disk = true`), and the
   hall of fame file `rrscores` (56 bytes) written by the game. About 420 KB of 880 KB used, derived.
 - **Boot to play:** the DPS logo loads before the first picture; the art (in a frame of its own),
-  then the title logo and the music load during the black splash. Time from fire to play on
+  then the title logo, then the songs (a frame each: fanfare, game over, theme) load during the black splash and the theme starts as the last one is in. Time from fire to play on
   a real floppy is **not measured** (open question 1); the AROS profile's first picture is at frame
   2590 (52 s of emulated time), its worst case. The art's load makes the splash about 190 frames
   longer on Kickstart 1.3 (130 on AROS) while the program loads about 450 (390) faster, so the title
@@ -706,6 +707,12 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   (0.08-0.8 s). `soundPlay` order in `playSounds` takes crash/open/boom as one choice per frame.
 - **Gap vs playbook:** no panning by screen X (effects go to whichever of 1 and 3 is free); no
   cap on effects per frame beyond priority. Rotor Raider has both.
+- **Music from the floppy (v1.8):** the three songs are files, not program data (`disk = true`). `songsLoad` (main.c) reads one a frame at boot after the title
+  logo, last the theme, which starts then; all three stay in memory (samples in chip, patterns in fast RAM, as the program had them: chip free is
+  unchanged, 119 / 153 / 159 KB on a500 / ks31 / aros), and nothing loads later: a load stops Paula's music and freezes the picture for seconds, so
+  there is no moment in play, on a card or on the title where one would be quiet. Our own loader, not the kit's `soundMusicLoad` (that put the whole
+  file, patterns too, in chip: 10 KB less chip free). The cost is time at boot: the title and its music come 50-200 harness frames (1-4 s of
+  emulated time) later, the first picture 50-150 sooner. `tests/songs.agk`, `tests/memory.agk`.
 - **Music:** one tune per state, all our own, synthesised sampled instruments (`sound/samples/`
   bass, hat, kick, lead, snare from `sound/tools/make_samples.py`): `theme` for the title, card,
   hall of fame and initials; `fanfare` for mission cleared and the ending; `gameover`. **Gap:** no
@@ -769,7 +776,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   back without changing what is played or heard: last picture's BOBs are erased in the top border
   while the HUD types, the HUD's numbers take one DIVU a digit, and the pacing sample never shares
   a picture with the status line. No dropped frames. Target (average <= 70%, worst < 100%): met.
-- **Memory:** executable 340.8 KB in slow RAM (phase 0 pay-back; 425.6 KB at `b9d5987`); `expect-min-chip-free 64` (KB) on every
+- **Memory:** executable 318.2 KB in slow RAM (phase 0 and songs pay-back; 425.6 KB at `b9d5987`); `expect-min-chip-free 64` (KB) on every
   profile, and 96 in `tests/memory.agk`. Kickstart 3.1's chip RAM was the binding limit when it dipped below 64 KB; earlier
   builds measured lowest chip free 95 / 88 / 155 KB (a500 / ks31 / aros); at v1.2 85 / 83 / 158 KB (a1200 1075 KB); at
   v1.6 73 / 66 / 149 KB (a1200 1058 KB); after the pay-back 119 / 153 / 159 KB (a1200 1153 KB). While the program fills
@@ -789,7 +796,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 - **Per-world arena and loader:** a world file (packed bands, BOB sheets, terrain tiles, map) loaded from the floppy into one reused chip arena (kit `loading`). **Band layout table:** the copper builder reads each world's lines, heights, speeds and palettes from a table (amiga-hw).
 - **Terrain strip** (amiga-hw, large; spiked first): a 1:1 PF2 ring buffer streamed a column at a time, a cloud-ceiling strip, the COLOR00 haze behind it; the copper list (465 of 496 entries used) must be enlarged for the strip, the ceiling strip and searchlight beams (about 3 KB chip more, estimated). **Water:** the perspective floor as a sea with a BPLCON1 shimmer.
 - **Height-map logic** (amiga-game): `floorAt` / `ceilAt`, wall bump, altitude above the floor, enemies and people follow terrain.
-- **Set pieces and garrisons** with `wavescript` and its pacing checker. **Program diet:** resident title and world-1 art and samples move to disk; the executable stays at 430 KB or less. (Phase 0 did the chopper, the BOBs and the bands: 340.8 KB. The songs, 33 KB, are next: as floppy files they load in about 270 frames on Kickstart 1.3, which the splash's black start can't hold beside the art and the title logo, so they need a later quiet moment.)
+- **Set pieces and garrisons** with `wavescript` and its pacing checker. **Program diet:** resident title and world-1 art and samples move to disk; the executable stays at 430 KB or less. (Phase 0 did the chopper, the BOBs and the bands: 348.9 KB; the songs, 33 KB, followed in v1.8: 318.2 KB. Not moved: the sound effects, 62 KB of samples in the program, which play in the air where nothing can load.)
 - Frame budget: terrain streaming, more units and long maps get a measured budget; the target stays average <= 70%, worst < 100%.
 
 ## 12. Production
@@ -839,7 +846,7 @@ writable disk.)
 
 (Numbers are kept from before. Questions 2, 4, 5 and 7 are decided, decided by Paul, 2026-11-11: see v1.2.)
 
-1. Fire-to-play time from a real floppy is not measured (340.8 KB executable plus logos and art). What is
+1. Fire-to-play time from a real floppy is not measured (318.2 KB executable plus logos, art and songs). What is
    the budget? (The 1 MB requirement stands: decided by Paul, 2026-11-12, v1.5.)
 3. Jet pacing is measured (v1.3, section 5); the tank and mine pacing is not. Is a full pacing run wanted?
 9. Jet fairness (v1.3) is studio tuning, pending Paul's playtest: skill 1 landed at a barracks with jets around; a jet pair on
@@ -859,4 +866,5 @@ writable disk.)
 | v1.4 | 2026-11-12 | decided by Paul, 2026-11-12: the plain between the mountains and the hills, a true perspective floor (each line its own speed, / 4 to / 2), sections 4, 8, 11; art contract `docs/plain-spec.md`. Art v4 approved by Paul: no mesas, blue-noise wandering foot, perspective texture between and under the hills, no full-width solid or dithered rows (checked by `art/tools/plain_check.py`) |
 | v1.5 | 2026-11-12 | approved by Paul: commercial content plan (`docs/CONTENT-PLAN.md`): twelve missions in four worlds (desert, islands, mountains, city), height-map terrain with no vertical scroll, pads and winch and wind, ground threats under shared fairness rules, lives refill per world with a continue, an animated ending and credits, two disks with one swap, 1 MB kept; sections 1, 2, 4-7, 9-12. Not built |
 | v1.6 | 2026-11-12 | (Paul's playtest, 2026-11-12; studio proposal, pending his playtest): volleys never become bombs (the bomb stance needs a 20-frame down hold with no fire, section 3), eased turn through front with lean frames and a front-facing sway |
+| v1.8 | 2026-11-13 | content plan phase 0, songs (T26), not a design change: the three songs are floppy files loaded a frame each at boot, the theme starting after them (50-200 frames later); program 348,940 -> 318,184 bytes; sections 2, 4, 9, 10, 11; `tests/songs.agk` |
 | v1.7 | 2026-11-12 | content plan phase 0 (T25, program diet), not a design change: the chopper's frames, the BOBs and the bands are a floppy file loaded during the splash; the chopper's sprite DMA reads small per-buffer blocks; chip free in play and the boot times in sections 2, 4 and 11; `tests/memory.agk` |
