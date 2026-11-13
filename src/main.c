@@ -100,11 +100,11 @@ _Static_assert(MTN_Y + ART_MOUNTAINS_H == FLOOR_Y, "the mountains band (with the
 #define PLAIN_FLOOR_BYTES ((ULONG)(PLAIN_FLOOR_W / 8) * 3 * FLOOR_LINES)
 _Static_assert(PLAY_HILLS_ROW == 2 && FLOOR_END + ART_HILLS_H - PLAY_HILLS_ROW == GROUND_BAND_Y, "the hills in play: rows 2-26, lines 199-223");
 // The floor's copper, per line at its start: WAIT, COLOR00 (the plain's ground;
-// 4 MOVEs in 24 bits on AGA), BPLCON1, BPL2MOD. At the end of line 179: PF2's
-// pointers to floor row 0 and the land palette (no blank line any more).
-// Against the old gap line (WAIT, blank pointers, modulo, WAIT, palette: 16):
-#define FLOOR_COP_OCS (1 + 6 + 7 + FLOOR_LINES * 4 - 16)
-#define FLOOR_COP_AGA (1 + 6 + 7 + FLOOR_LINES * 7 - 16 - 5 * (SKY_END - FLOOR_Y))
+// 4 MOVEs in 24 bits on AGA), BPLCON1, BPL2MOD. Line 179: the land palette at
+// its start (a WAIT and 7 MOVEs), PF2's pointers to floor row 0 at its end (a
+// WAIT and 6). Against the old gap line (WAIT, blank pointers, modulo, WAIT, palette: 16):
+#define FLOOR_COP_OCS (2 + 6 + 7 + FLOOR_LINES * 4 - 16)
+#define FLOOR_COP_AGA (2 + 6 + 7 + FLOOR_LINES * 7 - 16 - 5 * (SKY_END - FLOOR_Y))
 
 // The title's own layout (its copper list): the logo, then its lines of text,
 // the mountains lower down (the clouds don't show), the hills and ground as in
@@ -408,10 +408,19 @@ static tCopSlots cwBand(tAgkCopWriter *pW, UWORD uwGameY, const tBitMap *pBm) {
 // hills, from their row 2.
 __attribute__((noinline, optimize("Os"))) static void cwFloor(tAgkCopWriter *pW, UBYTE ubBfr, UBYTE ubMission) {
 	// (raw MOVEs by register offset: small code, the A500's slow RAM is full)
+	// Line FLOOR_Y - 1, the far strip's last row (bare): the land palette at its
+	// start, before its fetch (after the sky's COLOR00 there). At the end of the
+	// line with the pointers its 7 MOVEs ran into line FLOOR_Y and pushed that
+	// line's block (COLOR00, BPLCON1, BPL2MOD; on AGA 4 MOVEs of COLOR00) into the
+	// $30 6-plane fetch, where the copper gets a MOVE per 8 colour clocks (review
+	// A2; the kit's perspectivefloor, d4ba718). A red COLOR00 probe at the end of
+	// line FLOOR_Y's block started at full-frame x 140 (OCS) / 237 (AGA)
+	agkCopWait(pW, FLOOR_Y - 1, 0);
+	for(UBYTE i = 1; i < 8; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * (8 + i)), g_pMissionLandPal[ubMission][i]);
+	// its end: PF2 at floor row 0 (six MOVEs, done before line FLOOR_Y's block)
 	agkCopWait(pW, FLOOR_Y - 1, SWITCH_WAIT_X);
 	s_pFloorPtr[ubBfr] = pW->uwPos;
 	for(UBYTE p = 0; p < 3; ++p) cwPtr8(pW, (UBYTE)(1 + 2 * p), (ULONG)s_pPlainFloor->Planes[p]);
-	for(UBYTE i = 1; i < 8; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * (8 + i)), g_pMissionLandPal[ubMission][i]);
 	for(UBYTE j = 0; j < FLOOR_LINES; ++j) {
 		agkCopWait(pW, FLOOR_Y + j, 0);
 		if(s_isAga) cwSky24(pW, s_pFloorBg[ubMission][j], s_pFloorBgLo[ubMission][j]);
