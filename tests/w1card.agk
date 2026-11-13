@@ -1,0 +1,78 @@
+# World 1's mission cards keep the frame (SPEC 11, "Copper lists"): a new
+# mission in the same world patches its colours into both copper lists (the sky,
+# the floor's ground, the clouds', mountains' and land's palettes), as world 2's
+# do, instead of writing the lists again (~0.9 A500 frame each: every world-1
+# card dropped 4 pictures, worst 250 %). Covered in one run: the game's start
+# from the title (mission 1), the cards of missions 2 and 3, world 2's load
+# (mission 4) and the way back to world 1 (mission 1, its art loaded again).
+# Each flight checks the plain's ground on the floor's last line, line 198 (C
+# of that mission's floor: M1 DA6, M2 576, M3 CC8); the goldens are the same
+# pictures the full rewrite drew.
+wait-serial "AGK t0" 1000
+press fire 2
+wait 120
+press fire 2
+wait 40
+press up 60
+press left 60
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x02
+wait-serial "AGK start world=1 mission=2" 200
+wait 60
+press fire 2
+wait 40
+press up 60
+press left 60
+screenshot m2
+expect-color m2 4 198 0x576
+expect-color m2 315 198 0x576
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x03
+wait-serial "AGK start world=1 mission=3" 200
+wait 60
+press fire 2
+wait 40
+press up 60
+press left 60
+screenshot m3
+expect-color m3 4 198 0xCC8
+expect-color m3 315 198 0xCC8
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x04
+wait-serial "AGK world 2 loaded" 400
+wait 60
+press fire 2
+wait 40
+press up 60
+press left 60
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x01
+wait-serial "AGK world 1 loaded" 400
+wait 60
+press fire 2
+wait 40
+press up 60
+press left 60
+screenshot m1
+expect-color m1 4 198 0xDA6
+expect-color m1 315 198 0xDA6
+expect-serial "AGK world=1 mission=1"
+expect-no-serial "ERR|missing"
+expect-no-dropped-frames
+expect-max-load 90
