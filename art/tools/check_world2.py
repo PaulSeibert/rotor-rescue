@@ -75,14 +75,13 @@ BASE_RUN_MAX = 10        # px: longest run of bottom-edge pixels on one row (a l
 BASE_ROW_SHARE = 0.22    # no single row may carry more than this share of all bottom-edge pixels
 BASE_SPREAD_MIN = 10     # rows between the highest and the lowest cloud base
 BASE_DIAG_MAX = 9        # px: longest straight diagonal of the lowest drawn pixel per column
-BASE_MIN_CLOUDS = 4
+BASE_MIN_CLOUDS = 3
 
 
 def cloud_base_stats(band):
     """band: pen array (rows x 320), looping in x. Returns (longest run of bottom-edge pixels on one row, busiest row's share
     of all bottom-edge pixels, spread of the clouds' base rows, longest diagonal, number of clouds, base rows of the clouds).
-    A bottom-edge pixel is drawn with nothing drawn directly under it. A cloud is a run of drawn columns (gaps under 3 px
-    are merged); its base row is the row with most of its bottom-edge pixels."""
+    A bottom-edge pixel is drawn with nothing drawn directly under it. A cloud is a connected mass (gaps under 3 px bridged); its base row is the row with most of its bottom-edge pixels."""
     h, w = band.shape
     drawn = band > 0
     under = np.zeros_like(drawn)
@@ -99,37 +98,29 @@ def cloud_base_stats(band):
     total = int(edge.sum())
     per_row = edge.sum(axis=1)
     share = float(per_row.max()) / total if total else 0.0
-    # clouds as column spans
-    cols = drawn.any(axis=0)
-    if cols.all():
-        spans = [(0, w)]
-    else:
-        start = int(np.argmin(cols))                    # a gap column: unroll from there
-        order = [(start + i) % w for i in range(w)]
-        spans, cur = [], None
-        gap = 0
-        for i, x in enumerate(order):
-            if cols[x]:
-                if cur is None:
-                    cur = [i, i]
-                else:
-                    cur[1] = i
-                gap = 0
-            else:
-                gap += 1
-                if cur is not None and gap >= 3:
-                    spans.append(tuple(cur))
-                    cur = None
-        if cur is not None:
-            spans.append(tuple(cur))
-        spans = [[order[a] for a in range(s0, s1 + 1)] for s0, s1 in spans]
+    # clouds as connected components (pixels within 2 px of each other, looping in x; specks under 25 px dropped)
+    seen = np.zeros_like(drawn)
     bases = []
-    if cols.all():
-        bases.append(int(per_row.argmax()))
-    else:
-        for xs in spans:
-            pr = edge[:, xs].sum(axis=1)
-            bases.append(int(pr.argmax()))
+    for y0 in range(h):
+        for x0 in range(w):
+            if not drawn[y0, x0] or seen[y0, x0]:
+                continue
+            comp, stack = [], [(y0, x0)]
+            seen[y0, x0] = True
+            while stack:
+                y, x = stack.pop()
+                comp.append((y, x))
+                for dy in range(-2, 3):
+                    for dx in range(-2, 3):
+                        yy, xx = y + dy, (x + dx) % w
+                        if 0 <= yy < h and drawn[yy, xx] and not seen[yy, xx]:
+                            seen[yy, xx] = True
+                            stack.append((yy, xx))
+            if len(comp) >= 25:
+                pr = np.zeros(h, int)
+                for y, x in comp:
+                    pr[y] += int(edge[y, x])
+                bases.append(int(pr.argmax()))
     spread = (max(bases) - min(bases)) if bases else 0
     # straight diagonal: lowest drawn pixel per column, constant non-zero step
     low = np.array([int(np.nonzero(drawn[:, x])[0].max()) if drawn[:, x].any() else -1 for x in range(w)])

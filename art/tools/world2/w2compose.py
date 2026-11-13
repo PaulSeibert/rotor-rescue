@@ -254,8 +254,77 @@ def cloud_band_pilot(seed=9):
     return a
 
 
-def cloud_band():
-    return cloud_band_pilot()      # (replaced in the next commit)
+# Cloud specs: centre x, base row (the lowest a lobe may reach), width, smallest and largest lobe radius, lobe-size
+# profile exponent, base wobble (rows) and its period (px). The silhouettes differ on purpose: a tall tower, a big
+# three-domed cumulus, a low humped bank, a mid-height puff and a cluster of three small high puffs. The bases sit
+# 12 rows apart and every lobe has its own bottom, so no straight line shows across the loop (check_world2.py).
+CLOUDS = [
+    dict(cx=40, base=33, w=96, rmin=5.0, rmax=12.0, p=0.9, wob=3.0, per=61, stack=0),    # big low bank, base sags to the right
+    dict(cx=128, base=29, w=40, rmin=5.0, rmax=9.5, p=0.7, wob=1.5, per=23, stack=3),    # narrow tower
+    dict(cx=186, base=20, w=44, rmin=3.5, rmax=6.0, p=0.9, wob=1.6, per=29, stack=0),    # small high bank
+    dict(cx=240, base=26, w=60, rmin=4.5, rmax=9.5, p=0.8, wob=3.0, per=43, stack=1),    # mid bank, base rises to the right
+    dict(cx=292, base=15, w=26, rmin=3.0, rmax=4.2, p=0.9, wob=1.2, per=17, stack=0),    # high wisp
+]
+
+
+def cloud_band(seed=11):
+    """40 rows x 320 cumulus lit top-left (pens 7 lit .. 3 belly). Every cloud is a ring of overlapping circles whose
+    bottoms are their own (lobed, wandering), so there is no straight base; the belly pens follow each column's own
+    bottom and dissolve by blue noise. Rows 0-2 and 37-39 are empty (the band's seams)."""
+    r = rng(seed)
+    a = np.zeros((40, 320), np.uint8)
+    for k, cl in enumerate(CLOUDS):
+        cx0, yb, w = cl["cx"], cl["base"], cl["w"]
+        ph = r.uniform(0, 6.28)
+        circles = []
+        n = max(4, int(w / (cl["rmax"] * 0.8)))
+        for i in range(n):
+            t = i / (n - 1) if n > 1 else 0.5
+            rad = cl["rmin"] + (cl["rmax"] - cl["rmin"]) * math.sin(math.pi * t) ** cl["p"] + r.uniform(-0.8, 1.0)
+            cx = cx0 - w / 2 + w * t + r.uniform(-1.5, 1.5)
+            lb = yb + cl["wob"] * math.sin(2 * math.pi * (cx - cx0) / cl["per"] + ph) - r.uniform(0, 1.5)
+            circles.append((cx, lb - rad, rad))
+        # fill the underside between big lobes with small ones so the base is scalloped, not stepped
+        for i in range(n * 2):
+            cx = cx0 - w / 2 + 3 + (w - 6) * r.uniform()
+            rad = r.uniform(2.2, 3.6)
+            lb = yb + cl["wob"] * math.sin(2 * math.pi * (cx - cx0) / cl["per"] + ph) - r.uniform(0.5, 2.5)
+            circles.append((cx, lb - rad, rad))
+        for s in range(cl["stack"]):                       # towers: smaller domes stacked above the middle
+            rad = cl["rmax"] * (0.85 - 0.18 * s)
+            cx = cx0 + r.uniform(-4, 4)
+            circles.append((cx, yb - cl["rmax"] * 1.3 - s * rad * 0.9, rad))
+        x0, x1 = int(cx0 - w / 2 - 14), int(cx0 + w / 2 + 14)
+        cov = {}                                            # (x, y) -> pen before the belly
+        for y in range(3, 37):
+            for xx in range(x0, x1):
+                best = None
+                for (cx, cy, rad) in circles:
+                    d = math.hypot(xx + .5 - cx, y + .5 - cy)
+                    if d <= rad:
+                        lit = ((xx + .5 - cx) * -0.6 + (y + .5 - cy) * -0.8) / rad
+                        if best is None or cy - rad < best[0]:
+                            best = (cy - rad, lit)
+                if best:
+                    lit = best[1]
+                    cov[(xx, y)] = 7 if lit > 0.5 else 6 if lit > 0.15 else 5 if lit > -0.25 else 4 if lit > -0.6 else 3
+        bottom = {}
+        for (xx, y) in cov:
+            bottom[xx] = max(bottom.get(xx, 0), y)
+        for (xx, y), v in cov.items():
+            d = bottom[xx] - y                              # rows above this column's own bottom
+            if d < 2:
+                v = 3
+            elif d < 4:
+                v = min(v, 4)
+            if d < 3:                                       # the belly dissolves by blue noise
+                keep = 1 - (3 - d) * 0.30 - 0.12 * math.sin(xx * 0.31 + k)
+                if bn(xx, y) > keep:
+                    continue
+            a[y, xx % 320] = v
+    a[:3] = 0
+    a[37:] = 0
+    return a
 
 
 def sea_rows():
