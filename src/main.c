@@ -196,6 +196,11 @@ static UWORD s_uwTitleMtnPal, s_uwTitleLandPal;
 
 static tGame s_sGame;
 static ULONG s_ulFrameVbl;
+// The vertical blank count read just after a picture's copper list went to
+// COP1LC: the copper takes it at the next blank, so until then the back list
+// (and frame buffer) is still the one on screen (review A3)
+static ULONG s_ulSwapVbl = ~0UL;
+static UBYTE s_ubOverrun;        // Ctrl+L, O: pictures left that run over their frame (tests)
 static UBYTE s_isMusicOn = 1, s_ubSong = 0xFF;
 static UBYTE s_isPaused;
 static UBYTE s_isSplash;         // the logo's showing
@@ -242,6 +247,13 @@ static void skillKeys(void) {
 		s_ubSkillKeyWait = 0;
 		agkState("trip", s_sGame.trip);
 		agkEnd();
+		return;
+	}
+	if(keyUse(KEY_O)) {
+		// the next pictures run ~1.2 frames each (a test of the swap: tests/tear.agk)
+		s_ubOverrun = 8;
+		s_ubSkillKeyWait = 0;
+		agkPrint("AGK overrun\n");
 		return;
 	}
 	if(keyUse(KEY_H)) {
@@ -2695,6 +2707,8 @@ void genericProcess(void) {
 		// title for ~6 frames right as it appeared. Chip RAM has room for it.
 	}
 	UBYTE ubBfr = backBuffer();
+	// (the back list must not be the one the copper still shows: tests/tear.agk)
+	if(timerGet() == s_ulSwapVbl) agkPrint("AGK ERR a picture began before its last one was on screen\n");
 	// last picture's BOBs erased first: the blitter clears them while the CPU
 	// stages the HUD and runs the logic (the top of the picture is in the
 	// border, the bus mostly free)
@@ -2734,9 +2748,21 @@ void genericProcess(void) {
 	if(s_sGame.state == GS_INTRO && !s_pRouteLit[ubBfr]) routeShow(ubBfr);
 	else msgUpdate(ubBfr);   // (not both in one picture)
 	msgCoverAll(ubBfr);
+	if(s_ubOverrun) {
+		// (Ctrl+L, O) past this frame's end: to line 60 of the next
+		--s_ubOverrun;
+		while(timerGet() == s_ulFrameVbl) continue;
+		while(getRayPos().bfPosY < 60) continue;
+	}
 	copProcessBlocks();
+	s_ulSwapVbl = timerGet();
 	agkPerfEnd();
-	while(timerGet() - s_ulFrameVbl < 1) continue;
+	// The new list is on screen from the next vertical blank (COP1LC): wait for
+	// the first one after the swap. (Waiting for one after this picture's start
+	// let a picture that ran over by less than a frame be followed at once by
+	// one writing into the list and frame buffer still being shown: review A3.
+	// Such a picture now costs a whole frame, not a tear.)
+	while(timerGet() == s_ulSwapVbl) continue;
 	if(s_sGame.scoresChanged) scoresSave();
 
 	if(s_sGame.frame == 2) {

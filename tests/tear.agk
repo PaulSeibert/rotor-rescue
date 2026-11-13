@@ -1,0 +1,13 @@
+# Review A3: a picture that runs over its frame by less than a frame must not
+# start the next one while the copper still shows the list (and the frame
+# buffer) that one writes: COP1LC only takes the new list at the next vertical
+# blank, so the next picture waits for the first blank after its swap.
+# Ctrl+L, O (a test key): the next 8 pictures each run to line 60 of the frame after.
+start-at boarding
+key 0x63
+key 0x28
+wait 5
+key 0x18
+wait 30
+expect-serial "AGK overrun"
+expect-no-serial "AGK ERR"
