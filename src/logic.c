@@ -16,18 +16,33 @@ const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_HOSTAGE] = 16, [BOB_JET] = 32, [BOB_MINE] = 16, [BOB_SHOT] = 16,
 	[BOB_BOMB] = 16, [BOB_SHELL] = 16, [BOB_BOOM] = 32, [BOB_FLAG] = 16,
 	[BOB_SHADOW] = 32, [BOB_SMOKE] = 16,
+	[BOB_W2_BARRACKS] = 51, [BOB_PATROL] = 43, [BOB_GUNBOAT] = 61, [BOB_PAD48] = 48,
+	[BOB_PAD64] = 64, [BOB_PAD80] = 80, [BOB_PAD96] = 96, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24,
 };
 const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_HANGAR] = 40, [BOB_FENCE] = 32, [BOB_BARRACKS] = 28, [BOB_TANK] = 14,
 	[BOB_HOSTAGE] = 12, [BOB_JET] = 12, [BOB_MINE] = 12, [BOB_SHOT] = 3,
 	[BOB_BOMB] = 6, [BOB_SHELL] = 4, [BOB_BOOM] = 32, [BOB_FLAG] = 24,
 	[BOB_SHADOW] = 4, [BOB_SMOKE] = 8,
+	[BOB_W2_BARRACKS] = 31, [BOB_PATROL] = 17, [BOB_GUNBOAT] = 30, [BOB_PAD48] = PAD_ROWS,
+	[BOB_PAD64] = PAD_ROWS, [BOB_PAD80] = PAD_ROWS, [BOB_PAD96] = PAD_ROWS, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24,
 };
+// (world 2's frames are the ones the floppy set carries: art/tools/make_world_disk.py picks
+// them from the art: one wake frame a facing, the gunboat's fire frame is its second tell's,
+// the pad's lit phase only)
 const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_HANGAR] = 1, [BOB_FENCE] = 1, [BOB_BARRACKS] = 4, [BOB_TANK] = 10,
 	[BOB_HOSTAGE] = 8, [BOB_JET] = 4, [BOB_MINE] = 2, [BOB_SHOT] = 1,
 	[BOB_BOMB] = 1, [BOB_SHELL] = 1, [BOB_BOOM] = 5, [BOB_FLAG] = 2,
 	[BOB_SHADOW] = SHADOW_SIZES * 2, [BOB_SMOKE] = 3,
+	[BOB_W2_BARRACKS] = 4, [BOB_PATROL] = 2, [BOB_GUNBOAT] = 6, [BOB_PAD48] = 1,
+	[BOB_PAD64] = 1, [BOB_PAD80] = 1, [BOB_PAD96] = 1, [BOB_PAD_LAMP] = 2, [BOB_SPLASH] = 5,
+};
+
+// World 2's islands (logic.h): the tile map's "island" lines (art/world2/tilemap.txt), px
+const tIsland g_pIslands[W2_ISLANDS] = {
+	{64, 512, 160, 256, 64}, {1056, 1664, 1232, 1392, 64}, {1920, 2400, 2080, 2220, 56},
+	{2944, 3584, 3120, 3312, 96}, {4000, 4576, 0, 4136, 80},
 };
 
 // Barracks positions (centres), far to near
@@ -225,7 +240,7 @@ COLD void logicInit(tGame *g) {
 // The file keeps the table it always had: "RRH1", per entry the initials,
 // mission, hostages saved (2), score (4), a 16-bit sum: an old disk's table
 // reads as it is (tests/unit/test_logic.c has one)
-const tHiConfig g_sHiConfig = {"RRH1", MISSION_COUNT + 1, "rrscores"};
+const tHiConfig g_sHiConfig = {"RRH1", MISSIONS_TOTAL + 1, "rrscores"};
 
 COLD void logicScoresDefault(tGame *g) {
 	static const tHiScore pDefaults[HI_COUNT] = {
@@ -248,7 +263,7 @@ COLD static void gameEnded(tGame *g) {
 		g->titleArmed = 0;
 		return;
 	}
-	r = hiInsert(&g->hi, g->score, (uint8_t)(g->state == GS_VICTORY ? MISSION_COUNT + 1 : g->mission + 1), g->savedTotal);
+	r = hiInsert(&g->hi, g->score, (uint8_t)(g->state == GS_VICTORY ? MISSIONS_TOTAL + 1 : g->world * MISSION_COUNT + g->mission + 1), g->savedTotal);
 	g->hiScore = hiTop(&g->hi);
 	g->newRank = r;
 	hiEditBegin(&g->edit, r, ENTRY_FRAMES);   // (fire held from the end screen doesn't choose a letter)
@@ -330,6 +345,43 @@ COLD void logicChopperRespawn(tGame *g) {
 	g->unloadTimer = UNLOAD_FRAMES;
 }
 
+// World 2's boats, placed by the map (docs/CONTENT-PLAN.md 4.2: a garrison is fixed and seen
+// from afar): a stretch of sea each, the armed ones from the skill that meets them. A boat
+// keeps its slot whether it is there or not (a lower skill leaves the slot empty).
+COLD static void padsSet(tGame *g);
+typedef struct { int16_t x0, x1; uint8_t kind, minSkill; } tBoatPlace;
+static const tBoatPlace s_pBoatPlace[MISSION_COUNT][BOAT_MAX] = {
+	{{560, 980, BOAT_PATROL, 0}, {1690, 1890, BOAT_GUN, 1}, {2450, 2900, BOAT_GUN, 2}, {3620, 3960, BOAT_PATROL, 0}},
+	{{560, 1000, BOAT_GUN, 1}, {1690, 1890, BOAT_GUN, 1}, {2450, 2680, BOAT_GUN, 1}, {2680, 2900, BOAT_GUN, 3},
+		{3620, 3960, BOAT_PATROL, 0}},
+	{{540, 1020, BOAT_GUN, 1}, {1680, 1900, BOAT_GUN, 1}, {2440, 2680, BOAT_GUN, 1}, {2680, 2910, BOAT_GUN, 2},
+		{560, 780, BOAT_GUN, 4}, {3620, 3960, BOAT_PATROL, 0}},
+};
+
+COLD static void boatsPlace(tGame *g) {
+	g->atkWait = 0;
+	g->atkLast = 0;
+	g->wet = 0;
+	g->splashTimer = 0;
+	uint8_t ubSkill = g->difficulty ? g->difficulty : DIFFICULTY_NORMAL;   // (GODMODE plays as normal)
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) {
+		tBoat *b = &g->pBoats[i];
+		const tBoatPlace *p = &s_pBoatPlace[g->mission][i];
+		b->active = g->world && p->x1 && ubSkill >= p->minSkill;
+		if(!b->active) continue;
+		b->kind = p->kind;
+		b->x0 = p->x0;
+		b->x1 = p->x1;
+		b->x = (int16_t)((p->x0 + p->x1) >> 1);
+		b->dir = -1;
+		b->hp = p->kind == BOAT_GUN ? 3 : 2;
+		b->tell = 0;
+		b->fireAnim = 0;
+		b->cool = (uint8_t)(60 + i * 30);   // (a quiet start)
+		b->phase = 0;
+	}
+}
+
 COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->mission = ubMission;
 	g->trip = 0;
@@ -342,11 +394,10 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->spawnTimer = (uint16_t)(700 - ubMission * 150);   // a quiet start
 	g->wxFall = 0x8000;
 	g->wxDrift = 0;
-	// (world 2's display slice has no barracks yet: world 1's stand far off its map,
-	// where no shot or bomb reaches and nothing is drawn)
-	int16_t wBarracksOff = g->world ? -4000 : 0;
+	// (world 2's barracks stand on its four islands, the people wander about half way to the pad)
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
-		g->pBarracks[b].x = (int16_t)(s_pBarracksX[b] + wBarracksOff);
+		g->pBarracks[b].x = g->world ? g_pIslands[b].barracksX : s_pBarracksX[b];
+		g->pBarracks[b].wx = g->world ? (int16_t)((g_pIslands[b].barracksX + g_pIslands[b].padX) >> 1) : g->pBarracks[b].x;
 		g->pBarracks[b].hp = 2;
 		g->pBarracks[b].released = 0;
 		g->pBarracks[b].timer = 0;
@@ -368,6 +419,8 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	for(uint8_t i = 0; i < SHOT_MAX; ++i) g->pShots[i].active = 0;
 	for(uint8_t i = 0; i < ESHOT_MAX; ++i) g->pEShots[i].active = 0;
 	for(uint8_t i = 0; i < BOOM_MAX; ++i) g->pBooms[i].active = 0;
+	boatsPlace(g);
+	padsSet(g);
 	logicChopperRespawn(g);
 	logicCameraSnap(g);
 	setState(g, GS_INTRO, INTRO_FRAMES);
@@ -407,6 +460,9 @@ static const int16_t s_pJetRest[DIFFICULTY_MAX + 1] = {0, 100, 60, 0, -30, -50};
 // a tank's wind-up before each shell (it comes out of the time between shells:
 // the rate of fire is the same, the shell is announced)
 static const uint8_t s_pTankTell[DIFFICULTY_MAX + 1] = {16, 22, 18, 16, 14, 12};
+static const uint8_t s_pBoatTell[DIFFICULTY_MAX + 1] = {16, 22, 18, 16, 14, 12};  // a gunboat's barrel rises and its lamp flashes this long (content plan 4.4: 22 / 18 / 16 / 14 / 12)
+// World 2's pad: the widest the skill wants, px (SPEC 4.4: 96 / 80 / 64 / 56 / 48); the island's bed and the 16 px grid cut it down
+static const uint8_t s_pPadWant[DIFFICULTY_MAX + 1] = {64, 96, 80, 64, 56, 48};
 static const uint8_t s_pJetTell[DIFFICULTY_MAX + 1] = {16, 24, 20, 16, 14, 12};   // a jet's flash before a shot (its own table since the fairness pass: slower to react to on the low skills)
 // Jets and the chopper on the ground (Paul's playtest, 2026-11-11; studio tuning): frames it must have
 // sat landed, without a break, before a jet may bomb it (65535: never, the jets overfly it)
@@ -430,6 +486,8 @@ static const tDiffTable s_pDiffTables[] = {
 	{"jetRest", s_pJetRest, sizeof(s_pJetRest[0])},
 	{"tankTell", s_pTankTell, sizeof(s_pTankTell[0])},
 	{"jetTell", s_pJetTell, sizeof(s_pJetTell[0])},
+	{"boatTell", s_pBoatTell, sizeof(s_pBoatTell[0])},
+	{"padWant", s_pPadWant, sizeof(s_pPadWant[0])},
 	{"landDwell", s_pLandDwell, sizeof(s_pLandDwell[0])},
 	{"jetsMax", s_pJetsMax, sizeof(s_pJetsMax[0])},
 	{"jetsMaxM3", s_pJetsMaxM3, sizeof(s_pJetsMaxM3[0])},
@@ -442,7 +500,9 @@ const tDiffTable *logicDiffTables(uint8_t *pCount) {
 }
 
 void logicSetDifficulty(tGame *g, uint8_t ubLevel) {
-	if(ubLevel <= DIFFICULTY_MAX) g->difficulty = ubLevel;
+	if(ubLevel > DIFFICULTY_MAX) return;
+	g->difficulty = ubLevel;
+	padsSet(g);
 }
 
 // (world 2: no enemies in its display slice; the gameplay slice gives it its own)
@@ -466,6 +526,48 @@ uint8_t logicTankTell(const tGame *g) {
 
 uint8_t logicJetTell(const tGame *g) {
 	return s_pJetTell[g->difficulty];
+}
+
+uint8_t logicBoatTell(const tGame *g) {
+	return s_pBoatTell[g->difficulty];
+}
+
+// ---------------------------------------------------- world 2: the land ---
+
+COLD uint8_t logicOnWater(int16_t x) {
+	for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
+		if(x >= g_pIslands[i].x0 && x < g_pIslands[i].x1) return 0;
+	}
+	return 1;
+}
+
+// Each pad's width for the skill: the widest the skill wants that the bed takes, on the 16 px grid
+COLD static void padsSet(tGame *g) {
+	for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
+		uint8_t w = s_pPadWant[g->difficulty];
+		if(w > g_pIslands[i].bedPx) w = g_pIslands[i].bedPx;
+		g->padPx[i] = (uint8_t)(32 + ((w - 32) & ~15));
+	}
+}
+
+uint8_t logicPadAt(const tGame *g, int16_t x) {
+	for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
+		if(absw((int16_t)(x - g_pIslands[i].padX)) <= (g->padPx[i] >> 1) + PAD_TOLERANCE) return i;
+	}
+	return 0xFF;
+}
+
+COLD static uint8_t basePadW2(const tGame *g, int16_t x) {
+	return logicPadAt(g, x) == W2_BASE_ISLAND;
+}
+
+// (world 1's base pad stays two compares: this runs every frame)
+static inline uint8_t onBasePad(const tGame *g, int16_t x) {
+	return g->world ? basePadW2(g, x) : (x >= BASE_PAD_X0 && x <= BASE_PAD_X1);
+}
+
+uint8_t logicOnBasePad(const tGame *g, int16_t x) {
+	return onBasePad(g, x);
 }
 
 uint16_t logicGroundDwell(const tGame *g) {
@@ -521,7 +623,7 @@ __attribute__((noinline)) static void hostagesUpdate(tGame *g) {
 		switch(h->state) {
 			case HS_FREE: {
 				int16_t dx = (int16_t)(c->x - h->x);
-				if(isCalling && absw(dx) < HOSTAGE_CALL_RANGE) {
+				if(isCalling && absw(dx) < (g->world ? W2_CALL_RANGE : HOSTAGE_CALL_RANGE)) {
 					h->state = HS_TO_CHOPPER;
 					break;
 				}
@@ -538,7 +640,7 @@ __attribute__((noinline)) static void hostagesUpdate(tGame *g) {
 					h->dir = (r & 0x100) ? 1 : -1;
 					if(r & 0x600) h->dir = 0;  // mostly standing
 				}
-				int16_t wHome = g->pBarracks[(uint8_t)h->home].x;
+				int16_t wHome = g->pBarracks[(uint8_t)h->home].wx;
 				if(h->x < wHome - 56) h->dir = 1;
 				if(h->x > wHome + 56) h->dir = -1;
 				if(h->dir && isOdd) h->x = (int16_t)(h->x + h->dir);
@@ -561,9 +663,9 @@ __attribute__((noinline)) static void hostagesUpdate(tGame *g) {
 				h->anim = (uint8_t)((s > 0 ? MAN_RUN0 : MAN_RUNL0) + ((g->frame >> 2) & 1));
 			} break;
 			case HS_TO_HANGAR: {
-				h->x = (int16_t)(h->x + 1);
+				h->x = (int16_t)(h->x + (g->world ? 2 : 1));   // (world 2: a quicker run, fewer people on screen at once)
 				h->anim = (uint8_t)(MAN_RUN0 + ((g->frame >> 2) & 1));
-				if(h->x >= HANGAR_X + 12) {
+				if(h->x >= logicHangarX(g) + 12) {
 					h->state = HS_SAVED;
 					++g->saved;
 					++g->savedTotal;
@@ -607,6 +709,7 @@ __attribute__((noinline)) static void barracksUpdate(tGame *g) {
 		tBarracks *pB = &g->pBarracks[b];
 		if(pB->hp || pB->released >= HOSTAGES_PER_BARRACKS) continue;
 		if(pB->timer) { --pB->timer; continue; }
+		if(g->world && g->outCount >= W2_OUT_MAX) continue;   // (the next waits for room on the beach)
 		pB->timer = 8;
 		tHostage *h = &g->pHostages[b * HOSTAGES_PER_BARRACKS + pB->released];
 		++pB->released;
@@ -677,10 +780,12 @@ static int16_t floorAt(const tGame *g, int16_t x, uint8_t *pIsGround) {
 			return FEET_Y - 28;
 		}
 	}
-	if(!g->world && x + 14 > HANGAR_X && x - 14 < HANGAR_X + 64) {
+	if(x + 14 > logicHangarX(g) && x - 14 < logicHangarX(g) + 64) {
 		*pIsGround = 0;
 		return FEET_Y - 40;
 	}
+	// world 2: a pad is a landing; the beach, the palms and the sea are floors to stop on
+	if(g->world) *pIsGround = logicPadAt(g, x) != 0xFF;
 	return GROUND_Y;
 }
 
@@ -849,12 +954,27 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 	if(c->x < 24) { c->x = 24; c->vx = 0; }
 	if(c->x > logicWorldW(g) - 24) { c->x = (int16_t)(logicWorldW(g) - 24); c->vx = 0; }
 	if(c->y < CEIL_Y) { c->y = CEIL_Y; c->vy = 0; }
+	// the pad guide (skill 1-3): the last PAD_ASSIST_PX of a descent nudge the chopper toward
+	// the pad's centre, half a pixel a frame
+	if(g->world && c->vy > 0 && c->y >= GROUND_Y - PAD_ASSIST_PX && (g->frame & 1) && g->difficulty <= DIFFICULTY_NORMAL) {
+		for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
+			int16_t dxp = (int16_t)(g_pIslands[i].padX - c->x), ad = absw(dxp);
+			if(ad > 2 && ad <= logicPadPx(g, i) / 2 + PAD_TOLERANCE + PAD_ASSIST_REACH) c->x = (int16_t)(c->x + (dxp > 0 ? 1 : -1));
+		}
+	}
 	uint8_t isGround;
 	int16_t wFloor = floorAt(g, c->x, &isGround);
 	if(c->y >= wFloor && !c->landed) {
 		c->y = wFloor;
 		c->fy = 0;
 		if(c->vy > 0) c->vy = 0;
+		if(g->world && !g->wet && logicOnWater(c->x)) {
+			// the sea: a soft stop and a splash (no damage), one a touch
+			g->wet = 1;
+			g->splashX = c->x;
+			g->splashTimer = SPLASH_FRAMES;
+			g->events2 |= EV2_SPLASH;
+		}
 		if(isGround) {
 			c->landed = 1;
 			c->vx = 0;
@@ -863,6 +983,8 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 			hostagesBlast(g, c->x, 13);   // landed on someone
 		}
 	}
+
+	if(g->wet && (c->y < GROUND_Y - 6 || !logicOnWater(c->x))) g->wet = 0;
 
 	// the head-on strafe's lean follows the speed (slight from 0.75 px/frame, full from 1.75), a pose
 	// every LEAN_STEP_FRAMES: eased in and out, no pose skipped, never a snap from one side to the other
@@ -916,11 +1038,11 @@ static void chopperWreckUpdate(tGame *g) {
 static void unloadUpdate(tGame *g) {
 	tChopper *c = &g->chop;
 	// landing on the home pad mends a damaged chopper
-	if(c->alive && c->landed && c->damaged && c->x >= BASE_PAD_X0 && c->x <= BASE_PAD_X1) {
+	if(c->alive && c->landed && c->damaged && onBasePad(g, c->x)) {
 		c->damaged = 0;
 		g->events2 |= EV2_REPAIR;
 	}
-	if(!c->alive || !c->landed || c->x < BASE_PAD_X0 || c->x > BASE_PAD_X1 || !g->aboard) return;
+	if(!c->alive || !c->landed || !g->aboard || !onBasePad(g, c->x)) return;
 	if(--g->unloadTimer > 0) return;
 	g->unloadTimer = UNLOAD_FRAMES;
 	for(uint8_t i = 0; i < HOSTAGE_COUNT; ++i) {
@@ -935,6 +1057,17 @@ static void unloadUpdate(tGame *g) {
 }
 
 // ------------------------------------------------------------- shots ---
+
+// A boat's hull (cannon 1 a hit, a bomb 3): its box, 56 px wide and 26 tall, standing in the water
+#define BOAT_BOX_Y 222
+COLD static void boatHit(tGame *g, tBoat *b, uint8_t ubDmg) {
+	if(!b->active) return;
+	b->hp = ubDmg >= b->hp ? 0 : (uint8_t)(b->hp - ubDmg);
+	if(b->hp) return;
+	b->active = 0;
+	boomAt(g, b->x, BOAT_BOX_Y + 8);
+	addScore(g, b->kind == BOAT_GUN ? 100 : 50);
+}
 
 static uint8_t shotHitsTargets(tGame *g, tShot *s) {
 	// The player's cannon: jets, mines, tanks, barracks, people. 1 = used up.
@@ -959,6 +1092,13 @@ static uint8_t shotHitsTargets(tGame *g, tShot *s) {
 		}
 	}
 	if(sy < FEET_Y - 30) return 0;
+	for(uint8_t i = 0; g->world && i < BOAT_MAX; ++i) {
+		tBoat *b = &g->pBoats[i];
+		if(b->active && boxHit(sx, sy, 6, 3, (int16_t)(b->x - 28), BOAT_BOX_Y, 56, 26)) {
+			boatHit(g, b, 1);
+			return 1;
+		}
+	}
 	for(uint8_t i = 0; i < TANK_MAX; ++i) {
 		tTank *t = &g->pTanks[i];
 		if(t->active && boxHit(sx, sy, 6, 3, (int16_t)(t->x - 12), FEET_Y - 14, 24, 14)) {
@@ -1003,6 +1143,9 @@ static void bombExplode(tGame *g, int16_t x) {
 	}
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
 		if(absw((int16_t)(g->pBarracks[b].x - x)) < 30) barracksDamage(g, b, 2);
+	}
+	for(uint8_t i = 0; g->world && i < BOAT_MAX; ++i) {
+		if(g->pBoats[i].active && absw((int16_t)(g->pBoats[i].x - x)) < 30) boatHit(g, &g->pBoats[i], 3);
 	}
 	hostagesBlast(g, x, 14);
 }
@@ -1186,7 +1329,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 	else if(g->airGrace) --g->airGrace;
 	if(g->jetWait) --g->jetWait;
 	// the jet budget starts afresh on the home pad
-	if(c->landed && c->x >= BASE_PAD_X0 && c->x <= BASE_PAD_X1) g->jetsTrip = 0;
+	if(c->landed && onBasePad(g, c->x)) g->jetsTrip = 0;
 	uint8_t ubMax = logicJetsMax(g);
 	uint16_t uwDwell = logicGroundDwell(g);
 	uint8_t isBombOk = c->landed && uwDwell != GROUND_NEVER && g->landFrames >= uwDwell;
@@ -1294,6 +1437,79 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 			// (one jet at a time: 140 frames shorter, the warning flight is time the jet is no threat)
 			int16_t wRest = (int16_t)((ubMax > 1 ? 160 : 20) - g->mission * 30 + s_pJetRest[g->difficulty]);
 			j->cool = (uint16_t)((wRest < 40 ? 40 : wRest) + (logicRandom(g) & 63));
+		}
+	}
+}
+
+// --------------------------------------------------------------- boats ---
+
+// Whether a boat may take the chopper as its target now: the shared ground-threat rules
+// (docs/CONTENT-PLAN.md 4.1). It is low (skids below y 150, as a tank's target is), in the boat's
+// sight and not point-blank (R7, R8), the whole boat is on screen (R7); landed it has sat
+// there the ground dwell (R1: never on skill 1-2), and just off the ground the take-off grace
+// is over (R2)
+COLD static uint8_t boatTarget(const tGame *g, const tBoat *b) {
+	const tChopper *c = &g->chop;
+	if(!c->alive || c->y <= 150) return 0;
+	int16_t ad = absw((int16_t)(c->x - b->x));
+	if(ad >= BOAT_RANGE || ad < BOAT_MIN_RANGE) return 0;
+	if(b->x - 30 < g->cam || b->x + 30 > g->cam + SCREEN_W) return 0;
+	if(c->landed) {
+		uint16_t uwDwell = logicGroundDwell(g);
+		return uwDwell != GROUND_NEVER && g->landFrames >= uwDwell;
+	}
+	return !g->airGrace;
+}
+
+COLD static void boatsUpdate(tGame *g) {
+	tChopper *c = &g->chop;
+	if(g->splashTimer) --g->splashTimer;
+	if(g->atkWait) --g->atkWait;
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) {
+		tBoat *b = &g->pBoats[i];
+		if(!b->active) continue;
+		if(b->fireAnim) --b->fireAnim;
+		if(b->tell) {
+			// the wind-up: braced (it doesn't sail), barrel up, lamp flashing; then the shell,
+			// unless the chopper got away meanwhile
+			if(--b->tell) continue;
+			tShot *s = boatTarget(g, b) ? eshotNew(g) : 0;
+			if(s) {
+				uint8_t ubMask = s_pAimMask[g->difficulty];
+				int16_t tx = (int16_t)(c->x + (c->vx >> 1) - b->x + (int16_t)(logicRandom(g) & ubMask) - (ubMask >> 1) - 1);
+				int16_t ty = (int16_t)(c->y - 8 - BOAT_MUZZLE_Y);
+				s->active = 1;
+				s->kind = ESHOT_SHELL;
+				s->x = (int16_t)(b->x + (tx > 0 ? 26 : -26));
+				s->y = BOAT_MUZZLE_Y;
+				s->fx = s->fy = 0;
+				aim(tx, ty, &s->vx, &s->vy);
+				s->life = SHELL_LIFE;
+				b->fireAnim = 8;
+				g->events2 |= EV2_BOATFIRE;
+			}
+			int16_t wCool = (int16_t)(TANK_GAP_BASE - g->mission * 20 + s_pTankCool[g->difficulty]);
+			uint8_t ubMin = s_pTankCoolMin[g->difficulty];
+			b->cool = (uint8_t)((wCool < ubMin ? ubMin : wCool) - logicBoatTell(g));
+			b->cool = (uint8_t)(b->cool + (logicRandom(g) & 31));
+			continue;
+		}
+		if(b->cool) --b->cool;
+		else if(b->kind == BOAT_GUN && boatTarget(g, b) && (!g->atkWait || g->atkLast == i)) {
+			// the tell: it turns to the chopper, stops, raises its barrel
+			b->dir = c->x > b->x ? 1 : -1;
+			b->tell = logicBoatTell(g);
+			g->atkWait = BOAT_ATTACK_GAP;
+			g->atkLast = i;
+			g->events2 |= EV2_BOATTELL;
+			continue;
+		}
+		// patrol its stretch of sea, 0.6 px a frame (a patrol boat 0.8)
+		if(++b->phase >= 5) b->phase = 0;
+		if(b->phase < (b->kind == BOAT_GUN ? 3 : 4)) {
+			b->x = (int16_t)(b->x + b->dir);
+			if(b->x <= b->x0) { b->x = b->x0; b->dir = 1; }
+			else if(b->x >= b->x1) { b->x = b->x1; b->dir = -1; }
 		}
 	}
 }
@@ -1496,6 +1712,7 @@ static void worldUpdate(tGame *g) {
 	eshotsUpdate(g);
 	tanksUpdate(g);
 	jetsUpdate(g);
+	if(g->world) boatsUpdate(g);
 	minesUpdate(g);
 	boomsUpdate(g);
 }
@@ -1621,6 +1838,12 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 			boomsUpdate(g);
 			if(!g->stateTimer) {
 				if(g->mission + 1 < MISSION_COUNT) logicStartMission(g, (uint8_t)(g->mission + 1));
+				else if(g->world + 1 < WORLD_COUNT) {
+					// the next world's first mission: lives refill (decided by Paul), the score is kept
+					++g->world;
+					g->lives = LIVES_START;
+					logicStartMission(g, 0);
+				}
 				else setState(g, GS_VICTORY, OVER_FRAMES);
 			}
 			break;
@@ -1780,13 +2003,58 @@ static uint8_t drawAdd(tDraw *pOut, uint8_t n, int16_t sx, int16_t sy, uint8_t b
 	pOut[n].frame = frame;
 	return (uint8_t)(n + 1);
 }
+// (world 2's drawing, in small code: not inlined at each of its dozens of calls)
+COLD static uint8_t drawAddS(tDraw *pOut, uint8_t n, int16_t sx, int16_t sy, uint8_t bob, uint8_t frame) {
+	return drawAdd(pOut, n, sx, sy, bob, frame);
+}
+
+// World 2's pads, one BOB each (an end cap, n 8 px units, the H, n units, a cap: n 1-4, the pad's
+// width by skill; main.c puts each width together at the card). Two lamps blink over its ends once the
+// chopper is within PAD_LAMP_REACH px: yellow while its skids are over the pad, red while not; the
+// blink hides them a quarter of the time.
+#define PAD_LAMP_REACH 150
+COLD static uint8_t padsDraw(const tGame *g, tDraw *pOut, uint8_t n) {
+	int16_t cam = g->cam;
+	for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
+		uint8_t ubPx = logicPadPx(g, i);
+		int16_t x0 = (int16_t)(g_pIslands[i].padX - ubPx / 2 - cam);
+		if(x0 > SCREEN_W || x0 + ubPx < 0) continue;
+		n = drawAddS(pOut, n, x0, PAD_Y - PAD_SLAB_ROW, (uint8_t)(BOB_PAD48 + ((ubPx - 48) >> 4)), 0);
+		if(g->chop.alive && absw((int16_t)(g->chop.x - g_pIslands[i].padX)) < PAD_LAMP_REACH && ((g->frame >> 3) & 3) != 3) {
+			uint8_t ubLamp = logicPadAt(g, g->chop.x) == i ? PAD_LAMP_YELLOW : PAD_LAMP_RED;
+			n = drawAddS(pOut, n, (int16_t)(x0 + 10), PAD_Y - 8, BOB_PAD_LAMP, ubLamp);
+			n = drawAddS(pOut, n, (int16_t)(x0 + ubPx - 15), PAD_Y - 8, BOB_PAD_LAMP, ubLamp);
+		}
+	}
+	return n;
+}
+
+// World 2's sea: the boats and the splash
+COLD static uint8_t seaDraw(const tGame *g, tDraw *pOut, uint8_t n) {
+	int16_t cam = g->cam;
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) {
+		const tBoat *b = &g->pBoats[i];
+		if(!b->active || b->x + 34 < cam || b->x - 34 > cam + SCREEN_W) continue;   // (off screen: nothing to add)
+		if(b->kind == BOAT_PATROL) {
+			n = drawAddS(pOut, n, (int16_t)(b->x - 21 - cam), BOAT_BOTTOM_Y - 17, BOB_PATROL, b->dir > 0 ? PATROL_R : PATROL_L);
+		}
+		else {
+			uint8_t f = b->tell ? ((b->tell & 4) ? GUNBOAT_FIRE_L : GUNBOAT_TELL_L) : b->fireAnim ? GUNBOAT_FIRE_L : GUNBOAT_L;
+			n = drawAddS(pOut, n, (int16_t)(b->x - 30 - cam), BOAT_BOTTOM_Y - 30, BOB_GUNBOAT, (uint8_t)(f + (b->dir > 0 ? GUNBOAT_R : 0)));
+		}
+	}
+	if(g->splashTimer) {
+		n = drawAddS(pOut, n, (int16_t)(g->splashX - 12 - cam), FEET_Y - 18, BOB_SPLASH, (uint8_t)((SPLASH_FRAMES - g->splashTimer) / 4));
+	}
+	return n;
+}
 
 uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 	uint8_t n = 0;
 	int16_t cam = g->cam;
-	// structures (world 1's base and fence)
+	// structures (world 1's base and fence, world 2's hangar)
+	n = drawAdd(pOut, n, (int16_t)(logicHangarX(g) - cam), FEET_Y - 40, BOB_HANGAR, 0);
 	if(!g->world) {
-		n = drawAdd(pOut, n, (int16_t)(HANGAR_X - cam), FEET_Y - 40, BOB_HANGAR, 0);
 		n = drawAdd(pOut, n, (int16_t)(BASE_PAD_X0 - 20 - cam), FEET_Y - 24, BOB_FLAG, (uint8_t)((g->frame >> 4) & 1));
 		n = drawAdd(pOut, n, (int16_t)(BORDER_X - 8 - cam), FEET_Y - 32, BOB_FENCE, 0);
 	}
@@ -1794,10 +2062,12 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		const tBarracks *pB = &g->pBarracks[b];
 		uint8_t f = pB->hp == 2 ? BARRACKS_OK : pB->hp == 1 ? BARRACKS_HIT :
 			(uint8_t)(BARRACKS_OPEN0 + ((g->frame >> 3) & 1));
-		n = drawAdd(pOut, n, (int16_t)(pB->x - 24 - cam), FEET_Y - 28, BOB_BARRACKS, f);
+		if(g->world) n = drawAdd(pOut, n, (int16_t)(pB->x - 25 - cam), FEET_Y - 30, BOB_W2_BARRACKS, f);
+		else n = drawAdd(pOut, n, (int16_t)(pB->x - 24 - cam), FEET_Y - 28, BOB_BARRACKS, f);
 	}
+	if(g->world) n = padsDraw(g, pOut, n);
 	// the chopper's shadow, on the track under it (and under the people)
-	if(logicChopperVisible(g)) {
+	if(logicChopperVisible(g) && !(g->world && logicOnWater(g->chop.x))) {
 		static const uint8_t pSize[13] = {0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3};   // by altitude / 16
 		int16_t wAlt = (int16_t)(GROUND_Y - g->chop.y);
 		if(wAlt < 0) wAlt = 0;
@@ -1822,6 +2092,7 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		else continue;
 		n = drawAdd(pOut, n, (int16_t)(h->x - 8 - cam), FEET_Y - 12, BOB_HOSTAGE, f);
 	}
+	if(g->world) n = seaDraw(g, pOut, n);
 	// air
 	for(uint8_t i = 0; i < JET_MAX; ++i) {
 		const tJet *j = &g->pJets[i];
@@ -2122,7 +2393,14 @@ uint32_t logicSkyColor24(uint8_t ubMission, uint8_t ubLine) {
 	return ulOut;
 }
 
+// World 2's brief (mission 5 and 6 differ in how many boats; the winds, the radar and the
+// destroyer are the next slice)
+static const char *const s_pW2Brief[MISSION_COUNT] = {
+	"PATROL BOATS AND GUNBOATS", "GUNBOATS GUARD THE SEA LANES", "GUNBOATS HOLD THE STRAIT",
+};
+
 COLD const char *logicBrief(const tGame *g) {
+	if(g->world) return s_pW2Brief[g->mission];
 	// the threats this mission starts with (trip 0, this difficulty)
 	if(logicMinesOn(g)) return "TANKS, JETS AND AIR MINES";
 	if(logicJetsOn(g)) return "TANKS AND JETS ON PATROL";
@@ -2133,7 +2411,30 @@ static uint8_t routeX(int16_t x) {
 	return (uint8_t)((uint16_t)x / ROUTE_SCALE);
 }
 
+// World 2's map: 4608 px at an 18th, the sea dark, the islands on it, the barracks, pads
+// and hangar, the base island ours (the boats are in the brief: the map is made once, at the load)
+static uint8_t routeX2(int16_t x) {
+	return (uint8_t)(((uint32_t)(uint16_t)x * 3641u) >> 16);
+}
+
+COLD static uint8_t routeMap2(const tGame *g, tRouteMark *pOut) {
+	uint8_t n = 0;
+	const tIsland *pB = &g_pIslands[W2_BASE_ISLAND];
+	pOut[n++] = (tRouteMark){ROUTE_HOME, routeX2(pB->x0), (uint8_t)(routeX2(pB->x1) - routeX2(pB->x0))};
+	for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
+		pOut[n++] = (tRouteMark){ROUTE_ISLAND, routeX2(g_pIslands[i].x0), (uint8_t)(routeX2(g_pIslands[i].x1) - routeX2(g_pIslands[i].x0))};
+	}
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) pOut[n++] = (tRouteMark){ROUTE_BARRACKS, routeX2(g->pBarracks[b].x), 7};
+	for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
+		pOut[n++] = (tRouteMark){ROUTE_PAD, routeX2((int16_t)(g_pIslands[i].padX - logicPadPx(g, i) / 2)), (uint8_t)(logicPadPx(g, i) / 18 + 1)};
+	}
+	pOut[n++] = (tRouteMark){ROUTE_HANGAR, routeX2(W2_HANGAR_X), 64 / 18};
+	pOut[n++] = (tRouteMark){ROUTE_HERE, routeX2(g->chop.x), 1};
+	return n;
+}
+
 COLD uint8_t logicRouteMap(const tGame *g, tRouteMark *pOut) {
+	if(g->world) return routeMap2(g, pOut);
 	uint8_t n = 0, ubFence = routeX(BORDER_X);
 	pOut[n++] = (tRouteMark){ROUTE_ENEMY, 0, ubFence};
 	pOut[n++] = (tRouteMark){ROUTE_HOME, (uint8_t)(ubFence + 1), (uint8_t)(ROUTE_W - 1 - ubFence)};

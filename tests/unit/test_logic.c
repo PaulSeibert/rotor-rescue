@@ -848,8 +848,10 @@ static void testMissionClearWhenAllAccountedFor(void) {
 	CHECK(g.lives == LIVES_START);   // lives carry over
 }
 
+// The game ends after the last mission built: world 2's third (world 1's third goes on to world 2)
 static void testVictoryAfterLastMission(void) {
 	newGame();
+	g.world = WORLD_COUNT - 1;
 	g.mission = MISSION_COUNT - 1;
 	g.saved = HOSTAGE_COUNT;
 	step(NONE, 1);
@@ -2585,6 +2587,437 @@ static void testSkillOneEasier(void) {
 	CHECK(iRest[0] >= iRest[1] + 80);
 }
 
+// ------------------------------------------------------------------------------
+// World 2's gameplay (SPEC 4.4, 6; docs/CONTENT-PLAN.md section 4): islands and pads,
+// water as a soft stop, the barracks and the rescue, gunboats under the ground-threat
+// rules, and the way from world 1's last mission to world 2's first.
+
+// A game on world 2's mission ubM (0-2), in play at the base pad
+static void newWorld2(uint8_t ubM) {
+	logicInit(&g);
+	logicStartAt(&g, 1, ubM);
+	step(NONE, INTRO_FRAMES + 1);
+	g.spawnTimer = 60000;
+}
+
+// Hovering at (x, y), facing left, no airborne grace
+static void hoverAt(int16_t x, int16_t y) {
+	flyAt(x, y);
+	g.chop.face = g.chop.faceTarget = FACE_LEFT;
+}
+
+static uint8_t boatsActive(void) {
+	uint8_t n = 0;
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) n += g.pBoats[i].active;
+	return n;
+}
+
+// The island table is the tile map's: a column is water exactly when no island has it,
+// each barracks and pad stands on its island, the pad bed fits its tiles
+static void testW2IslandsMatchTheMap(void) {
+	uint8_t pMap[W2_MAP_COLS];
+	FILE *f = fopen("art/world2/tilemap.bin", "rb");
+	if(!f) f = fopen("../art/world2/tilemap.bin", "rb");
+	CHECK(f && fread(pMap, 1, W2_MAP_COLS, f) == W2_MAP_COLS);
+	if(f) fclose(f);
+	for(uint16_t c = 0; c < W2_MAP_COLS; ++c) {
+		int16_t x = (int16_t)(c * 16 + 8);
+		CHECK((logicTerrainFloorY(pMap, x) == TERRAIN_WATER) == (logicOnWater(x) != 0));
+	}
+	for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
+		const tIsland *p = &g_pIslands[i];
+		CHECK(!logicOnWater((int16_t)((p->x0 + p->x1) / 2)) && logicOnWater((int16_t)(p->x0 - 8)));
+		CHECK(p->padX - p->bedPx / 2 >= p->x0 && p->padX + p->bedPx / 2 <= p->x1);
+		if(i != W2_BASE_ISLAND) CHECK(p->barracksX - 36 >= p->x0 && p->barracksX + 36 <= p->x1 && p->padX > p->barracksX + 40);
+	}
+	CHECK(g_pIslands[W2_BASE_ISLAND].padX == W2_START_X && W2_HANGAR_X > g_pIslands[W2_BASE_ISLAND].padX + 40);
+	CHECK(logicOnWater(-5) && logicOnWater(W2_W + 5));
+}
+
+// The drawn pad is the widest on the 16 px grid (32 + 16 n) that the skill and the bed allow
+static void testW2PadWidthBySkill(void) {
+	newWorld2(0);
+	static const uint8_t pWant3[6] = {64, 96, 80, 64, 48, 48};   // island 3 (96 px bed): GODMODE plays as 3
+	static const uint8_t pWant2[6] = {48, 48, 48, 48, 48, 48};   // island 2 (56 px bed)
+	static const uint8_t pWant0[6] = {64, 64, 64, 64, 48, 48};   // island 0 (64 px bed)
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		logicSetDifficulty(&g, d);
+		CHECK(logicPadPx(&g, 3) == pWant3[d]);
+		CHECK(logicPadPx(&g, 2) == pWant2[d]);
+		CHECK(logicPadPx(&g, 0) == pWant0[d]);
+		CHECK((logicPadPx(&g, 1) & 15) == 0 && logicPadPx(&g, 1) >= 48 && logicPadPx(&g, 1) <= 96);
+	}
+	logicSetDifficulty(&g, DIFFICULTY_NORMAL);
+	// the zone: the pad and PAD_TOLERANCE px beyond its edge
+	int16_t px = g_pIslands[3].padX;
+	CHECK(logicPadAt(&g, px) == 3 && logicPadAt(&g, (int16_t)(px + 32 + PAD_TOLERANCE)) == 3);
+	CHECK(logicPadAt(&g, (int16_t)(px + 32 + PAD_TOLERANCE + 1)) == 0xFF && logicPadAt(&g, 100) == 0xFF);
+	CHECK(logicPadAt(&g, (int16_t)(px - 32 - PAD_TOLERANCE)) == 3 && logicPadAt(&g, (int16_t)(px - 32 - PAD_TOLERANCE - 1)) == 0xFF);
+	CHECK(logicPadAt(&g, W2_START_X) == W2_BASE_ISLAND);
+}
+
+// Water is a soft stop with a splash: the skids stop at the surface, nothing is damaged, no
+// life is lost; one splash a touch (a new one after lifting off the water again)
+static void testW2WaterIsASoftStop(void) {
+	newWorld2(0);
+	hoverAt(800, 150);                                    // the open sea between islands 0 and 1
+	uint8_t nSplash = 0;
+	tInput down = {.dy = 1};
+	for(int i = 0; i < 120; ++i) { step(down, 1); nSplash += (g.events2 & EV2_SPLASH) != 0; }
+	CHECK(g.chop.y == GROUND_Y && !g.chop.landed && g.chop.alive && !g.chop.damaged);
+	CHECK(g.state == GS_PLAY && g.lives == LIVES_START && nSplash == 1 && g.splashTimer + 20 > 0 && g.splashX == g.chop.x);
+	tInput up = {.dy = -1};
+	step(up, 12);
+	CHECK(g.chop.y < GROUND_Y - 6);
+	nSplash = 0;
+	for(int i = 0; i < 80; ++i) { step(down, 1); nSplash += (g.events2 & EV2_SPLASH) != 0; }
+	CHECK(g.chop.y == GROUND_Y && !g.chop.landed && nSplash == 1);
+	// the splash is drawn, the shadow is not (no ground to fall on)
+	g.splashTimer = 10;
+	g.splashX = g.chop.x;
+	tDraw pDraw[DRAW_MAX];
+	uint8_t n = logicDraw(&g, pDraw), isSplash = 0, isShadow = 0;
+	for(uint8_t i = 0; i < n; ++i) { isSplash |= pDraw[i].bob == BOB_SPLASH; isShadow |= pDraw[i].bob == BOB_SHADOW; }
+	CHECK(isSplash && !isShadow);
+}
+
+// Landing happens on a pad only: the beach, a barracks roof and the water are floors to stop on
+static void testW2LandOnlyOnPads(void) {
+	newWorld2(0);
+	tInput down = {.dy = 1};
+	int16_t xSand = (int16_t)((g_pIslands[3].barracksX + g_pIslands[3].padX) / 2 + 8);   // between barracks 3 and its pad
+	hoverAt(xSand, 150);
+	step(down, 100);
+	CHECK(g.chop.y == GROUND_Y && !g.chop.landed && !logicOnWater(g.chop.x));          // sand: not a landing
+	hoverAt(g_pIslands[3].barracksX, 150);
+	step(down, 100);
+	CHECK(!g.chop.landed && g.chop.y < GROUND_Y);                                      // the roof (as world 1's)
+	hoverAt(g_pIslands[3].padX, 150);
+	step(down, 100);
+	CHECK(g.chop.landed && g.chop.y == GROUND_Y && g.chop.x == g_pIslands[3].padX);
+}
+
+// "Pads are forgiving": a touch-down PAD_TOLERANCE outside the edge counts; on skill 1-3 the last
+// 12 px of the descent nudge the chopper in, so a few px more still land; on skill 4-5 there is no nudge
+static void testW2PadTolerance(void) {
+	tInput down = {.dy = 1};
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(0);
+		logicSetDifficulty(&g, d);
+		int16_t wHalf = (int16_t)(logicPadPx(&g, 3) / 2 + PAD_TOLERANCE);
+		int16_t px = g_pIslands[3].padX;
+		hoverAt((int16_t)(px + wHalf), 150);
+		step(down, 100);
+		CHECK(g.chop.landed);                                      // on the edge of the tolerance
+		hoverAt((int16_t)(px + wHalf + 2), 150);
+		step(down, 100);
+		if(d <= DIFFICULTY_NORMAL) CHECK(g.chop.landed && g.chop.x < px + wHalf + 2);   // nudged in
+		else CHECK(!g.chop.landed && g.chop.x == px + wHalf + 2);                       // not helped
+		hoverAt((int16_t)(px + wHalf + PAD_ASSIST_REACH + 8), 150);
+		step(down, 100);
+		CHECK(!g.chop.landed);                                     // too far for any help
+	}
+}
+
+// The rescue as in world 1: a barracks opens, its people walk toward the pad and board a chopper
+// landed there (all 16 of them: the pad is up to 192 px from the barracks), and unload at the base pad
+static void testW2RescueFromAnIsland(void) {
+	for(uint8_t isl = 0; isl < BARRACKS_COUNT; ++isl) {
+		newWorld2(0);
+		CHECK(g.pBarracks[isl].x == g_pIslands[isl].barracksX);
+		hoverAt(g_pIslands[isl].padX, GROUND_Y - 30);
+		tInput down = {.dy = 1};
+		step(down, 40);
+		CHECK(g.chop.landed);
+		g.pBarracks[isl].hp = 0;                                  // (shot open)
+		uint8_t ubMostOut = 0;
+		for(int i = 0; i < 1500; ++i) { step(NONE, 1); if(g.outCount > ubMostOut) ubMostOut = g.outCount; }
+		CHECK(g.aboard == CABIN_MAX);
+		CHECK(ubMostOut > 2 && ubMostOut <= W2_OUT_MAX);          // never more than W2_OUT_MAX on the beach at once
+	}
+	newWorld2(0);
+	g.aboard = 16;
+	for(uint8_t i = 0; i < 16; ++i) g.pHostages[i].state = HS_ABOARD;
+	step(NONE, 400);
+	CHECK(g.chop.landed && g.aboard == 0 && g.saved == 16 && g.trip == 1);
+	CHECK(logicHangarX(&g) == W2_HANGAR_X);          // they ran in at the hangar on the base island
+}
+
+// A barracks shot open from the sea side: the cannon works on the island barracks as on world 1's
+static void testW2CannonOpensABarracks(void) {
+	newWorld2(0);
+	hoverAt((int16_t)(g_pIslands[3].barracksX + 150), GROUND_Y - 10);
+	for(int i = 0; i < 120 && g.pBarracks[3].hp; ++i) step((tInput){.fire = (uint8_t)(i & 1)}, 1);
+	CHECK(g.pBarracks[3].hp == 0 && g.score >= 25);
+}
+
+// Boats are placed, not spawned: reef run has its patrol boats and gunboats from the start;
+// the lower skills meet fewer gunboats; boats stay on their stretch of water
+static void testW2BoatsArePlaced(void) {
+	newWorld2(0);
+	uint8_t nGun = 0, nPatrol = 0;
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) {
+		const tBoat *b = &g.pBoats[i];
+		if(!b->active) continue;
+		CHECK(logicOnWater(b->x0) && logicOnWater(b->x1) && b->x >= b->x0 && b->x <= b->x1);
+		nGun += b->kind == BOAT_GUN;
+		nPatrol += b->kind == BOAT_PATROL;
+	}
+	CHECK(nGun == 2 && nPatrol == 2);
+	logicSetDifficulty(&g, 1);
+	logicStartAt(&g, 1, 0);
+	uint8_t nGun1 = 0;
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) nGun1 += g.pBoats[i].active && g.pBoats[i].kind == BOAT_GUN;
+	CHECK(nGun1 == 1);
+	logicSetDifficulty(&g, 5);
+	logicStartAt(&g, 1, 2);
+	uint8_t nGun5 = 0;
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) nGun5 += g.pBoats[i].active && g.pBoats[i].kind == BOAT_GUN;
+	CHECK(nGun5 > nGun);
+	// they patrol: after a while the boat has moved and never leaves its stretch
+	newWorld2(0);
+	int16_t x0 = g.pBoats[1].x;
+	for(int i = 0; i < 1500; ++i) {
+		step(NONE, 1);
+		for(uint8_t b = 0; b < BOAT_MAX; ++b) if(g.pBoats[b].active) CHECK(g.pBoats[b].x >= g.pBoats[b].x0 - 1 && g.pBoats[b].x <= g.pBoats[b].x1 + 1);
+	}
+	CHECK(g.pBoats[1].x != x0 && boatsActive() >= 3);
+	newGame();            // world 1 has none
+	CHECK(boatsActive() == 0);
+}
+
+// The gunboat tell table: 22 / 18 / 16 / 14 / 12 frames by skill (SPEC 6, content plan 4.4)
+static void testW2BoatTellTable(void) {
+	static const uint8_t pTell[6] = {16, 22, 18, 16, 14, 12};
+	newWorld2(0);
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		logicSetDifficulty(&g, d);
+		CHECK(logicBoatTell(&g) == pTell[d] && logicBoatTell(&g) >= 12);
+	}
+}
+
+// Put the first armed boat (index 1 in mission 4) dx px from a chopper hovering at (x, y), facing left (the camera leads that way: a boat to its left is on screen)
+static tBoat *gunboatNear(int16_t x, int16_t y, int16_t dx) {
+	hoverAt(x, y);
+	tBoat *b = &g.pBoats[1];
+	b->x0 = (int16_t)(x - 300);
+	b->x1 = (int16_t)(x + 300);
+	b->x = (int16_t)(x + dx);
+	b->cool = 0;
+	b->tell = 0;
+	b->dir = 1;
+	g.atkWait = 0;
+	g.pBoats[2].active = 0;
+	return b;
+}
+
+// Every shell comes after a tell of logicBoatTell() frames, braced and unbroken, on every skill;
+// the shell flies toward the chopper
+static void testW2GunboatTellsBeforeItShoots(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(0);
+		logicSetDifficulty(&g, d);
+		tBoat *b = gunboatNear(2400, GROUND_Y - 30, -150);      // open sea, a low chopper
+		uint8_t nTell = 0, nTellFrames = 0, nShells = 0;
+		for(int i = 0; i < 400 && !nShells; ++i) {
+			int16_t xb = b->x;
+			uint8_t wasTell = b->tell != 0;
+			step(NONE, 1);
+			if(g.events2 & EV2_BOATTELL) { ++nTell; nTellFrames = 0; CHECK(!g.pEShots[0].active); }
+			if(b->tell) { ++nTellFrames; CHECK(wasTell ? b->x == xb : 1); }
+			if(g.events2 & EV2_BOATFIRE) {
+				++nShells;
+				CHECK(nTellFrames + 1 >= logicBoatTell(&g));
+				CHECK(g.pEShots[0].active && g.pEShots[0].vx > 0);   // the chopper is to the boat's right
+			}
+		}
+		CHECK(nTell == 1 && nShells == 1);
+		CHECK(logicBoatTell(&g) >= 12);
+	}
+}
+
+// ...and not at a high chopper, not from off screen, not at point-blank, not beyond its sight
+static void testW2GunboatFairness(void) {
+	// a high chopper (skids above 150) is ignored
+	newWorld2(0);
+	gunboatNear(2400, 120, -150);
+	step(NONE, 300);
+	CHECK(!g.pBoats[1].tell && !g.pEShots[0].active);
+	// off screen: the boat is past the left edge
+	newWorld2(0);
+	gunboatNear(2400, GROUND_Y - 30, -200);
+	for(int i = 0; i < 200; ++i) { g.cam = (int16_t)(2400 - 100); g.pBoats[1].x = 2200; step(NONE, 1); CHECK(!g.pBoats[1].tell); }
+	// point-blank
+	newWorld2(0);
+	gunboatNear(2400, GROUND_Y - 30, -40);
+	for(int i = 0; i < 200; ++i) { g.pBoats[1].x = 2360; step(NONE, 1); CHECK(!g.pBoats[1].tell); }
+	// out of its sight
+	newWorld2(0);
+	gunboatNear(2400, GROUND_Y - 30, (int16_t)-(BOAT_RANGE + 20));
+	for(int i = 0; i < 200; ++i) { g.cam = (int16_t)(2400 - 300); g.pBoats[1].x = (int16_t)(2400 - BOAT_RANGE - 20); step(NONE, 1); CHECK(!g.pBoats[1].tell); }
+	// just after take-off: no new attack on a low chopper (the jets' 2 s grace, shared)
+	newWorld2(0);
+	gunboatNear(2400, GROUND_Y - 30, -150);
+	for(int i = 0; i < 90; ++i) { g.airGrace = JET_TAKEOFF_GRACE; step(NONE, 1); CHECK(!g.pBoats[1].tell); }
+}
+
+// A chopper that has just landed is not a target until its ground dwell (6 s on normal, 4 s, 3 s;
+// never on skill 1-2: the garrison overflies), the one table every ground weapon shares
+static void testW2LandedChopperHasGrace(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(0);
+		logicSetDifficulty(&g, d);
+		tBoat *b = gunboatNear(g_pIslands[2].padX, GROUND_Y - 20, -140);
+		step((tInput){.dy = 1}, 30);
+		CHECK(g.chop.landed);
+		uint16_t uwDwell = logicGroundDwell(&g), uwFirstTell = 0;
+		for(uint16_t i = 0; i < 700 && !uwFirstTell; ++i) {
+			b->x = (int16_t)(g.chop.x - 140);                        // (it keeps its place)
+			b->cool = 0;
+			g.atkWait = 0;
+			step(NONE, 1);
+			g.pBoats[2].active = 0;
+			if(b->tell) uwFirstTell = g.landFrames;
+		}
+		if(uwDwell == GROUND_NEVER) CHECK(!uwFirstTell);
+		else CHECK(uwFirstTell >= uwDwell);
+	}
+}
+
+// One attack at a time: once a boat has started its tell, another waits BOAT_ATTACK_GAP frames
+static void testW2OneBoatAttackAtATime(void) {
+	newWorld2(0);
+	logicSetDifficulty(&g, 4);
+	tBoat *a = gunboatNear(2400, GROUND_Y - 30, -130);
+	tBoat *b = &g.pBoats[2];
+	b->active = 1; b->kind = BOAT_GUN; b->hp = 3; b->x0 = 2000; b->x1 = 2800; b->x = 2310; b->cool = 0; b->tell = 0; b->dir = 1;
+	tBoat *pFirst = 0, *pOther = 0;
+	int16_t wFirst = -1;
+	for(int i = 0; i < 400; ++i) {
+		step(NONE, 1);
+		if(wFirst < 0 && (a->tell || b->tell)) { wFirst = (int16_t)i; pFirst = a->tell ? a : b; pOther = a->tell ? b : a; }
+		if(wFirst >= 0 && i < wFirst + BOAT_ATTACK_GAP) CHECK(!pOther->tell);
+		CHECK(!(a->tell && b->tell));
+	}
+	CHECK(wFirst >= 0 && pFirst != pOther);
+}
+
+// Boats die to the cannon (3 hits for a gunboat) and to a bomb; they pay
+static void testW2BoatsCanBeShot(void) {
+	newWorld2(0);
+	tBoat *b = gunboatNear(2400, GROUND_Y - 4, -100);
+	g.chop.face = g.chop.faceTarget = FACE_LEFT;
+	uint32_t ulScore = g.score;
+	for(int i = 0; i < 200 && b->active; ++i) { b->x = 2300; b->cool = 250; step((tInput){.fire = (uint8_t)(i & 1)}, 1); }
+	CHECK(!b->active && g.score >= ulScore + 100);
+	// a bomb kills a gunboat outright
+	newWorld2(0);
+	b = gunboatNear(2400, 100, 0);
+	b->cool = 250;
+	g.pShots[0] = (tShot){.x = 2400, .y = 225, .vx = 0, .vy = 16, .active = 1, .kind = SHOT_BOMB, .life = 100};
+	step(NONE, 12);
+	CHECK(!b->active);
+}
+
+// From the third mission on to the fourth: world 2 begins, lives refilled, the score kept, the
+// chopper on the base island's pad, its boats placed; world 2's last mission ends the game
+static void testW2MissionsFollowWorld1(void) {
+	newGame();
+	g.mission = MISSION_COUNT - 1;
+	g.score = 1234;
+	g.lives = 1;
+	g.saved = HOSTAGE_COUNT;
+	step(NONE, 1);
+	CHECK(g.state == GS_CLEAR);
+	step(NONE, CLEAR_FRAMES + 1);
+	CHECK(g.state == GS_INTRO && g.world == 1 && g.mission == 0 && g.lives == LIVES_START && g.score >= 1234 + HOSTAGE_COUNT * 10);   // (the score is kept, with the clear's)
+	CHECK(g.chop.x == W2_START_X && logicWorldW(&g) == W2_W && g.saved == 0 && boatsActive() >= 3);
+	step(NONE, INTRO_FRAMES + 1);
+	CHECK(g.state == GS_PLAY);
+	g.saved = HOSTAGE_COUNT;
+	step(NONE, 1);
+	step(NONE, CLEAR_FRAMES + 1);
+	CHECK(g.state == GS_INTRO && g.world == 1 && g.mission == 1 && g.chop.x == W2_START_X);
+	g.mission = MISSION_COUNT - 1;
+	g.state = GS_PLAY;
+	g.saved = HOSTAGE_COUNT;
+	step(NONE, 1);
+	CHECK(g.state == GS_CLEAR);
+	step(NONE, CLEAR_FRAMES + 1);
+	CHECK(g.state == GS_VICTORY);
+	// the hall of fame knows six missions and "all done"
+	CHECK(g_sHiConfig.ubReachedMax == MISSIONS_TOTAL + 1);
+	logicInit(&g);
+	logicStartAt(&g, 1, 1);
+	step(NONE, INTRO_FRAMES + 1);
+	g.score = 99999;
+	g.state = GS_OVER;
+	g.stateTimer = 1;
+	step(NONE, 2);
+	CHECK(g.state == GS_ENTRY && g.hi.pEntries[g.newRank].reached == MISSION_COUNT + 2);   // mission 5
+}
+
+// The card's one-line brief and strip map: what is out there, and the islands, barracks,
+// pads, hangar and the "you are here" marker on a map of 4608 px at an 18th
+static void testW2CardBriefAndMap(void) {
+	newWorld2(0);
+	char sz4[40], sz5[40], sz6[40];
+	strcpy(sz4, logicBrief(&g));
+	logicStartAt(&g, 1, 1);
+	strcpy(sz5, logicBrief(&g));
+	logicStartAt(&g, 1, 2);
+	strcpy(sz6, logicBrief(&g));
+	CHECK(sz4[0] && sz5[0] && sz6[0] && strcmp(sz4, sz5) && strcmp(sz5, sz6) && strstr(sz4, "BOAT"));
+	logicStartAt(&g, 1, 0);
+	tRouteMark pM[ROUTE_MARKS];
+	uint8_t n = logicRouteMap(&g, pM), nIsland = 0, nBarracks = 0, nPad = 0, nHere = 0, nHangar = 0;
+	CHECK(n <= ROUTE_MARKS);
+	for(uint8_t i = 0; i < n; ++i) {
+		CHECK(pM[i].x + pM[i].w <= ROUTE_W);
+		nIsland += pM[i].kind == ROUTE_ISLAND;
+		nBarracks += pM[i].kind == ROUTE_BARRACKS;
+		nPad += pM[i].kind == ROUTE_PAD;
+		nHangar += pM[i].kind == ROUTE_HANGAR;
+		if(pM[i].kind == ROUTE_HERE) { ++nHere; CHECK(pM[i].x == W2_START_X / 18); }
+	}
+	CHECK(nIsland == W2_ISLANDS && nBarracks == BARRACKS_COUNT && nPad == W2_ISLANDS && nHere == 1 && nHangar == 1);
+	CHECK(pM[n - 1].kind == ROUTE_HERE);
+}
+
+// The island barracks, the pads (a cap, units, an H, units, a cap, two lamps) and the hangar
+// are drawn where the camera sees them
+static void testW2DrawsIslands(void) {
+	newWorld2(0);
+	g.cam = (int16_t)(g_pIslands[3].padX - 200);
+	g.frame = 0;                              // (the lamps blink: shown at frame 0)
+	tDraw pDraw[DRAW_MAX];
+	g.chop.x = g_pIslands[3].padX;             // (the lamps wake up as the chopper comes near)
+	uint8_t n = logicDraw(&g, pDraw), nBarracks = 0, nPad = 0, nLamp = 0, nBoat = 0;
+	for(uint8_t i = 0; i < n; ++i) {
+		nBarracks += pDraw[i].bob == BOB_W2_BARRACKS;
+		nPad += pDraw[i].bob == BOB_PAD48 + (logicPadPx(&g, 3) - 48) / 16 && pDraw[i].x == g_pIslands[3].padX - logicPadPx(&g, 3) / 2 - g.cam;
+		nLamp += pDraw[i].bob == BOB_PAD_LAMP;
+		CHECK(pDraw[i].bob != BOB_BARRACKS && pDraw[i].bob != BOB_FENCE && pDraw[i].bob != BOB_FLAG);
+		CHECK(pDraw[i].bob < BOB_TYPES);
+	}
+	CHECK(nBarracks == 1 && nPad == 1 && nLamp == 2);   // a pad is one BOB (not a dozen: each BOB is ~2 % of an A500 frame)
+	g.chop.x = W2_START_X;                              // far from it: no lamps
+	n = logicDraw(&g, pDraw);
+	nLamp = 0;
+	for(uint8_t i = 0; i < n; ++i) nLamp += pDraw[i].bob == BOB_PAD_LAMP;
+	CHECK(nLamp == 0);
+	g.cam = (int16_t)(g_pIslands[1].x1 + 20);                  // the sea east of island 1
+	n = logicDraw(&g, pDraw);
+	for(uint8_t i = 0; i < n; ++i) nBoat += pDraw[i].bob == BOB_GUNBOAT || pDraw[i].bob == BOB_PATROL;
+	CHECK(nBoat >= 1);
+	g.cam = (int16_t)(W2_HANGAR_X - 100);
+	n = logicDraw(&g, pDraw);
+	uint8_t nHangar = 0;
+	for(uint8_t i = 0; i < n; ++i) nHangar += pDraw[i].bob == BOB_HANGAR;
+	CHECK(nHangar == 1);
+	for(uint8_t i = 0; i < BOB_TYPES; ++i) CHECK(g_pBobW[i] && g_pBobH[i] && g_pBobFrames[i]);
+}
+
 int main(void) {
 	testRotorRateFollowsSpeedAndClimb();
 	testRotorIdlesSlowAndSoftOnTheGround();
@@ -2691,6 +3124,23 @@ int main(void) {
 	testJetTellTable();
 	testSkillOneEasier();
 	testHarderTanksFireSooner();
+	testW2IslandsMatchTheMap();
+	testW2PadWidthBySkill();
+	testW2WaterIsASoftStop();
+	testW2LandOnlyOnPads();
+	testW2PadTolerance();
+	testW2RescueFromAnIsland();
+	testW2CannonOpensABarracks();
+	testW2BoatsArePlaced();
+	testW2BoatTellTable();
+	testW2GunboatTellsBeforeItShoots();
+	testW2GunboatFairness();
+	testW2LandedChopperHasGrace();
+	testW2OneBoatAttackAtATime();
+	testW2BoatsCanBeShot();
+	testW2MissionsFollowWorld1();
+	testW2CardBriefAndMap();
+	testW2DrawsIslands();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);
 		return 1;
