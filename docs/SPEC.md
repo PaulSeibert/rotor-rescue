@@ -150,7 +150,8 @@ and the AROS margin.
 - Enemy shots are 4 x 4, mines 12 x 12 (a 14 x 12 target for the cannon), the jet 28 x 10 for a ram
   and 32 x 12 for the cannon. The cannon's box is 6 x 3.
 - **Damage instead of instant loss** (decided by Paul, 2026-11-11; the hero device). The first hit **damages** the
-  chopper: it trails smoke, flies about 20 % slower (`VX_MAX` 48 to 38, the sidestep 40 to 32, climb
+  chopper: it trails smoke (a puff every 3 frames in flight; every 6 landed or hovering, under half a pixel a
+  frame, where they would pile up on one spot: v1.8, frame budget), flies about 20 % slower (`VX_MAX` 48 to 38, the sidestep 40 to 32, climb
   28 to 22, descent 32 to 26), everyone aboard is kept, and the HUD's right slot reads DAMAGED in
   place of the skill. The hit is followed by `INVULN_FRAMES` = 100 frames (2 s) in which nothing
   hurts the chopper (shots and mines pass through, a ram does nothing) and it blinks (4 frames
@@ -775,7 +776,8 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   v1.6 73 / 66 / 149 KB (a1200 1058 KB); after the pay-back 119 / 153 / 159 KB (a1200 1153 KB). While the program fills
   the 512K slow RAM, every KB it grows is a KB of chip RAM: watch `fast=` in the `AGK mem` lines (49 KB a500, 8 KB ks31).
 - **Kit techniques used:** `blitq` (blit queue), `copw` (raw copper writer), `text`, `pack` (the
-  packed logos), `perf`, ACE's ptplayer for the music mask; our own splash and title copper
+  packed logos), `perf`, `asmmodule` (the per-picture BOB loop, `src/objblits.s`, its C version kept
+  beside it as `OBJ_BLITS_C`), ACE's ptplayer for the music mask; our own splash and title copper
   pictures. Not used: `wavescript`, `longmap`, `modcredits`, `agahud`.
 - **A1200 extras** (chosen at runtime, A500 unchanged): the 24-bit sky (4 MOVEs a line, all 172
   lines, also on the title); the 224-colour title logo (8 planes at 1x fetch, palette loaded in the

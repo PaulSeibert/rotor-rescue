@@ -32,6 +32,13 @@ include_directories(${ACE_DIR}/include)
 add_subdirectory(${AGK_KIT}/runtime agk)
 
 file(GLOB_RECURSE SOURCES src/*.c)
+# 68000 assembly modules (src/*.s, vasm), if any. See techniques/asmmodule.
+file(GLOB_RECURSE ASM_SOURCES src/*.s src/*.asm)
+if(ASM_SOURCES)
+	include(${AGK_KIT}/cmake/agk_asm.cmake)
+	agk_asm_objects(ASM_OBJECTS ${ASM_SOURCES})
+	list(APPEND SOURCES ${ASM_OBJECTS})
+endif()
 # Art converted by agk (art/ -> build/art/art.c + art.h), if the project has any
 if(EXISTS ${CMAKE_BINARY_DIR}/art/art.c)
 	list(APPEND SOURCES ${CMAKE_BINARY_DIR}/art/art.c)

@@ -58,3 +58,7 @@ key 0x25
 wait 30
 expect-serial "AGK scores loaded\nAGK scores names=DPS/PRS/ACE/AGK/PRS\nAGK top=5000 last=16\d\d"
 expect-no-serial "AGK ERR"
+# The frame budget through game over, the initials, the table typing itself and
+# the save to the floppy (SPEC 11: worst < 100% on the A500; the target here 90%)
+expect-no-dropped-frames
+expect-max-load 90

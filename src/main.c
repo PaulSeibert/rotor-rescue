@@ -41,6 +41,8 @@
 #include <ace/utils/custom.h>
 #include <ace/utils/extview.h>
 #include <hardware/dmabits.h>
+#include <stddef.h>
+#include <agk/asm.h>
 #include <agk/blitq.h>
 #include <agk/copw.h>
 #include <agk/debug.h>
@@ -879,9 +881,14 @@ static UBYTE msgLayout(void) {
 }
 #define MSG_TYPE_PER_FRAME 2         // new letters a picture: text is slow, and it types itself
                                      // (3 made the title's worst frame 91% with the cloud band)
-static char s_pMsgStage[2][MSG_LINES][MSG_LEN + 1];   // what each line is showing / about to show
+// (rows of 44: long-aligned, for msgUpdate's four-letter compare)
+static char s_pMsgStage[2][MSG_LINES][MSG_LEN + 4] __attribute__((aligned(4)));   // what each line is showing / about to show
+typedef ULONG __attribute__((may_alias)) tUlongAlias;
+static UWORD s_pMsgTypeKey[2] = {0xFFFF, 0xFFFF};   // the key msgUpdate is typing (or typed)
+static UWORD s_pMsgDone[2];                  // per line (a bit): typed out under that key
 static ULONG s_pMsgCover[2][MSG_LINES][2];  // columns (bits) this buffer's BOBs covered last time
 static ULONG s_pMsgFix[2][MSG_LINES][2];    // columns an erase crossed: redraw their letters
+static ULONG s_pMsgInk[2][MSG_LINES][2];    // columns with a letter staged (not a space): the only ones a fix redraws
 static UBYTE s_pMsgAnyFix[2];
 static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
@@ -893,8 +900,47 @@ static UBYTE s_ubLastDrawn;          // objects in the last picture (the HUD typ
 static tBitMap *s_pBobBm[BOB_TYPES], *s_pBobMask[BOB_TYPES];
 static UBYTE s_pTplFirst[BOB_TYPES];
 static tAgkBlit s_pTpl[TPL_MAX][2];
+// Per BOB type, for objectsQueue's loop (src/objblits.s reads it: 16 bytes)
+typedef struct {
+	const tAgkBlit *pTpl;    // its frame 0's pair of templates (frame f: + 2f)
+	UWORD uwMaxX, uwMaxY;    // the buffer positions it fits at (the margins: no clipping)
+	UBYTE ubSlack;           // unused pixels in its last word: a shift past it needs the wider template
+	UBYTE pPad[7];
+} tBobInfo;
+_Static_assert(sizeof(tBobInfo) == 16, "objblits.s: 16 bytes a BOB type");
+static tBobInfo s_pBobInfo[BOB_TYPES];
+
+// objectsQueue's loop in 68000 assembly (src/objblits.s); its C version below
+// (OBJ_BLITS_C) is the reference it was checked against, picture for picture
+typedef struct {
+	const tDraw *pDraw;
+	tAgkBlit *pQueue;        // the queue's first free slot
+	tAgkBlit *pNext;         // the next queued blit to start
+	tAgkBlitArea *pErase;
+	UBYTE *pFb0;
+	const tBobInfo *pInfo;
+	UWORD uwN;
+	UWORD uwRoom;            // in: free slots; out: left
+	UWORD uwStarted;         // out
+	UWORD uwDrawn;           // out (bit 15: the queue was full)
+} tObjBlits;
+void objBlitsAsm(AGK_REG(tObjBlits *pCtx, "a0"));
+_Static_assert(offsetof(tObjBlits, uwN) == 24 && offsetof(tObjBlits, uwDrawn) == 30, "objblits.s: OB_*");
+_Static_assert(sizeof(tAgkBlit) == 24 && offsetof(tAgkBlit, pCD) == 16 && offsetof(tAgkBlit, wDstMod) == 22, "objblits.s: BL_*");
+_Static_assert(sizeof(tAgkBlitArea) == 8 && sizeof(tDraw) == 6 && offsetof(tDraw, bob) == 4, "objblits.s: the erase and draw lists");
+_Static_assert(FB_X0 == 48 && FB_ROW_BYTES == 162, "objblits.s: FB_X0, FB_ROW_BYTES");
 static UWORD s_pFbRowOffs[FB_H];
 static tDraw s_pDraw[DRAW_MAX];
+
+// Message columns c0..c1 (c0 <= c1 < MSG_LEN) as bits: word 0 columns 0-31, word 1 32-39
+static void msgColumns(ULONG *pOut, UBYTE c0, UBYTE c1) {
+	pOut[0] = pOut[1] = 0;
+	if(c0 < 32) pOut[0] = (0xFFFFFFFFUL >> (31 - ((c1 < 32 ? c1 : 31) - c0))) << c0;
+	if(c1 >= 32) {
+		UBYTE a = (UBYTE)(c0 > 32 ? c0 - 32 : 0);
+		pOut[1] = (0xFFFFFFFFUL >> (31 - (c1 - 32 - a))) << a;
+	}
+}
 
 static void bobAdd(UBYTE ubBob, tBitMap *pBm, tBitMap *pMask, UBYTE ubW, UBYTE ubH, UBYTE ubFrames) {
 	s_pBobBm[ubBob] = pBm;
@@ -922,6 +968,12 @@ static tBitMap *bobBm(ULONG ulOffs, UWORD uwW, UWORD uwRows) {
 	return pBm;
 }
 
+// Shots and shells are small and solid: a plain copy (half the bus).
+// Buildings are drawn first, onto an empty buffer: a plain copy too
+static UBYTE bobIsCopy(UBYTE b) {
+	return b == BOB_SHOT || b == BOB_SHELL || b == BOB_HANGAR || b == BOB_FENCE || b == BOB_BARRACKS || b == BOB_FLAG;
+}
+
 __attribute__((optimize("Os"))) static void bobsCreate(void) {
 	BOB_AT(BOB_HANGAR, HANGAR);
 	BOB_AT(BOB_FENCE, FENCE);
@@ -941,23 +993,135 @@ __attribute__((optimize("Os"))) static void bobsCreate(void) {
 	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
 		s_pTplFirst[b] = t;
 		for(UBYTE f = 0; f < g_pBobFrames[b] && t < TPL_MAX; ++f, ++t) {
-			// Shots and shells are small and solid: a plain copy (half the bus)
-			// Buildings are drawn first, onto an empty buffer: a plain copy too
-			UBYTE isCopy = b == BOB_SHOT || b == BOB_SHELL || b == BOB_HANGAR ||
-				b == BOB_FENCE || b == BOB_BARRACKS || b == BOB_FLAG;
-			agkBlitBob(s_pTpl[t], s_pBobBm[b], isCopy ? 0 : s_pBobMask[b], g_pBobW[b], g_pBobH[b], f, FB_PLANE_BYTES);
+			agkBlitBob(s_pTpl[t], s_pBobBm[b], bobIsCopy(b) ? 0 : s_pBobMask[b], g_pBobW[b], g_pBobH[b], f, FB_PLANE_BYTES);
 		}
 	}
 	if(t >= TPL_MAX) agkPrint("AGK ERR too many BOB frames: raise TPL_MAX\n");
 	for(UWORD y = 0; y < FB_H; ++y) s_pFbRowOffs[y] = (UWORD)(y * FB_ROW_BYTES);
+	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
+		// objectsQueue's tables: in the buffer when x <= max x and y <= max y (the
+		// buffer's margins: no clipping); the template for one word more (agkBlitPlace's
+		// choice) when the shift is past the slack in the last word
+		UWORD uwW = g_pBobW[b];
+		tBobInfo *pI = &s_pBobInfo[b];
+		pI->pTpl = s_pTpl[s_pTplFirst[b]];
+		pI->uwMaxX = (UWORD)(FB_W - 16 - uwW);
+		pI->uwMaxY = (UWORD)(FB_H - g_pBobH[b]);
+		pI->ubSlack = (UBYTE)(((uwW + 15) & ~15) - uwW);
+	}
+}
+
+static UBYTE s_ubDraws;              // objects in s_pDraw this picture (objectsQueue)
+
+// After the art is loaded (diskArtLoad): each masked BOB frame's two templates
+// cut to the rows its mask uses. Where the mask is 0 a cookie-cut writes the
+// background back (D = C), and each BOB's erase only has to take out what it
+// changed, so the pictures are the same, with fewer blitter words: the
+// blitter is what a busy picture waits for (explosions, smoke, the people).
+// The rows skipped at the top go in the template's (unused) destination, as
+// a byte offset objectsQueue adds. Plain copies (shots, shells, buildings)
+// write their blank rows too, so they stay whole.
+__attribute__((noinline, optimize("Os"))) static void bobsCrop(void) {
+	for(UBYTE b = 0; b < BOB_TYPES; ++b) {
+		if(bobIsCopy(b)) continue;
+		const tBitMap *pMask = s_pBobMask[b];
+		UBYTE ubH = g_pBobH[b];
+		UWORD uwBpr = pMask->BytesPerRow, uwRowBytes = (UWORD)(g_pBobW[b] / 8 * FB_BPP);
+		for(UBYTE f = 0; f < g_pBobFrames[b]; ++f) {
+			UBYTE t = (UBYTE)(s_pTplFirst[b] + f);
+			if(t >= TPL_MAX) break;
+			const UBYTE *pFrame = pMask->Planes[0] + (ULONG)f * ubH * uwBpr;
+			UBYTE ubTop = 0, ubEnd = ubH;
+			for(; ubTop < ubH; ++ubTop) {
+				const UBYTE *p = pFrame + (ULONG)ubTop * uwBpr;
+				UBYTE ubAny = 0;
+				for(UWORD i = 0; i < uwRowBytes; ++i) ubAny |= p[i];   // (all planes' rows: interleaved)
+				if(ubAny) break;
+			}
+			if(ubTop == ubH) { ubTop = 0; ubEnd = 1; }   // a blank frame: one row (a size of 0 rows is 1024)
+			else {
+				for(; ubEnd > ubTop + 1; --ubEnd) {
+					const UBYTE *p = pFrame + (ULONG)(ubEnd - 1) * uwBpr;
+					UBYTE ubAny = 0;
+					for(UWORD i = 0; i < uwRowBytes; ++i) ubAny |= p[i];
+					if(ubAny) break;
+				}
+			}
+			if(!ubTop && ubEnd == ubH) continue;
+			for(UBYTE v = 0; v < 2; ++v) {
+				tAgkBlit *pT = &s_pTpl[t][v];
+				ULONG ulSkip = (ULONG)ubTop * uwBpr;
+				pT->pA += ulSkip;
+				pT->pB += ulSkip;
+				pT->uwSize = (UWORD)((((ubEnd - ubTop) * FB_BPP) << 6) | (pT->uwSize & 0x3F));
+				pT->pCD = (UBYTE *)((ULONG)ubTop * FB_ROW_BYTES);
+			}
+		}
+	}
+}
+
+// The letters of this layout's message lines a BOB at buffer (x, y) covers,
+// for redrawing after its erase (msgCoverAll)
+static void msgCoverBob(UBYTE ubBfr, WORD x, WORD y, UBYTE b, UBYTE ubFirst, UBYTE ubEnd) {
+	// (the erase covers whole words: from the word's start, + 16 px)
+	WORD c0 = (WORD)(((x - FB_X0) & ~15) >> 3), c1 = (WORD)((x - FB_X0 + g_pBobW[b] + 15) >> 3);
+	if(c0 < 0) c0 = 0;
+	if(c1 > MSG_LEN - 1) c1 = MSG_LEN - 1;
+	if(c0 > c1) return;
+	// columns c0..c1 as bits (word 0: 0-31, word 1: 32-39), once a BOB
+	ULONG pCols[2];
+	msgColumns(pCols, (UBYTE)c0, (UBYTE)c1);
+	s_pMsgAnyCover[ubBfr] = 1;
+	for(UBYTE l = ubFirst; l < ubEnd; ++l) {
+		if(y < s_pMsgY[l] + 8 && y + g_pBobH[b] > s_pMsgY[l]) {
+			s_pMsgCover[ubBfr][l][0] |= pCols[0];
+			s_pMsgCover[ubBfr][l][1] |= pCols[1];
+		}
+	}
+}
+
+// After the picture's letters are typed (msgUpdate): the ones under its BOBs,
+// which their erase takes out next time in this buffer. The blitter drew the
+// BOBs first, the CPU typed over them, so the letters there now are the ones to
+// redraw. Only while the layout's lines have letters: in play they're empty,
+// and a jet, its missiles and the damage smoke in the band cost 10% of a frame
+__attribute__((noinline)) static void msgCoverAll(UBYTE ubBfr) {
+	UBYTE ubLayout = msgLayout();
+	UBYTE ubFirst = s_pMsgFirst[ubLayout], ubEnd = s_pMsgEnd[ubLayout];
+	ULONG ulInk = 0;
+	for(UBYTE l = ubFirst; l < ubEnd; ++l) ulInk |= s_pMsgInk[ubBfr][l][0] | s_pMsgInk[ubBfr][l][1];
+	if(!ulInk) return;
+	// the objects drawn (objectsQueue's test) across the layout's lines
+	WORD wTop = s_pMsgY[ubFirst], wEnd = (WORD)(s_pMsgY[ubEnd - 1] + 8);
+	const tDraw *pD = s_pDraw;
+	for(UBYTE i = s_ubDraws; i--; ++pD) {
+		WORD y = pD->y;
+		if(y >= wEnd) continue;
+		UBYTE b = pD->bob;
+		if(y + g_pBobH[b] <= wTop) continue;
+		WORD x = (WORD)(pD->x + FB_X0);
+		const tBobInfo *pI = &s_pBobInfo[b];
+		if((UWORD)x > pI->uwMaxX || (UWORD)y > pI->uwMaxY) continue;
+		msgCoverBob(ubBfr, x, y, b, ubFirst, ubEnd);
+	}
 }
 
 __attribute__((noinline)) static void erasesQueue(UBYTE ubBfr) {
 	agkBlitqReset();
+	// (as agkBlitClear + agkBlitqPush, leaner: D only, so a slot needs just
+	// BLTCON0/1, D, its modulo and the size - A, B, the masks and the source
+	// modulo don't count; the queue is empty, and DRAW_MAX of them fit it)
+	_Static_assert(DRAW_MAX < AGK_BLITQ_MAX, "a picture's erases fit the blit queue");
 	const tAgkBlitArea *pDrawn = s_pErase[ubBfr];
-	for(UBYTE i = s_pErased[ubBfr]; i--; ++pDrawn) {
-		agkBlitClear(agkBlitqSlot(), pDrawn);
-		agkBlitqPush();
+	tAgkBlit *pQ = g_pAgkBlitq;
+	for(UBYTE i = s_pErased[ubBfr]; i--; ++pDrawn, ++pQ) {
+		pQ->uwCon0 = 0x0100;                  // USED, minterm 0
+		pQ->uwCon1 = 0;
+		pQ->pCD = pDrawn->pD;
+		pQ->wDstMod = pDrawn->wMod;
+		pQ->uwSize = pDrawn->uwSize;
+		++g_uwAgkBlitqCount;
+		agkBlitqPoll();
 	}
 }
 
@@ -971,41 +1135,80 @@ __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 	UBYTE ubLayout = msgLayout();
 	UBYTE ubMsgFirst = s_pMsgFirst[ubLayout], ubMsgEnd = s_pMsgEnd[ubLayout];
 	// what last time's BOBs covered gets erased now: those letters need redrawing
-	// (not in the other layout's lines: msgLayoutClear() is about to clear them)
+	// (not in the other layout's lines: msgLayoutClear() is about to clear them).
+	// Just the columns with letters in them: in play the lines are empty, and a
+	// jet or a missile crossing them made msgUpdate retype all four every frame
+	// (a quarter of an A500 frame; the skill-5 trip ran at 130-180%)
 	if(s_pMsgAnyCover[ubBfr]) {
 		s_pMsgAnyCover[ubBfr] = 0;
-		for(UBYTE l = 0; l < MSG_LINES; ++l) {
+		ULONG *pCover = s_pMsgCover[ubBfr][0], *pFix = s_pMsgFix[ubBfr][0];
+		const ULONG *pInk = s_pMsgInk[ubBfr][0];
+		ULONG ulAny = 0;
+		for(UBYTE l = 0; l < MSG_LINES; ++l, pCover += 2, pFix += 2, pInk += 2) {
 			if(l >= ubMsgFirst && l < ubMsgEnd) {
-				s_pMsgFix[ubBfr][l][0] |= s_pMsgCover[ubBfr][l][0];
-				s_pMsgFix[ubBfr][l][1] |= s_pMsgCover[ubBfr][l][1];
-				s_pMsgAnyFix[ubBfr] |= (s_pMsgCover[ubBfr][l][0] | s_pMsgCover[ubBfr][l][1]) != 0;
+				ULONG ulFix0 = pCover[0] & pInk[0], ulFix1 = pCover[1] & pInk[1];
+				pFix[0] |= ulFix0;
+				pFix[1] |= ulFix1;
+				ulAny |= ulFix0 | ulFix1;
 			}
-			else s_pMsgFix[ubBfr][l][0] = s_pMsgFix[ubBfr][l][1] = 0;
-			s_pMsgCover[ubBfr][l][0] = s_pMsgCover[ubBfr][l][1] = 0;
+			else pFix[0] = pFix[1] = 0;
+			pCover[0] = pCover[1] = 0;
 		}
+		if(ulAny) s_pMsgAnyFix[ubBfr] = 1;
 	}
+	// The per-object loop: it runs from slow RAM in the 6-plane lines, where
+	// the bus is full (bitplanes 55%, the blitter 15%), and the C loop cost ~6
+	// raster lines an object: half of a busy A500 frame. Per type, a table made
+	// once (bobsCreate) gives the limits and the template; src/objblits.s keeps
+	// everything in registers. (OBJ_BLITS_C: the C version it was checked
+	// against, every golden picture identical.)
+	s_ubDraws = n;
+#ifndef OBJ_BLITS_C
+	tObjBlits sB;
+	sB.pDraw = s_pDraw;
+	sB.pQueue = &g_pAgkBlitq[g_uwAgkBlitqCount];
+	sB.pNext = &g_pAgkBlitq[g_uwAgkBlitqNext];
+	sB.pErase = pErase;
+	sB.pFb0 = pFb->Planes[0];
+	sB.pInfo = s_pBobInfo;
+	sB.uwN = n;
+	sB.uwRoom = (UWORD)(AGK_BLITQ_MAX - g_uwAgkBlitqCount);
+	objBlitsAsm(&sB);
+	g_uwAgkBlitqCount = (UWORD)(AGK_BLITQ_MAX - sB.uwRoom);
+	g_uwAgkBlitqNext = (UWORD)(g_uwAgkBlitqNext + sB.uwStarted);
+	if(sB.uwDrawn & 0x8000) agkBlitqFull();
+	ubDrawn = (UBYTE)sB.uwDrawn;
+	(void)pD;
+#else
+	UBYTE *pFb0 = pFb->Planes[0];
+	tAgkBlit *pQ = &g_pAgkBlitq[g_uwAgkBlitqCount];
 	for(UBYTE i = n; i--; ++pD) {
 		UBYTE b = pD->bob;
 		WORD x = pD->x + FB_X0, y = pD->y;
-		if(x < 0 || y < 0 || x + g_pBobW[b] + 16 > FB_W || y + g_pBobH[b] > FB_H) continue;
-		tAgkBlit *pB = agkBlitqSlot();
-		agkBlitPlace(pB, s_pTpl[s_pTplFirst[b] + pD->frame], g_pBobW[b], pFb->Planes[0] + s_pFbRowOffs[y], (UWORD)x);
-		agkBlitArea(pErase++, pB);
-		agkBlitqPush();
-		++ubDrawn;
-		if(y < s_pMsgY[ubMsgEnd - 1] + 8 && y + g_pBobH[b] > s_pMsgY[ubMsgFirst]) {
-			// (the erase covers whole words: from the word's start, + 16 px)
-			WORD c0 = (WORD)(((x - FB_X0) & ~15) >> 3), c1 = (WORD)((x - FB_X0 + g_pBobW[b] + 15) >> 3);
-			if(c0 < 0) c0 = 0;
-			if(c1 > MSG_LEN - 1) c1 = MSG_LEN - 1;
-			s_pMsgAnyCover[ubBfr] = 1;
-			for(UBYTE l = ubMsgFirst; l < ubMsgEnd; ++l) {
-				if(y < s_pMsgY[l] + 8 && y + g_pBobH[b] > s_pMsgY[l]) {
-					for(WORD c = c0; c <= c1; ++c) s_pMsgCover[ubBfr][l][c >> 5] |= 1UL << (c & 31);
-				}
-			}
+		const tBobInfo *pI = &s_pBobInfo[b];
+		// (x < 0 and y < 0 are large unsigned: off too)
+		if((UWORD)x > pI->uwMaxX || (UWORD)y > pI->uwMaxY) continue;
+		UBYTE ubShift = (UBYTE)(x & 15);
+		const tAgkBlit *pT = pI->pTpl + 2 * pD->frame + (ubShift > pI->ubSlack);
+		*pQ = *pT;
+		UWORD uwShift = (UWORD)ubShift << 12;
+		pQ->uwCon0 |= uwShift;   // ASHIFT
+		pQ->uwCon1 = uwShift;    // BSHIFT
+		UBYTE *pCD = pFb0 + s_pFbRowOffs[y] + ((x >> 4) << 1) + (ULONG)pT->pCD;   // (+ its blank rows: bobsCrop)
+		pQ->pCD = pCD;
+		pErase->pD = pCD;
+		pErase->uwSize = pQ->uwSize;
+		pErase->wMod = pQ->wDstMod;
+		++pErase;
+		if(g_uwAgkBlitqCount < AGK_BLITQ_MAX) {
+			++g_uwAgkBlitqCount;
+			++pQ;
 		}
+		else agkBlitqFull();
+		agkBlitqPoll();
+		++ubDrawn;
 	}
+#endif
 	s_pErased[ubBfr] = ubDrawn;
 	s_ubLastDrawn = ubDrawn;
 }
@@ -1018,7 +1221,7 @@ __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 #define HUD_TYPE_PER_FRAME 8
 #define HUD_TYPE_BUSY 3              // ... when the last picture had HUD_BUSY_BOBS objects or more:
 #define HUD_BUSY_BOBS 16             // (16 people running into the hangar: the heaviest pictures)
-static char s_pHudStage[2][HUD_LEN + 1];
+static char s_pHudStage[2][HUD_LEN + 4] __attribute__((aligned(4)));   // (rows of 44: textType reads longs)
 static UBYTE s_pHudPending[2];
 static tAgkFont s_sFont;
 // The kit's font plus ( ) , and a copyright sign (written '@' in strings)
@@ -1032,6 +1235,13 @@ static const unsigned char s_pFontExtra[4][8] = {
 };
 static tAgkText s_pHudText[2], s_pHudText2[2], s_pHudSkill[2];
 #define HUD_SKILL_X (16 + 264)       // right of the radar
+// The two slots under the line, per buffer ([0] left: HELI / QUOTA, 8 letters;
+// [1] right: SKILL / DAMAGED..., 7): typed like the line, in its budget
+#define HUD_SLOT_LEN 8
+static char s_pHudSlotLine[2][2][HUD_SLOT_LEN + 4] __attribute__((aligned(4)));   // (rows of 12: textType reads longs)
+static char s_pHudSlotStage[2][2][HUD_SLOT_LEN + 4] __attribute__((aligned(4)));
+static UBYTE s_pHudSlotPending[2][2];
+static UBYTE s_pHudDraw[2];              // per buffer: texts staged, to draw (hudDraw): 1 the line, 2 left, 4 right
 
 static void hudInit(void) {
 	for(UBYTE c = 0; c < AGK_FONT8_COUNT; ++c)
@@ -1045,20 +1255,37 @@ static void hudInit(void) {
 		s_pHudStage[b][HUD_LEN] = 0;
 		agkTextInit(&s_pHudText2[b], &s_sFont, s_pHud[b], 16, RADAR_Y, 8, 4, 1);   // (8 letters: up to the radar)
 		agkTextInit(&s_pHudSkill[b], &s_sFont, s_pHud[b], HUD_SKILL_X, RADAR_Y, 7, 4, 1);
+		for(UBYTE s = 0; s < 2; ++s) {
+			UBYTE ubLen = s ? 7 : 8;
+			for(UBYTE c = 0; c < ubLen; ++c) s_pHudSlotStage[b][s][c] = ' ';
+			s_pHudSlotStage[b][s][ubLen] = 0;
+			s_pHudSlotLine[b][s][ubLen] = 0;
+		}
 	}
 }
 
 // Show szTarget in pText, at most ubBudget changed letters now (the rest
 // on later calls: text is slow to draw). Returns 1 when it's all shown.
-static UBYTE textType(tAgkText *pText, char *pStage, const char *szTarget, UBYTE ubBudget) {
-	UBYTE isDone = 1, isChange = 0;
-	for(UBYTE c = 0; szTarget[c]; ++c) {
-		if(pStage[c] != szTarget[c]) {
-			if(ubBudget) { pStage[c] = szTarget[c]; --ubBudget; isChange = 1; }
-			else isDone = 0;
+// (Only the stage here: hudDraw() draws it later in the picture, *pDraw set.
+// Both long-aligned, ubLen letters: four at a time where they match - the
+// 40-letter line, compared a letter at a time on every picture of its typing,
+// was 14 lines of the A500's frame after a lost chopper.)
+static UBYTE textType(char *pStage, const char *szTarget, UBYTE ubLen, UBYTE *pBudget, UBYTE *pDraw, UBYTE ubDrawBit) {
+	UBYTE isDone = 1, isChange = 0, ubBudget = *pBudget;
+	for(UBYTE c = 0; c < ubLen;) {
+		if(*(const tUlongAlias *)&pStage[c] == *(const tUlongAlias *)&szTarget[c]) {
+			c += 4;
+			continue;
+		}
+		for(UBYTE e = (UBYTE)(c + 4); c < e && c < ubLen; ++c) {
+			if(pStage[c] != szTarget[c]) {
+				if(ubBudget) { pStage[c] = szTarget[c]; --ubBudget; isChange = 1; }
+				else isDone = 0;
+			}
 		}
 	}
-	if(isChange) agkTextSet(pText, pStage);
+	if(isChange) *pDraw |= ubDrawBit;
+	*pBudget = ubBudget;
 	return isDone;
 }
 
@@ -1105,7 +1332,7 @@ __attribute__((noinline, noclone)) static void hudUpdate(UBYTE ubBfr) {
 	ULONG ulScore = isTitle ? g->hiScore : g->score;
 	// the line to show, per buffer: only the fields that changed are formatted
 	// again (a 6-digit score is 12 DIVUs)
-	static char pLine[2][HUD_LEN + 1];
+	static char pLine[2][HUD_LEN + 4] __attribute__((aligned(4)));
 	char *szLine = pLine[ubBfr];
 	if(isTitle != pTitle[ubBfr]) {
 		pTitle[ubBfr] = isTitle;
@@ -1125,29 +1352,58 @@ __attribute__((noinline, noclone)) static void hudUpdate(UBYTE ubBfr) {
 		if(g->killed != pKilled[ubBfr]) { pKilled[ubBfr] = g->killed; hudNumber(&szLine[24], g->killed, 2); s_pHudPending[ubBfr] = 1; }
 	}
 	if(ulScore != pScore[ubBfr]) { pScore[ubBfr] = ulScore; hudNumber(&szLine[33], ulScore, 6); s_pHudPending[ubBfr] = 1; }
-	if(s_pHudPending[ubBfr]) {
-		s_pHudPending[ubBfr] = !textType(&s_pHudText[ubBfr], s_pHudStage[ubBfr], szLine,
-			s_ubLastDrawn >= HUD_BUSY_BOBS ? HUD_TYPE_BUSY : HUD_TYPE_PER_FRAME);
-	}
+	// One budget of letters a picture for the whole HUD: the two slots first
+	// (the alerts), then the line. (The slots were drawn whole at once: at a lost
+	// chopper HELI, SKILL and the line's three numbers changed in one picture,
+	// beside the explosions: 15% of an A500 frame)
+	UBYTE ubBudget = s_ubLastDrawn >= HUD_BUSY_BOBS ? HUD_TYPE_BUSY : HUD_TYPE_PER_FRAME;
 	// the left slot: the choppers left; for a while after the last scoring tank
 	// kill of a mission, the quota (later tanks pay nothing)
 	UBYTE ubLeft = (UBYTE)(g->lives | (g->quotaMsg ? 0x10 : 0));
 	if(ubLeft != pLives[ubBfr]) {
 		pLives[ubBfr] = ubLeft;
-		char szLine[] = "HELI 3";
-		szLine[5] = (char)('0' + g->lives);
-		agkTextSet(&s_pHudText2[ubBfr], g->quotaMsg ? "QUOTA 10" : szLine);
+		const char *szL = g->quotaMsg ? "QUOTA 10" : "HELI 3  ";
+		char *pL = s_pHudSlotLine[ubBfr][0];
+		for(UBYTE i = 0; i < HUD_SLOT_LEN; ++i) pL[i] = szL[i];
+		if(!g->quotaMsg) pL[5] = (char)('0' + g->lives);
+		s_pHudSlotPending[ubBfr][0] = 1;
 	}
 	// the right slot: the skill; DAMAGED while the chopper is damaged (until the pad mends it)
 	UBYTE isDamaged = g->chop.damaged && g->chop.alive && !g->demo;
 	UBYTE ubSkill = (UBYTE)(g->difficulty | (g->demo << 4) | (isDamaged << 5));
 	if(ubSkill != pSkill[ubBfr]) {
 		pSkill[ubBfr] = ubSkill;
-		char szSkill[] = "SKILL 3";
-		szSkill[6] = (char)('0' + g->difficulty);
-		agkTextSet(&s_pHudSkill[ubBfr], g->demo ? "   DEMO" : isDamaged ? "DAMAGED" :
-			g->difficulty == DIFFICULTY_INVINCIBLE ? "GODMODE" : szSkill);
+		const char *szS = g->demo ? "   DEMO " : isDamaged ? "DAMAGED " :
+			g->difficulty == DIFFICULTY_INVINCIBLE ? "GODMODE " : "SKILL 3 ";
+		char *pS = s_pHudSlotLine[ubBfr][1];
+		for(UBYTE i = 0; i < HUD_SLOT_LEN; ++i) pS[i] = szS[i];
+		pS[HUD_SLOT_LEN - 1] = 0;   // (7 letters)
+		if(!g->demo && !isDamaged && g->difficulty != DIFFICULTY_INVINCIBLE) pS[6] = (char)('0' + g->difficulty);
+		s_pHudSlotPending[ubBfr][1] = 1;
 	}
+	UBYTE *pDraw = &s_pHudDraw[ubBfr];
+	if(s_pHudSlotPending[ubBfr][0]) {
+		s_pHudSlotPending[ubBfr][0] = !textType(s_pHudSlotStage[ubBfr][0], s_pHudSlotLine[ubBfr][0], 8, &ubBudget, pDraw, 2);
+	}
+	if(s_pHudSlotPending[ubBfr][1]) {
+		s_pHudSlotPending[ubBfr][1] = !textType(s_pHudSlotStage[ubBfr][1], s_pHudSlotLine[ubBfr][1], 7, &ubBudget, pDraw, 4);
+	}
+	if(s_pHudPending[ubBfr]) {
+		s_pHudPending[ubBfr] = !textType(s_pHudStage[ubBfr], szLine, HUD_LEN, &ubBudget, pDraw, 1);
+	}
+}
+
+// The letters hudUpdate() staged this picture, drawn into this buffer's HUD
+// (the CPU's, not on screen until the swap): late in the picture, while the
+// blitter finishes the objects, rather than at its start, where the objects'
+// blits waited for them (the busiest pictures end waiting for the blitter)
+__attribute__((noinline)) static void hudDraw(UBYTE ubBfr) {
+	UBYTE ubDraw = s_pHudDraw[ubBfr];
+	if(!ubDraw) return;
+	s_pHudDraw[ubBfr] = 0;
+	if(ubDraw & 2) agkTextSet(&s_pHudText2[ubBfr], s_pHudSlotStage[ubBfr][0]);
+	if(ubDraw & 4) agkTextSet(&s_pHudSkill[ubBfr], s_pHudSlotStage[ubBfr][1]);
+	if(ubDraw & 1) agkTextSet(&s_pHudText[ubBfr], s_pHudStage[ubBfr]);
 }
 
 // The radar: RADAR_W x RADAR_H px at HUD (RADAR_X0, RADAR_Y). Rows 0-4 move
@@ -1316,15 +1572,35 @@ __attribute__((noinline)) static void msgLayoutClear(UBYTE ubBfr) {
 	agkBlitqPush();
 	char *pShown = s_pMsg[ubBfr][l].szShown;
 	for(UBYTE c = c0; c < c1; ++c) pStage[c] = pShown[c] = ' ';
+	s_pMsgInk[ubBfr][l][0] = s_pMsgInk[ubBfr][l][1] = 0;
 	s_pMsgFix[ubBfr][l][0] = s_pMsgFix[ubBfr][l][1] = 0;
 	s_pMsgCover[ubBfr][l][0] = s_pMsgCover[ubBfr][l][1] = 0;
+}
+
+// One letter of a message line drawn, and noted as shown: what agkTextSet()
+// does for each letter that differs (the kit's drawChar), without its scan of
+// all 40: msgUpdate knows which ones it typed and which an erase crossed (the
+// scans were ~20 lines of an A500 frame while CHOPPER DOWN shows over explosions)
+static const UBYTE s_pZero8[8];
+__attribute__((noinline)) static void msgChar(tAgkText *pT, UBYTE ubCol, char c) {
+	pT->szShown[ubCol] = c;
+	const tAgkFont *pFont = pT->pFont;
+	UBYTE ubChar = pFont->pIndex[(UBYTE)c & 0x7F];
+	UWORD uwStep = pT->uwRowBytes;
+	for(UBYTE p = 0; p < pT->ubDepth; ++p) {
+		UBYTE isL = (pT->ubColor >> p) & 1, isS = (pT->ubShadow >> p) & 1;
+		const UBYTE *pSrc = isL ? (isS ? pFont->pBoth[ubChar] : pFont->pRows[ubChar])
+		                        : (isS ? pFont->pShadow[ubChar] : s_pZero8);
+		UBYTE *pD = pT->pPlane[p] + ubCol;
+		for(UBYTE r = 0; r < 8; ++r, pD += uwStep) *pD = pSrc[r];
+	}
 }
 
 static void msgCentre(char *szOut, const char *szText) {
 	UBYTE ubLen = 0;
 	while(szText[ubLen] && ubLen < MSG_LEN) ++ubLen;
 	UBYTE ubPad = (UBYTE)((MSG_LEN - ubLen) >> 1);
-	for(UBYTE i = 0; i < MSG_LEN; ++i) szOut[i] = ' ';
+	for(UBYTE i = 0; i < MSG_LEN; i += 4) *(tUlongAlias *)&szOut[i] = 0x20202020UL;   // (szOut: long-aligned)
 	for(UBYTE i = 0; i < ubLen; ++i) szOut[ubPad + i] = szText[i];
 	szOut[MSG_LEN] = 0;
 }
@@ -1361,11 +1637,24 @@ __attribute__((noinline, optimize("Os"))) static void scoreRow(char *p, UBYTE i)
 __attribute__((noinline, optimize("Os"))) static UWORD msgMenu(const char **pText, char (*pRows)[32], char *szA, char *szB) {
 	const tGame *g = &s_sGame;
 	if(g->state == GS_SCORES) {
-		pText[MSG_SCORES] = "HALL OF FAME";
-		for(UBYTE i = 0; i < SCORE_COUNT; ++i) {
-			scoreRow(pRows[i], i);
-			pText[MSG_SCORES + 1 + i] = pRows[i];
+		// The rows (12 DIVUs each, for the score) made again only when the
+		// table or the new entry changes: every picture of the table's typing
+		// they were a fifth of an A500 frame
+		static tScore pRowsOf[SCORE_COUNT];
+		static UBYTE ubRowsRank = 0xFF, isRows;
+		UBYTE isSame = isRows && ubRowsRank == g->newRank;
+		const UBYTE *pNow = (const UBYTE *)g->pScores, *pThen = (const UBYTE *)pRowsOf;
+		for(UWORD i = 0; i < sizeof(pRowsOf) && isSame; ++i) isSame = pNow[i] == pThen[i];
+		if(!isSame) {
+			for(UBYTE i = 0; i < SCORE_COUNT; ++i) {
+				scoreRow(pRows[i], i);
+				pRowsOf[i] = g->pScores[i];
+			}
+			ubRowsRank = g->newRank;
+			isRows = 1;
 		}
+		pText[MSG_SCORES] = "HALL OF FAME";
+		for(UBYTE i = 0; i < SCORE_COUNT; ++i) pText[MSG_SCORES + 1 + i] = pRows[i];
 		static const char *const pStatus[] = {
 			"", "SAVING TO DISK...", "SAVED TO DISK", "DISK WRITE-PROTECTED: NOT SAVED",
 			"DISK ERROR: NOT SAVED", "", "",
@@ -1394,16 +1683,36 @@ __attribute__((noinline, optimize("Os"))) static UWORD msgMenu(const char **pTex
 		((s->name[0] * 37 + s->name[1] * 11 + s->name[2]) & 0xFFF));
 }
 
+// What the message lines say, as a number: the same key means the same text
+// (the initials: any letter, the cursor, the blink; the table: the disk status)
+static UWORD msgKeyNow(void) {
+	const tGame *g = &s_sGame;
+	if(g->state == GS_ENTRY) {
+		const tScore *s = &g->pScores[g->newRank];
+		UBYTE isBlink = (g->frame >> 4) & 1;
+		return (UWORD)(0x8000 | ((g->entryPos & 3) << 13) | (isBlink << 12) |
+			((s->name[0] * 37 + s->name[1] * 11 + s->name[2]) & 0xFFF));
+	}
+	UWORD uwKeyLow = g->state == GS_SCORES ? (UWORD)(s_ubDiskStatus << 1) : 0;
+	return (UWORD)(g->state << 8 | g->mission << 4 | uwKeyLow |
+		(g->state == GS_TITLE ? (g->frame >> 5) & 1 : 0) |
+		(g->state == GS_LOST && g->stateTimer < LOST_FRAMES - 40 ? 2 : 0));
+}
+
 __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	const tGame *g = &s_sGame;
 	const char *pText[MSG_LINES] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 	char szA[24], szB[28];
-	char pRows[SCORE_COUNT][32];
-	UWORD uwKeyLow = 0;
-	switch(g->state) {
+	static char pRows[SCORE_COUNT][32];   // (msgMenu keeps them while the table stays)
+	// Nothing new, nothing crossed: nothing to do (the usual case in play). The
+	// key first, the text only when there's typing to do
+	UWORD uwKey = msgKeyNow();
+	UBYTE isSettled = uwKey == s_pMsgKey[ubBfr];
+	if(isSettled && !s_pMsgAnyFix[ubBfr]) return;
+	if(!isSettled) switch(g->state) {
 		case GS_SCORES:
 		case GS_ENTRY:
-			uwKeyLow = msgMenu(pText, pRows, szA, szB);
+			msgMenu(pText, pRows, szA, szB);
 			break;
 		case GS_TITLE:
 			pText[MSG_TITLE] = "BY PAUL ROSS SEIBERT";
@@ -1456,46 +1765,65 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 		default:
 			break;
 	}
-	// Nothing new, nothing crossed: nothing to do (the usual case in play)
-	UWORD uwKey = uwKeyLow & 0x8000 ? uwKeyLow : (UWORD)(g->state << 8 | g->mission << 4 | uwKeyLow |
-		(g->state == GS_TITLE ? (g->frame >> 5) & 1 : 0) |
-		(g->state == GS_LOST && g->stateTimer < LOST_FRAMES - 40 ? 2 : 0));
-	if(uwKey == s_pMsgKey[ubBfr] && !s_pMsgAnyFix[ubBfr]) return;
 	s_pMsgAnyFix[ubBfr] = 0;
-	char szLine[MSG_LEN + 1];
+	if(uwKey != s_pMsgTypeKey[ubBfr]) {
+		// new text: every line to check again
+		s_pMsgTypeKey[ubBfr] = uwKey;
+		s_pMsgDone[ubBfr] = 0;
+	}
+	char szLine[MSG_LEN + 4] __attribute__((aligned(4)));
 	UBYTE ubBudget = MSG_TYPE_PER_FRAME;
 	UBYTE ubLayout = msgLayout();
 	// (just this layout's lines: msgLayoutClear() blanks the others)
 	for(UBYTE l = s_pMsgFirst[ubLayout]; l < s_pMsgEnd[ubLayout]; ++l) {
 		char *pStage = s_pMsgStage[ubBfr][l];
 		ULONG *pFix = s_pMsgFix[ubBfr][l];
+		ULONG *pInk = s_pMsgInk[ubBfr][l];
+		tAgkText *pT = &s_pMsg[ubBfr][l];
 		UBYTE isChange = 0;
-		if(ubBudget) {
-			// (no letters left to type this picture: the later lines wait, unread)
-			msgCentre(szLine, pText[l]);
-			for(UBYTE c = 0; c < MSG_LEN && ubBudget; ++c) {
-				if(pStage[c] != szLine[c]) {
-					pStage[c] = szLine[c];
-					--ubBudget;
-					isChange = 1;
+		UWORD uwLineBit = (UWORD)(1 << l);
+		if(ubBudget && !isSettled && !(s_pMsgDone[ubBfr] & uwLineBit)) {
+			// (no letters left to type this picture: the later lines wait, unread.
+			// Settled, everything is typed: only the fixes below. A line typed
+			// out under this key, or blank and to stay blank, isn't read again:
+			// centring and comparing all four lines a picture was 15-20% of an
+			// A500 frame at a state change, beside the explosions)
+			UBYTE c = 0;
+			if(!pText[l][0] && !(pInk[0] | pInk[1])) c = MSG_LEN;
+			else msgCentre(szLine, pText[l]);
+			while(c < MSG_LEN && ubBudget) {
+				// four letters at a time where nothing changes
+				if(*(const tUlongAlias *)&pStage[c] == *(const tUlongAlias *)&szLine[c]) {
+					c += 4;
+					continue;
+				}
+				for(UBYTE e = (UBYTE)(c + 4); c < e && ubBudget; ++c) {
+					if(pStage[c] != szLine[c]) {
+						pStage[c] = szLine[c];
+						ULONG ulBit = 1UL << (c & 31);
+						if(szLine[c] != ' ') pInk[c >> 5] |= ulBit;
+						else pInk[c >> 5] &= ~ulBit;
+						msgChar(pT, c, szLine[c]);
+						--ubBudget;
+						isChange = 1;
+					}
 				}
 			}
+			if(c >= MSG_LEN) s_pMsgDone[ubBfr] |= uwLineBit;
 		}
-		if(pFix[0] | pFix[1]) {
-			// letters an erase crossed: draw again (not spaces: they'd cut into the BOB)
-			tAgkText *pT = &s_pMsg[ubBfr][l];
-			for(UBYTE c = 0; c < MSG_LEN; ++c) {
-				if((pFix[c >> 5] & (1UL << (c & 31))) && pStage[c] != ' ') {
-					pT->szShown[c] = 1;
-					isChange = 1;
-				}
-			}
-			pFix[0] = pFix[1] = 0;
+		// letters an erase crossed: draw again (only letters: spaces would cut
+		// into the BOB; objectsQueue keeps just the inked columns)
+		ULONG ulFix0 = pFix[0] & pInk[0], ulFix1 = pFix[1] & pInk[1];
+		pFix[0] = pFix[1] = 0;
+		if(ulFix0 | ulFix1) {
+			// (the set bits only, the mask shifted along)
+			UBYTE c = 0;
+			for(ULONG m = ulFix0; m; m >>= 1, ++c) if(m & 1) msgChar(pT, c, pStage[c]);
+			c = 32;
+			for(ULONG m = ulFix1; m; m >>= 1, ++c) if(m & 1) msgChar(pT, c, pStage[c]);
+			isChange = 1;
 		}
-		if(isChange) {
-			agkTextSet(&s_pMsg[ubBfr][l], pStage);
-			s_pMsgLit[ubBfr] |= (UWORD)(1 << l);
-		}
+		if(isChange) s_pMsgLit[ubBfr] |= uwLineBit;
 	}
 	// all typed: settled until the key changes
 	s_pMsgKey[ubBfr] = ubBudget ? uwKey : 0xFFFF;
@@ -1647,6 +1975,7 @@ static void chopperDestroy(void) {
 __attribute__((noinline, optimize("Os"))) static void diskArtLoad(void) {
 	s_isArtPending = 0;
 	if(agkLoadFile("diskart.bin.pk", s_pDiskArt, DISK_ART_BYTES) != DISK_ART_BYTES) agkPrint("AGK art missing\n");
+	bobsCrop();
 	agkPerfSkip();
 }
 
@@ -2367,10 +2696,12 @@ void genericProcess(void) {
 	}
 	UBYTE ubBfr = backBuffer();
 	// last picture's BOBs erased first: the blitter clears them while the CPU
-	// types the HUD (the top of the picture is in the border, the bus mostly free)
+	// stages the HUD and runs the logic (the top of the picture is in the
+	// border, the bus mostly free)
 	erasesQueue(ubBfr);
+	UWORD uwRadarBlit = g_uwAgkBlitqCount;   // (radarUpdate: after this blit)
 	radarClear(ubBfr);
-	hudUpdate(ubBfr);
+	hudUpdate(ubBfr);   // (what to type: hudDraw types it)
 	agkBlitqPoll();
 	UBYTE ubStateBefore = s_sGame.state;
 	if(!s_isPaused) {
@@ -2388,11 +2719,21 @@ void genericProcess(void) {
 	skyUpdate(ubBfr);
 	rotorUpdate();
 	reportState(ubStateBefore);
+	// The HUD's CPU work while the blitter finishes the objects (a busy
+	// picture ends waiting for the blitter): the radar once its strip's clear
+	// is done (blits run in order: a later one started, or the blitter idle
+	// after it), then the letters staged at the start
+	while(g_uwAgkBlitqNext <= uwRadarBlit + 1 &&
+		(g_uwAgkBlitqNext <= uwRadarBlit || ((void)g_pCustom->dmaconr, g_pCustom->dmaconr & DMAF_BLTDONE))) {
+		agkBlitqPoll();
+	}
+	radarUpdate(ubBfr);
+	hudDraw(ubBfr);
 
 	agkBlitqFinish();
-	radarUpdate(ubBfr);
 	if(s_sGame.state == GS_INTRO && !s_pRouteLit[ubBfr]) routeShow(ubBfr);
 	else msgUpdate(ubBfr);   // (not both in one picture)
+	msgCoverAll(ubBfr);
 	copProcessBlocks();
 	agkPerfEnd();
 	while(timerGet() - s_ulFrameVbl < 1) continue;

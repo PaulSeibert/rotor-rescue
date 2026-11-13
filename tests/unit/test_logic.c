@@ -1779,6 +1779,37 @@ static void testSmokeTrailOnlyWhenDamaged(void) {
 	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_SMOKE);
 }
 
+// Hovering damaged, the puffs rise from one spot and pile up on each other: one
+// every 7 frames there (as on the ground), not 4 - the column looks the same and
+// the blitter draws half as many (the skill-5 loss among explosions overran the
+// A500's frame). Flying, the trail is as before.
+static void testSmokeSparserWhenHovering(void) {
+	newGame();
+	flyAt(1500, 120);
+	g.chop.damaged = 1;
+	tDraw d[DRAW_MAX];
+	int iMax = 0;
+	for(int f = 0; f < 60; ++f) {
+		g.chop.x = 1500; g.chop.y = 120; g.chop.vx = 0;
+		step(NONE, 1);
+		uint8_t n = logicDraw(&g, d);
+		int c = 0;
+		for(uint8_t i = 0; i < n; ++i) c += d[i].bob == BOB_SMOKE;
+		if(c > iMax) iMax = c;
+	}
+	CHECK(iMax >= 3 && iMax <= 4);              // hovering: a sparser column
+	iMax = 0;
+	for(int f = 0; f < 60; ++f) {
+		g.chop.x = (int16_t)(1000 + 2 * f); g.chop.y = 120; g.chop.vx = 32;   // 2 px a frame
+		step(NONE, 1);
+		uint8_t n = logicDraw(&g, d);
+		int c = 0;
+		for(uint8_t i = 0; i < n; ++i) c += d[i].bob == BOB_SMOKE;
+		if(c > iMax) iMax = c;
+	}
+	CHECK(iMax >= 6);                           // flying: the full trail
+}
+
 static void testInvincibleIsNeverDamaged(void) {
 	newGame();
 	logicSetDifficulty(&g, DIFFICULTY_INVINCIBLE);
@@ -2354,6 +2385,7 @@ int main(void) {
 	testSecondHitDestroys();
 	testPadRepairs();
 	testSmokeTrailOnlyWhenDamaged();
+	testSmokeSparserWhenHovering();
 	testInvincibleIsNeverDamaged();
 	testJetTellShowsFlash();
 	testTankShellSpeedAndGap();
