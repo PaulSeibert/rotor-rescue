@@ -33,6 +33,17 @@ def rim(fr):
     return lit, shade
 
 
+def flag(fr):
+    """(pixels left of the mast, pixels right of it) of the masthead pennant: the non-outline pixels in the rows above the cabin
+    roof (the first row with a long run of outline), the mast being the column that is outline in most of those rows"""
+    top = next(i for i, r in enumerate(fr) if "K" * 8 in r)
+    rows = fr[:top]
+    mast = max(range(len(rows[0])), key=lambda x: sum(r[x] == "K" for r in rows))
+    left = sum(ch not in ".K" for r in rows for ch in r[:mast])
+    right = sum(ch not in ".K" for r in rows for ch in r[mast + 1:])
+    return left, right
+
+
 def run():
     bad = 0
 
@@ -63,6 +74,14 @@ def run():
             lb, sb = rim(b)
             if name != "destroyer_turret" and (lb < sb or la < sa):
                 fail("%s frame %d: light is not from the left (lit rims %d/%d, shade %d/%d)" % (name, i, la, lb, sa, sb))
+    pb = frames("patrol_boat")                                   # the mast flag streams toward the stern, away from the heading
+    for i, f in enumerate(pb):
+        left, right = flag(f)
+        face_left = i < 2                                        # frames 0-1 face left, so the stern (and the flag) is to the right
+        toward, away = (right, left) if face_left else (left, right)
+        if toward < 3 or away:
+            fail("patrol_boat frame %d (%s-facing): mast flag must stream toward the stern, >= 3 px and none toward the bow (stern side %d px, bow side %d px)" %
+                 (i, "left" if face_left else "right", toward, away))
     n = len(W.bank)
     if n > 40:
         fail("tile bank %d columns > 40" % n)
