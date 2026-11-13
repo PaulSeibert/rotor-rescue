@@ -287,16 +287,24 @@ static UBYTE s_isReady;
 static UBYTE s_ubSkillKeyWait;  // frames left to press 0-5 after Ctrl+L
 static UBYTE s_ubScrollTrace;   // Ctrl+L, T: frames left to print the far bands' BPLCON1 (tests)
 static UWORD s_uwMtnCon1, s_uwHillCon1, s_uwMtnX4;   // what copperUpdate wrote last
-static UBYTE s_ubDiskStatus;    // HS_*: the hall of fame on the floppy (shown under it)
+static UBYTE s_ubDiskStatus;    // HI_DISK_*: the hall of fame on the floppy (shown under it)
+
+// The table from the floppy (HI_DISK_LOADED, or HI_DISK_DEFAULT: the defaults stay)
+static UBYTE scoresLoad(void) {
+	UBYTE ubStatus = hiDiskLoad(&s_sGame.hi, &g_sHiConfig);
+	s_sGame.hiScore = hiTop(&s_sGame.hi);
+	agkPrint(ubStatus == HI_DISK_LOADED ? "AGK scores loaded\n" : "AGK scores default\n");
+	return ubStatus;
+}
 
 static void scoresReport(void) {
 	// "AGK scores names=DPS/PRS/..." best first, then the top and last scores
 	char szLine[] = "AGK scores names=AAA/AAA/AAA/AAA/AAA\n";
-	for(UBYTE i = 0; i < SCORE_COUNT; ++i)
-		for(UBYTE c = 0; c < SCORE_NAME; ++c) szLine[17 + 4 * i + c] = s_sGame.pScores[i].name[c];
+	for(UBYTE i = 0; i < HI_COUNT; ++i)
+		for(UBYTE c = 0; c < HI_NAME; ++c) szLine[17 + 4 * i + c] = s_sGame.hi.pEntries[i].name[c];
 	agkPrint(szLine);
-	agkState("top", (LONG)s_sGame.pScores[0].score);
-	agkState("last", (LONG)s_sGame.pScores[SCORE_COUNT - 1].score);
+	agkState("top", (LONG)s_sGame.hi.pEntries[0].score);
+	agkState("last", (LONG)s_sGame.hi.pEntries[HI_COUNT - 1].score);
 	agkEnd();
 }
 static const UBYTE s_pDigitKeys[DIFFICULTY_MAX + 1] = {KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5};
@@ -358,7 +366,7 @@ __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 	if(keyUse(KEY_H)) {
 		// the hall of fame read from the disk again, as at boot (tests)
 		s_ubSkillKeyWait = 0;
-		agkPrint(hiscoreLoad(&s_sGame) == DISK_LOADED ? "AGK scores loaded\n" : "AGK scores default\n");
+		scoresLoad();
 		scoresReport();
 		agkPerfSkip();
 		return;
@@ -766,7 +774,7 @@ static void titleLoad(void) {
 	// the hall of fame from the floppy (none yet: the defaults). Here, not at
 	// startup: AROS takes ~2800 frames to load the program and the harness
 	// waits 3000 for the first picture
-	agkPrint(hiscoreLoad(&s_sGame) == DISK_LOADED ? "AGK scores loaded\n" : "AGK scores default\n");
+	scoresLoad();
 	// (the A1200: its 8-plane logo, or without the file the OCS one)
 	s_isTitleLogo8 = s_isAga && s_pTitleLogo &&
 		agkLoadFile("titlelogo8.bin.pk", s_pTitleLogo, TITLE_LOGO8_BYTES) == TITLE_LOGO8_BYTES;
@@ -2088,81 +2096,61 @@ static void msgCentre(char *szOut, const char *szText) {
 	szOut[MSG_LEN] = 0;
 }
 
-// A hall of fame line: "1  ABC  012345  M2  CAPTAIN", the new entry between dashes
+// A hall of fame line (the kit's hiRow): "- 1  ABC  012345  MSN 2  CAPTAIN  -",
+// the new entry between dashes. The mission it reached and the rank its
+// hostages saved earned are this game's two words.
 __attribute__((noinline, optimize("Os"))) static void scoreRow(char *p, UBYTE i) {
-	const tScore *s = &s_sGame.pScores[i];
-	UBYTE isNew = i == s_sGame.newRank;
-	*p++ = isNew ? '-' : ' ';
-	*p++ = ' ';
-	*p++ = (char)('1' + i);
-	*p++ = ' ';
-	*p++ = ' ';
-	for(UBYTE c = 0; c < SCORE_NAME; ++c) *p++ = s->name[c];
-	*p++ = ' ';
-	*p++ = ' ';
-	agkTextNumber(p, s->score, 6);
-	p += 6;
-	*p++ = ' ';
-	*p++ = ' ';
-	if(s->mission > MISSION_COUNT) { *p++ = 'A'; *p++ = 'L'; *p++ = 'L'; }
-	else { *p++ = 'M'; *p++ = (char)('0' + s->mission); *p++ = ' '; }
-	*p++ = ' ';
-	const char *szR = logicRank(s->saved);
-	UBYTE n = 0;
-	while(szR[n]) *p++ = szR[n++];
-	while(n++ < 7) *p++ = ' ';
-	*p++ = ' ';
-	*p++ = isNew ? '-' : ' ';
-	*p = 0;
+	const tHiScore *s = &s_sGame.hi.pEntries[i];
+	char szReached[HI_REACHED_W + 1] = "ALL";
+	if(s->reached <= MISSION_COUNT) {
+		szReached[0] = 'M'; szReached[1] = 'S'; szReached[2] = 'N'; szReached[3] = ' ';
+		szReached[4] = (char)('0' + s->reached);
+		szReached[5] = 0;
+	}
+	hiRow(p, &s_sGame.hi, i, i == s_sGame.newRank, szReached, logicRank(s->extra));
 }
 
 // The hall of fame's and the initials' lines; returns the low bits of the key
-__attribute__((noinline, optimize("Os"))) static UWORD msgMenu(const char **pText, char (*pRows)[32], char *szA, char *szB) {
+__attribute__((noinline, optimize("Os"))) static UWORD msgMenu(const char **pText, char (*pRows)[HI_ROW_LEN + 1], char *szA, char *szB) {
 	const tGame *g = &s_sGame;
 	if(g->state == GS_SCORES) {
 		// The rows (12 DIVUs each, for the score) made again only when the
 		// table or the new entry changes: every picture of the table's typing
 		// they were a fifth of an A500 frame
-		static tScore pRowsOf[SCORE_COUNT];
+		static tHiTable sRowsOf;
 		static UBYTE ubRowsRank = 0xFF, isRows;
 		UBYTE isSame = isRows && ubRowsRank == g->newRank;
-		const UBYTE *pNow = (const UBYTE *)g->pScores, *pThen = (const UBYTE *)pRowsOf;
-		for(UWORD i = 0; i < sizeof(pRowsOf) && isSame; ++i) isSame = pNow[i] == pThen[i];
+		const UBYTE *pNow = (const UBYTE *)&g->hi, *pThen = (const UBYTE *)&sRowsOf;
+		for(UWORD i = 0; i < sizeof(sRowsOf) && isSame; ++i) isSame = pNow[i] == pThen[i];
 		if(!isSame) {
-			for(UBYTE i = 0; i < SCORE_COUNT; ++i) {
-				scoreRow(pRows[i], i);
-				pRowsOf[i] = g->pScores[i];
-			}
+			for(UBYTE i = 0; i < HI_COUNT; ++i) scoreRow(pRows[i], i);
+			sRowsOf = g->hi;
 			ubRowsRank = g->newRank;
 			isRows = 1;
 		}
 		pText[MSG_SCORES] = "HALL OF FAME";
-		for(UBYTE i = 0; i < SCORE_COUNT; ++i) pText[MSG_SCORES + 1 + i] = pRows[i];
-		static const char *const pStatus[] = {
-			"", "SAVING TO DISK...", "SAVED TO DISK", "DISK WRITE-PROTECTED: NOT SAVED",
-			"DISK ERROR: NOT SAVED", "", "",
-		};
-		pText[MSG_SCORES + 6] = g->newRank < SCORE_COUNT ? pStatus[s_ubDiskStatus] : "";
+		for(UBYTE i = 0; i < HI_COUNT; ++i) pText[MSG_SCORES + 1 + i] = pRows[i];
+		pText[MSG_SCORES + 6] = g->newRank < HI_COUNT ? hiDiskText(s_ubDiskStatus) : "";
 		return (UWORD)(s_ubDiskStatus << 1);
 	}
-	// the initials: up/down a letter, fire the next, the current one blinking
-	const tScore *s = &g->pScores[g->newRank];
+	// the initials: typed, or up/down a letter and fire the next; the current one blinking
+	const tHiScore *s = &g->hi.pEntries[g->newRank];
 	const char *szR = "RANK 1   000000";
 	for(UBYTE i = 0; i < 16; ++i) szB[i] = szR[i];
 	szB[5] = (char)('1' + g->newRank);
-	agkTextNumber(&szB[9], s->score, 6);
+	hiNumber(&szB[9], s->score, 6);
 	pText[0] = "GREAT SCORE!";
 	pText[1] = szB;
 	pText[2] = "ENTER YOUR INITIALS";
 	UBYTE isBlink = (g->frame >> 4) & 1;
-	for(UBYTE c = 0; c < SCORE_NAME; ++c) {
-		szA[2 * c] = (c == g->entryPos && isBlink) ? '-' : s->name[c];
+	for(UBYTE c = 0; c < HI_NAME; ++c) {
+		szA[2 * c] = (c == g->edit.ubPos && isBlink) ? '-' : s->name[c];
 		szA[2 * c + 1] = ' ';
 	}
-	szA[2 * SCORE_NAME - 1] = 0;
+	szA[2 * HI_NAME - 1] = 0;
 	pText[3] = szA;
 	// (the key changes with any letter, the cursor or the blink)
-	return (UWORD)(0x8000 | ((g->entryPos & 3) << 13) | (isBlink << 12) |
+	return (UWORD)(0x8000 | ((g->edit.ubPos & 3) << 13) | (isBlink << 12) |
 		((s->name[0] * 37 + s->name[1] * 11 + s->name[2]) & 0xFFF));
 }
 
@@ -2171,9 +2159,9 @@ __attribute__((noinline, optimize("Os"))) static UWORD msgMenu(const char **pTex
 static UWORD msgKeyNow(void) {
 	const tGame *g = &s_sGame;
 	if(g->state == GS_ENTRY) {
-		const tScore *s = &g->pScores[g->newRank];
+		const tHiScore *s = &g->hi.pEntries[g->newRank];
 		UBYTE isBlink = (g->frame >> 4) & 1;
-		return (UWORD)(0x8000 | ((g->entryPos & 3) << 13) | (isBlink << 12) |
+		return (UWORD)(0x8000 | ((g->edit.ubPos & 3) << 13) | (isBlink << 12) |
 			((s->name[0] * 37 + s->name[1] * 11 + s->name[2]) & 0xFFF));
 	}
 	UWORD uwKeyLow = g->state == GS_SCORES ? (UWORD)(s_ubDiskStatus << 1) : 0;
@@ -2197,7 +2185,7 @@ __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey) {
 	const tGame *g = &s_sGame;
 	const char *pText[MSG_LINES] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 	char szA[24], szB[28];
-	static char pRows[SCORE_COUNT][32];   // (msgMenu keeps them while the table stays)
+	static char pRows[HI_COUNT][HI_ROW_LEN + 1];   // (msgMenu keeps them while the table stays)
 	UBYTE isSettled = uwKey == s_pMsgKey[ubBfr];
 	if(!isSettled) switch(g->state) {
 		case GS_SCORES:
@@ -2975,7 +2963,8 @@ static void readInput(tInput *pIn) {
 	UBYTE isUp = (uwUpDown >> 8) & 1, isDown = uwUpDown & 1;
 	pIn->dx = (isLeft || keyCheck(KEY_LEFT)) ? -1 : (isRight || keyCheck(KEY_RIGHT)) ? 1 : 0;
 	pIn->dy = (isUp || keyCheck(KEY_UP)) ? -1 : (isDown || keyCheck(KEY_DOWN)) ? 1 : 0;
-	pIn->fire = !(g_pCia[CIA_A]->pra & 0x80) || keyCheck(KEY_SPACE);
+	// (in the initials Space is a space, typed: only the stick's button is fire)
+	pIn->fire = !(g_pCia[CIA_A]->pra & 0x80) || (s_sGame.state != GS_ENTRY && keyCheck(KEY_SPACE));
 	pIn->fire2 = !(g_pCustom->potinp & (1 << 14)) || keyCheck(KEY_X);
 }
 
@@ -3154,15 +3143,15 @@ __attribute__((optimize("Os"))) void genericCreate(void) {   // (startup: small 
 __attribute__((noinline, optimize("Os"))) static void scoresSave(void) {
 	tGame *g = &s_sGame;
 	if(g->state != GS_SCORES) return;
-	if(s_ubDiskStatus != DISK_SAVING) {
-		s_ubDiskStatus = DISK_SAVING;
+	if(s_ubDiskStatus != HI_DISK_SAVING) {
+		s_ubDiskStatus = HI_DISK_SAVING;
 		return;
 	}
 	if(g->stateTimer > SCORES_FRAMES - 120) return;   // (the table and this line type themselves first)
 	g->scoresChanged = 0;
-	s_ubDiskStatus = hiscoreSave(g);
-	agkPrint(s_ubDiskStatus == DISK_SAVED ? "AGK scores saved\n" :
-		s_ubDiskStatus == DISK_PROTECTED ? "AGK scores not saved: write-protected\n" : "AGK scores not saved: disk error\n");
+	s_ubDiskStatus = hiDiskSave(&g->hi, &g_sHiConfig);
+	agkPrint(s_ubDiskStatus == HI_DISK_SAVED ? "AGK scores saved\n" :
+		s_ubDiskStatus == HI_DISK_PROTECTED ? "AGK scores not saved: write-protected\n" : "AGK scores not saved: disk error\n");
 	scoresReport();
 	agkPerfSkip();
 }
@@ -3284,19 +3273,28 @@ void genericProcess(void) {
 	// behind the ground, unseen in rain and dust)
 	if(!s_isSplash) weatherUpdate();
 	keyProcess();     // (the joystick: readInput(), from the hardware)
-	if(keyCheck(KEY_ESCAPE)) {
-		gameExit();
-		return;
+	// In the initials the keyboard types (hiscore): the game's own keys (Esc,
+	// M, P, Ctrl+L...) are not read, so typing an M doesn't mute the music
+	UBYTE isEntry = s_sGame.state == GS_ENTRY;
+	if(!isEntry) {
+		if(keyCheck(KEY_ESCAPE)) {
+			gameExit();
+			return;
+		}
+		if(keyUse(KEY_M)) {
+			s_isMusicOn = !s_isMusicOn;
+			musicFor(s_sGame.state);
+		}
+		if(keyUse(KEY_P) && s_sGame.state == GS_PLAY) s_isPaused = !s_isPaused;
+		skillKeys();
 	}
-	if(keyUse(KEY_M)) {
-		s_isMusicOn = !s_isMusicOn;
-		musicFor(s_sGame.state);
-	}
-	if(keyUse(KEY_P) && s_sGame.state == GS_PLAY) s_isPaused = !s_isPaused;
-	skillKeys();
 
 	tInput sIn;
 	readInput(&sIn);
+	{
+		UBYTE ubKey = isEntry ? hiKeyPoll() : HI_KEY_NONE;
+		sIn.key = ubKey == HI_KEY_NONE ? 0 : ubKey;
+	}
 	if(s_isSplash) {
 		s_isSplash = splashProcess(sIn.fire || keyCheck(KEY_RETURN));
 		agkPerfEnd();
@@ -3340,6 +3338,7 @@ void genericProcess(void) {
 	agkBlitqPoll();
 	UBYTE ubStateBefore = s_sGame.state;
 	if(!s_isPaused) logicUpdate(&s_sGame, &sIn);
+	if(s_sGame.state == GS_ENTRY && ubStateBefore != GS_ENTRY) hiKeyFlush();   // (a key held from the game isn't a letter)
 	msgLayoutClear(ubBfr);
 	routeClear(ubBfr);
 	agkBlitqPoll();

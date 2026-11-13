@@ -1,0 +1,61 @@
+# Initials typed on the keyboard (the kit's hiscore technique): the same trip
+# home and the three losses as tests/hiscore.agk, then on the entry screen
+# K (0x27), M (0x37: a letter here, not the music key), Backspace (0x41) takes
+# the M back, 1 (0x01: the digit row), Return (0x44) confirms with the third
+# place as it was: "K1 ". The table shows it and the floppy has it.
+start-at rescued
+key 0x63
+key 0x28
+wait 5
+key 0x05
+wait 30
+press up 30
+press left 170
+wait 60
+press down 70
+wait-serial "chopper lost" 2000
+wait 170
+press up 30
+press left 170
+wait 60
+press down 70
+wait-serial "lives=1" 2000
+wait 170
+press up 30
+press left 170
+wait 60
+press down 70
+wait-serial "lives=0" 2000
+wait-serial "state=5" 300
+expect-serial "AGK music gameover"   # (loaded at boot, plays here with no load pause)
+wait 120
+press fire 1
+wait-serial "state=8" 10
+wait 60
+wait 5
+key 0x27
+wait 3
+screenshot typed
+key 0x37
+wait 3
+key 0x41
+wait 3
+key 0x01
+wait 3
+key 0x44
+wait-serial "state=7" 10
+wait-serial "scores names=" 600
+wait 40
+screenshot table
+expect-serial "AGK scores saved\nAGK scores names=DPS/PRS/ACE/AGK/K1 \nAGK top=5000 last=16\d\d"
+expect-no-serial "AGK ERR"
+# read back from the floppy as at boot (Ctrl+L, H)
+wait-serial "state=0" 600
+key 0x63
+key 0x28
+wait 5
+key 0x25
+wait 30
+expect-serial "AGK scores loaded\nAGK scores names=DPS/PRS/ACE/AGK/K1 \nAGK top=5000 last=16\d\d"
+expect-no-dropped-frames
+expect-max-load 90
