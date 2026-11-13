@@ -9,19 +9,35 @@ LET = {"K": 0x111, "O": 0x564, "S": 0x998, "W": 0xFEC, "R": 0xD42, "Y": 0xFC3, "
 
 
 class C:
-    def __init__(self, w, h):
+    """flip=True draws the same picture facing the other way: every pixel lands at x -> w-1-x (so a boat drawn bow-left comes
+    out bow-right) except the lit rim strips (see rect), which stay on the left of their block: the light is always
+    from the top left, so a mirrored boat is re-lit, not just flipped."""
+    def __init__(self, w, h, flip=False):
         self.w, self.h = w, h
+        self.flip = flip
+        self.blocks = []
         self.a = [["."] * w for _ in range(h)]
 
     def px(self, x, y, c):
         x, y = int(x), int(y)
+        if self.flip:
+            x = self.w - 1 - x
         if 0 <= x < self.w and 0 <= y < self.h:
             self.a[y][x] = c
 
     def get(self, x, y):
+        """the stored picture (already flipped), not drawing coordinates"""
         return self.a[y][x] if 0 <= x < self.w and 0 <= y < self.h else "."
 
     def rect(self, x0, y0, x1, y1, c):
+        if self.flip:
+            if c == "O":
+                self.blocks.append((x0, y0, x1, y1))
+            elif c == "S" and x1 - x0 <= 2 and y1 > y0:
+                for (bx0, by0, bx1, by1) in reversed(self.blocks):
+                    if bx0 == x0 and bx1 > x1 and by0 <= y0 <= by1:          # a lit strip on a block's left edge
+                        x0, x1 = bx1 - (x1 - x0), bx1                         # (px mirrors it: the left edge again)
+                        break
         for y in range(y0, y1 + 1):
             for x in range(x0, x1 + 1):
                 self.px(x, y, c)
@@ -117,8 +133,8 @@ def barrel(c, x0, y0, ang_deg, length, face=-1):
 
 
 # ----------------------------------------------------------------------------------------- patrol boat
-def patrol(wake=0):
-    c = C(46, 18)
+def patrol(wake=0, flip=False):
+    c = C(46, 18, flip)
     ox = 3
     c.poly([(ox + 0, 8), (ox + 40, 9), (ox + 37, 14), (ox + 8, 14)], "O")
     c.rect(ox + 1, 8, ox + 39, 8, "S")                       # lit deck edge
@@ -152,9 +168,9 @@ def patrol(wake=0):
 
 
 # ----------------------------------------------------------------------------------------- gunboat
-def gunboat(state="idle", wake=0):
+def gunboat(state="idle", wake=0, flip=False, crop=True):
     """state: idle | tell1 | tell2 | fire. Barrel pivot at (20, 11). 64 x 30."""
-    c = C(64, 38)
+    c = C(64, 38, flip)
     ox = 13
     base = 30
     c.poly([(ox + 0, base - 8), (ox + 50, base - 7), (ox + 47, base), (ox + 7, base)], "O")      # hull
@@ -213,7 +229,7 @@ def gunboat(state="idle", wake=0):
         c.px(x, y, "W")
     for x in range(ox + 12, ox + 46, 6):
         c.px(x + wake * 2, base + 2, "S")
-    return c.crop()
+    return c.crop() if crop else c
 
 
 # ----------------------------------------------------------------------------------------- radar site
@@ -410,10 +426,10 @@ def pad(width, lit=True):
 
 
 # ----------------------------------------------------------------------------------------- destroyer
-def destroyer(turret_state=("idle", "idle"), flash_aa=False):
+def destroyer(turret_state=("idle", "idle"), flash_aa=False, flip=False):
     """a strait destroyer, facing left, 160 x 46 (feet at row 41). Cut into three BOB sections for the blitter:
     bow 64 / mid 64 / stern 32. Turret A (forward) and B (aft of the bridge) are separate parts with tell frames."""
-    c = C(170, 50)
+    c = C(170, 50, flip)
     base = 42
     ox = 4
     # hull
@@ -482,10 +498,10 @@ def destroyer(turret_state=("idle", "idle"), flash_aa=False):
     return c
 
 
-def turret(state="idle", mirror=False):
+def turret(state="idle", flip=False):
     """a twin-gun turret with long barrels, facing left, 30 x 18. states idle | tell1 | tell2 | fire.
     The tell is the barrels rising and a flash on the housing (frames per skill: 28/24/20/18/16)."""
-    c = C(34, 22)
+    c = C(34, 22, flip)
     ox = 18
     lift = {"idle": 0, "tell1": 1, "tell2": 2, "fire": 0}[state]
     c.rect(ox + 0, 13 - lift, ox + 14, 17 - lift, "O")
@@ -585,3 +601,60 @@ def windsock(frame):
             c.rect(3 + i, 3 + i // 4, 3 + i, 7 - i // 4, ch)
     c.px(2, 2, "K")
     return c
+
+
+# ----------------------------------------------------------------------------------------- production helpers
+def bbox(frames):
+    """(x0, y0, x1, y1) inclusive, the union of the drawn pixels of every frame"""
+    xs, ys = [], []
+    for f in frames:
+        for y in range(f.h):
+            for x in range(f.w):
+                if f.a[y][x] != ".":
+                    xs.append(x)
+                    ys.append(y)
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def common(frames):
+    """crop every frame to the union box, so a frame set keeps its registration (the pivot, the waterline) and every frame
+    has the same size, as one text-art asset needs; returns (frames, (x0, y0))"""
+    x0, y0, x1, y1 = bbox(frames)
+    out = []
+    for f in frames:
+        c = C(x1 - x0 + 1, y1 - y0 + 1)
+        for y in range(c.h):
+            for x in range(c.w):
+                c.a[y][x] = f.a[y + y0][x + x0]
+        out.append(c)
+    return out, (x0, y0)
+
+
+def barracks_set():
+    """the engine's 4 barracks frames: 0 intact (closed, blue lamp), 1 shot up, 2-3 open and burning (flicker). The pilot
+    drew closed and open; shot-up and the flames are derived from them (holes, scorch, flames on the thatch)."""
+    closed, op = barracks("closed"), barracks("open")
+    shot = closed.copy()
+    for (x, y, ch) in [(12, 5, "K"), (13, 5, "K"), (13, 6, "K"), (30, 7, "K"), (31, 7, "K"), (31, 8, "K"), (14, 4, "S"), (29, 6, "S"),
+                       (11, 16, "K"), (11, 17, "K"), (12, 17, "K"), (38, 15, "K"), (39, 15, "K"), (39, 16, "K"), (9, 19, "O"),
+                       (38, 19, "O"), (37, 20, "O"), (7, 21, "O")]:
+        shot.px(x, y, ch)
+    shot.px(25, 0, "K")                                     # the beacon is gone
+    shot.px(24, 0, "K")
+    shot.px(26, 0, "K")
+    shot.px(24, 1, "K")
+    shot.px(26, 1, "K")
+    shot.px(25, 1, "O")
+    out = [closed, shot]
+    for k in range(2):
+        b = op.copy()
+        for xs in (12, 22, 33):                             # flames break through the roof
+            for i, (dx, hgt) in enumerate([(0, 4), (1, 6), (2, 7), (3, 5), (4, 3), (5, 2)]):
+                top = 9 - (hgt + (k if i % 2 else 0) - (0 if i % 3 else 1))
+                for y in range(max(0, top), 10):
+                    ch = "Y" if y < top + 2 else "R"
+                    b.px(xs + dx + (k if i == 2 else 0), y, ch)
+        for (x, y) in [(15, 2 + k), (25, 1 + k), (36, 2), (27, 0 + k)]:      # sparks
+            b.px(x, y, "Y")
+        out.append(b)
+    return out

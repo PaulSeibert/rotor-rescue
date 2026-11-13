@@ -115,6 +115,9 @@ def world_map(bank):
         row = row[:inner]
         t += row + ["shoreR%d_0" % (seed % 2), "shoreR%d_1" % (seed % 2)]
         lay(col, t)
+        objs.append(dict(first_col=col, columns=ncol, base_island=base,
+                         barracks_col=None if barracks is None else col + barracks,
+                         pad_col=None if pad is None else col + pad[0], pad_px=None if pad is None else pad[1]))
         if barracks is not None:                        # clear flat ground under the barracks (4 tiles) and the pad
             for k in range(4):
                 names[col + barracks + k] = "flat%d" % ((k + seed) % 4)

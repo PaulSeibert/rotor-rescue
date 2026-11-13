@@ -1,0 +1,22 @@
+# Pad status lamps 5 x 5: red (off the pad), yellow (over the pad). No green exists in PF1.
+colors
+  .  transparent
+  K  0x111
+  O  0x564
+  S  0x998
+  W  0xFEC
+  R  0xD42
+  Y  0xFC3
+  B  0x36B
+frame
+.KKK.
+KRRRK
+KRRRK
+KRRRK
+.KKK.
+frame
+.KKK.
+KWYYK
+KYYYK
+KYYYK
+.KKK.
