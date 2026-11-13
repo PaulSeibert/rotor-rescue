@@ -1,0 +1,54 @@
+# World 2's gameplay slice (SPEC 4.4, 11 "World 2's gameplay"): mission 4, Reef Run, played.
+# Ctrl+L, W, 4 starts it behind its card (the strip map: islands, barracks, pads, hangar).
+# - water is a soft stop with a splash: fly out over the sea west of the base island and
+#   descend: the skids stop at the surface, a splash shows, nothing is lost;
+# - a pad: land on island 4's (x 3312, 64 px wide on normal); the pad guide is drawn;
+# - the island barracks opens to the cannon from the pad (two shots, 192 px away), its 16
+#   people walk to the chopper and board, and fly home to the base island's pad: 16 saved.
+# No dropped frames, worst <= 85 % (the world's budget, tests/world2.agk).
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x04
+wait-serial "AGK world 2 loaded" 400
+wait 30
+screenshot card
+press fire 2
+wait 50
+screenshot base
+press up 30
+press left 100
+wait 40
+press down 90
+wait 20
+screenshot splash
+press up 20
+press left 150
+wait 40
+press down 120
+wait 60
+screenshot pad
+expect-color pad 184 210 0xFC3
+press fire 1
+wait 30
+press fire 1
+wait-serial "barracks open=3" 100
+wait-serial "aboard=16" 900
+screenshot boarded
+press up 30
+press right 250
+wait 60
+press down 100
+wait-serial "saved=16" 500
+screenshot saved
+expect-serial "AGK world=2 mission=4"
+expect-serial "AGK splash"
+expect-serial "landed x=33\d\d"
+expect-serial "landed x=41\d\d"
+expect-no-serial "chopper lost|ERR|missing"
+expect-no-dropped-frames
+expect-max-load 85
+expect-min-chip-free 96

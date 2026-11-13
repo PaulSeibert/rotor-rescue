@@ -37,8 +37,13 @@ sys.path.insert(0, os.path.join(os.path.expanduser("~"), "amiga-game-kit", "harn
 from agk import art as agkart   # noqa: E402
 
 BANDS = ["clouds", "mountains", "title_mtn", "hills", "ground"]
-BOBS = ["hangar", "fence", "barracks", "tank", "hostage", "jet", "mine", "shot", "bomb", "shell", "boom",
-        "shadow", "flag", "smoke"]
+# The layout (content plan T25, SPEC 11 "World 2's gameplay"): the chopper, the BOBs both worlds use,
+# the bands (world 1's; world 2's display art takes their place: the world arena), then world 1's own
+# BOBs. World 2's art is loaded over the arena AND those BOBs (and a little chip past the block's
+# end): one run of bytes, so the BOBs it needs cost no chip of their own.
+SHARED_BOBS = ["hangar", "hostage", "shot", "bomb", "shell", "boom", "shadow", "smoke"]
+W1_BOBS = ["fence", "barracks", "tank", "jet", "mine", "flag"]
+BOBS = SHARED_BOBS + W1_BOBS
 
 
 def c_name(name):
@@ -94,9 +99,14 @@ def bob_parts(src, hdr, name):
 def outputs(src, hdr):
     files = {}
     parts = []
-    for name in ["chopper"] + BANDS:
+    for name in ["chopper"]:
         parts.append((name, struct.pack(">%dH" % len(array(src, name)), *array(src, name))))
-    for name in BOBS:
+    for name in SHARED_BOBS:
+        img, mask = bob_parts(src, hdr, name)
+        parts += [(name, img), (name + "_mask", mask)]
+    for name in BANDS:
+        parts.append((name, struct.pack(">%dH" % len(array(src, name)), *array(src, name))))
+    for name in W1_BOBS:
         img, mask = bob_parts(src, hdr, name)
         parts += [(name, img), (name + "_mask", mask)]
     # (each part starts on 8 bytes, like an AllocMem block)
