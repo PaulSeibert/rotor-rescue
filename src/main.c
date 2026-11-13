@@ -247,8 +247,8 @@ static UWORD s_pW2Sky[MISSION_COUNT][FLOOR_Y - PLAY_TOP];     // COLOR00 lines 2
 static UWORD s_pW2SkyLo[MISSION_COUNT][FLOOR_Y - PLAY_TOP];   // AGA: the low nibbles
 static UWORD s_pW2SeaBg[MISSION_COUNT][SEA_LINES];            // lines 180-207: H to C
 static UWORD s_pW2SeaBgLo[MISSION_COUNT][SEA_LINES];
-static UWORD s_pW2SkySlot[2][FLOOR_Y - PLAY_TOP];   // per game list: each sky line's COLOR00 MOVE (w2Mission)
-static UWORD s_pW2PalSlot[2][4];                    // its clouds', far islands', sea's and islands' palettes
+static UWORD s_pSkySlot[2][FLOOR_Y - PLAY_TOP];   // per game list, both worlds: each sky line's COLOR00 MOVE (copperMission)
+static UWORD s_pPalSlot[2][4];   // its PF2 palettes: clouds, far band (mountains, far islands), land or sea, islands
 
 typedef struct {
 	UWORD uwCon1;          // index of the MOVE BPLCON1
@@ -525,6 +525,7 @@ __attribute__((noinline, optimize("Os"))) static void cwFloor(tAgkCopWriter *pW,
 	// A2; the kit's perspectivefloor, d4ba718). A red COLOR00 probe at the end of
 	// line FLOOR_Y's block started at full-frame x 140 (OCS) / 237 (AGA)
 	agkCopWait(pW, FLOOR_Y - 1, 0);
+	s_pPalSlot[ubBfr][2] = pW->uwPos;
 	for(UBYTE i = 1; i < 8; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * (8 + i)), g_pMissionLandPal[ubMission][i]);
 	// its end: PF2 at floor row 0 (six MOVEs, done before line FLOOR_Y's block)
 	agkCopWait(pW, FLOOR_Y - 1, SWITCH_WAIT_X);
@@ -568,7 +569,7 @@ __attribute__((noinline, optimize("Os"))) static void floorSet(tCopCmd *pList, U
 // COLOR00 stays the gradient's last colour, C, under the strip: no MOVE.
 __attribute__((noinline, optimize("Os"))) static void cwSea(tAgkCopWriter *pW, UBYTE ubBfr, UBYTE ubMission) {
 	agkCopWait(pW, SEA_Y - 1, 0);
-	s_pW2PalSlot[ubBfr][2] = pW->uwPos;
+	s_pPalSlot[ubBfr][2] = pW->uwPos;
 	for(UBYTE i = 1; i < 8; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * (8 + i)), g_pW2SeaPal[ubMission][i]);
 	agkCopWait(pW, SEA_Y - 1, SWITCH_WAIT_X);
 	s_pFloorPtr[ubBfr] = pW->uwPos;
@@ -584,7 +585,7 @@ __attribute__((noinline, optimize("Os"))) static void cwSea(tAgkCopWriter *pW, U
 		cwReg(pW, REG_COLOR00, j ? s_pW2SeaBg[ubMission][j] : 0xF00);   // (a block a MOVE longer: the stride +1)
 #endif
 	}
-	s_pW2PalSlot[ubBfr][3] = pW->uwPos;
+	s_pPalSlot[ubBfr][3] = pW->uwPos;
 	for(UBYTE i = 1; i < 8; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * (8 + i)), g_pW2IslPal[ubMission][i]);
 #ifdef W2_COP_PROBE
 	cwReg(pW, REG_COLOR00, 0x0F0);
@@ -595,24 +596,36 @@ __attribute__((noinline, optimize("Os"))) static void cwSea(tAgkCopWriter *pW, U
 #endif
 }
 
-// World 2's missions share one list layout (a sky MOVE on every line): a new
-// mission patches its colours (sky, sea gradient, the four PF2 palettes) into the
-// back list, a few hundred word writes, where writing the whole list again took
-// about 85 % of an A500 frame (a mission card dropped pictures)
-__attribute__((noinline, optimize("Os"))) static void w2Mission(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
+// A world's three missions share one list layout (a sky MOVE on every line), so
+// a new mission in the same world patches its colours into the back list: the
+// sky, the floor's or the sea's ground, the PF2 palettes (world 1: clouds,
+// mountains, land; world 2: clouds, far islands, sea, islands). A few hundred
+// word writes, where writing the whole list again took ~0.9 A500 frame and a
+// mission card dropped 4 pictures (tests/w1card.agk)
+__attribute__((noinline, optimize("Os"))) static void copperMission(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
+	UBYTE isW2 = s_ubWorld;
+	const UWORD *pSky = isW2 ? s_pW2Sky[ubMission] : s_pSky[ubMission];
+	const UWORD *pSkyLo = isW2 ? s_pW2SkyLo[ubMission] : s_pSkyLo ? s_pSkyLo[ubMission] : 0;
 	for(UBYTE y = 0; y < FLOOR_Y - PLAY_TOP; ++y) {
-		UWORD i = s_pW2SkySlot[ubBfr][y];
-		copSetMoveVal(&pList[i].sMove, s_pW2Sky[ubMission][y]);
-		if(s_isAga) copSetMoveVal(&pList[i + 2].sMove, s_pW2SkyLo[ubMission][y]);
+		UWORD i = s_pSkySlot[ubBfr][y];
+		copSetMoveVal(&pList[i].sMove, pSky[y]);
+		if(s_isAga) copSetMoveVal(&pList[i + 2].sMove, pSkyLo[y]);
 	}
-	UWORD uwBg = (UWORD)(s_pFloorCon1[ubBfr] - (s_isAga ? 4 : 1));   // line 0's COLOR00 (cwSea)
-	for(UBYTE j = 0; j < SEA_LINES; ++j, uwBg += s_ubFloorStride) {
-		copSetMoveVal(&pList[uwBg].sMove, s_pW2SeaBg[ubMission][j]);
-		if(s_isAga) copSetMoveVal(&pList[uwBg + 2].sMove, s_pW2SeaBgLo[ubMission][j]);
+	const UWORD *pBg = isW2 ? s_pW2SeaBg[ubMission] : s_pFloorBg[ubMission];
+	const UWORD *pBgLo = isW2 ? s_pW2SeaBgLo[ubMission] : s_pFloorBgLo[ubMission];
+	UWORD uwBg = (UWORD)(s_pFloorCon1[ubBfr] - (s_isAga ? 4 : 1));   // line 0's COLOR00 (cwFloor, cwSea)
+	for(UBYTE j = 0; j < (isW2 ? SEA_LINES : FLOOR_LINES); ++j, uwBg += s_ubFloorStride) {
+		copSetMoveVal(&pList[uwBg].sMove, pBg[j]);
+		if(s_isAga) copSetMoveVal(&pList[uwBg + 2].sMove, pBgLo[j]);
 	}
 	const UWORD *pPal[4] = {g_pW2CloudPal[ubMission], g_pW2FarPal[ubMission], g_pW2SeaPal[ubMission], g_pW2IslPal[ubMission]};
-	for(UBYTE k = 0; k < 4; ++k)
-		for(UBYTE i = 0; i < 7; ++i) copSetMoveVal(&pList[s_pW2PalSlot[ubBfr][k] + i].sMove, pPal[k][i + 1]);
+	if(!isW2) {
+		pPal[0] = g_pMissionCloudPal[ubMission];
+		pPal[1] = g_pMissionMtnPal[ubMission];
+		pPal[2] = g_pMissionLandPal[ubMission];
+	}
+	for(UBYTE k = 0; k < 3 + isW2; ++k)
+		for(UBYTE i = 0; i < 7; ++i) copSetMoveVal(&pList[s_pPalSlot[ubBfr][k] + i].sMove, pPal[k][i + 1]);
 }
 
 // Each frame the camera moves: the sea's lines (logicSeaScroll) and row 0's pointers
@@ -950,7 +963,7 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 	for(UBYTE p = 0; p < 3; ++p) agkCopPtrs(&sW, p, (ULONG)s_pHud[ubBfr]->Planes[p]);
 	agkCopMove(&sW, &g_pCustom->color[0], s_pHudBg[0]);
 	agkCopMove(&sW, &g_pCustom->color[HUD_INK], s_pHudInk[0]);
-	if(isW2) s_pW2PalSlot[ubBfr][0] = sW.uwPos;
+	if(!isTitle) s_pPalSlot[ubBfr][0] = sW.uwPos;
 	if(!isTitle) cwPf2Palette(&sW, isW2 ? g_pW2CloudPal[ubMission] : g_pMissionCloudPal[ubMission]);   // PF2 shows nothing until the clouds
 	cwHudPanel(&sW);
 
@@ -996,32 +1009,16 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 		}
 	}
 	else {
-		// The sky, line by line where the colour changes, down to the plain; the
-		// switch to dual playfield
-		UWORD uwPrev = 0xFFFF;
-		ULONG ulPrev24 = ~0UL;
+		// The sky down to the plain, a MOVE on every line (even where the
+		// mountains hide the sky: COLOR00 is also the overscan border either side
+		// of the picture), so a world's three missions share one list layout and
+		// a new one only patches the colours (copperMission); the switch to dual
+		// playfield
 		for(UWORD y = PLAY_TOP; y < FLOOR_Y; ++y) {
-			UWORD uwColor = pSkyCol[y - PLAY_TOP];
-			if(s_isAga) {
-				// 24 bits: nearly every line differs
-				UWORD uwLo = pSkyColLo[y - PLAY_TOP];
-				ULONG ul24 = ((ULONG)uwColor << 16) | uwLo;
-				if(ul24 != ulPrev24 || isW2) {
-					agkCopWait(&sW, y, 0);
-					if(isW2) s_pW2SkySlot[ubBfr][y - PLAY_TOP] = sW.uwPos;
-					cwSky24(&sW, uwColor, uwLo);
-					ulPrev24 = ul24;
-				}
-			}
-			else if(uwColor != uwPrev || isW2) {
-				// (every change, even where the mountains hide the sky: COLOR00 is
-				// also the overscan border either side of the picture. World 2: every
-				// line, so its three missions share one list layout: w2Mission)
-				agkCopWait(&sW, y, 0);
-				if(isW2) s_pW2SkySlot[ubBfr][y - PLAY_TOP] = sW.uwPos;
-				agkCopMove(&sW, &g_pCustom->color[0], uwColor);
-				uwPrev = uwColor;
-			}
+			agkCopWait(&sW, y, 0);
+			s_pSkySlot[ubBfr][y - PLAY_TOP] = sW.uwPos;
+			if(s_isAga) cwSky24(&sW, pSkyCol[y - PLAY_TOP], pSkyColLo[y - PLAY_TOP]);
+			else agkCopMove(&sW, &g_pCustom->color[0], pSkyCol[y - PLAY_TOP]);
 			if(y == CLOUDS_Y - 3) {
 				// BPL4-6 aren't fetched yet: load them early (cloud planes 2-3,
 				// PF1's third plane at the clouds' first line)
@@ -1052,7 +1049,7 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 			}
 			if(y == CLOUDS_END + 1) {
 				agkCopWait(&sW, y, SWITCH_WAIT_X);
-				if(isW2) s_pW2PalSlot[ubBfr][1] = sW.uwPos;
+				s_pPalSlot[ubBfr][1] = sW.uwPos;
 				cwPf2Palette(&sW, pFarPal);
 			}
 			if(y == MTN_Y - 1) {
@@ -1257,11 +1254,11 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 	else if(s_sGame.world != s_ubWorld) {
 		// (the other world's art loads at the next picture's start: no list for this one now)
 	}
-	else if(s_ubWorld && s_pListMission[ubBfr] != 0xFF && (s_pListMission[ubBfr] >> 2) == s_ubWorld &&
+	else if(s_pListMission[ubBfr] != 0xFF && (s_pListMission[ubBfr] >> 2) == s_ubWorld &&
 		s_pListMission[ubBfr] != (UBYTE)((s_ubWorld << 2) | s_sGame.mission)) {
-		// world 2, another of its missions: the same layout, new colours
+		// another mission of this world: the same layout, new colours
 		s_pListMission[ubBfr] = (UBYTE)((s_ubWorld << 2) | s_sGame.mission);
-		w2Mission(pList, ubBfr, s_sGame.mission);
+		copperMission(pList, ubBfr, s_sGame.mission);
 	}
 	else if(s_pListMission[ubBfr] != (UBYTE)((s_ubWorld << 2) | s_sGame.mission)) {
 		s_pListMission[ubBfr] = (UBYTE)((s_ubWorld << 2) | s_sGame.mission);
@@ -3112,36 +3109,17 @@ __attribute__((optimize("Os"))) void genericCreate(void) {   // (startup: small 
 
 	diskArtCreate();   // the bands and the chopper's frames: blank until diskArtLoad
 	world2Create();    // world 2's bitmaps in the same block's band region, its gradients
-	// The sky per mission and line: OCS line-dithered (a MOVE on most lines
-	// where the sky shows, down to the plain: the list grows by the changes
-	// beyond the plain gradient's, which COP_RAW_COUNT has room for), the
-	// A1200's 24-bit below
+	// The sky per mission and line: OCS line-dithered, the A1200's 24-bit below
 	_Static_assert(SKY_END - PLAY_TOP == SKY_LINES, "the sky table is logic.c's");
-	WORD pSkyMoves[WORLD_COUNT] = {0, 0};
-	for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
-		logicSkyFillDither(m, s_pSky[m]);
-		WORD wN = 0;
-		UWORD uwPrev = 0xFFFF;
-		for(UWORD y = PLAY_TOP; y < FLOOR_Y; ++y) {
-			UWORD uwColor = s_pSky[m][y - PLAY_TOP];
-			if(uwColor != uwPrev) {
-				++wN;
-				uwPrev = uwColor;
-			}
-		}
-		if(wN > pSkyMoves[0]) pSkyMoves[0] = wN;
-	}
-	pSkyMoves[1] = FLOOR_Y - PLAY_TOP;   // (world 2: a MOVE every sky line, one layout for its missions)
+	for(UBYTE m = 0; m < MISSION_COUNT; ++m) logicSkyFillDither(m, s_pSky[m]);
 	// (the rest of the list takes ~210 of COP_RAW_COUNT; chip RAM is tight on
-	// Kickstart 3.1, so no more slack than that.) Sized per world from its layout,
-	// the lists hold the bigger: world 2 has the sea's 9 more lines a block each
-	// and the island palette (7 MOVEs at line 207), not the hills' band (a WAIT,
-	// 8 MOVEs); its strip's switch takes the ground band's place
-	if(!s_isAga) {
-		UWORD uwW1 = (UWORD)(COP_RAW_COUNT - 120 + 2 * pSkyMoves[0] + FLOOR_COP_OCS);   // (a WAIT and a MOVE each)
-		UWORD uwW2 = (UWORD)(COP_RAW_COUNT - 120 + 2 * pSkyMoves[1] + W2_COP_OCS);
-		s_uwCopCount = uwW1 > uwW2 ? uwW1 : uwW2;
-	}
+	// Kickstart 3.1, so no more slack than that.) Both worlds have a sky MOVE on
+	// every line down to the plain (a WAIT and a MOVE each, one layout for a
+	// world's missions); the lists hold the bigger, world 2's: the sea's 9 more
+	// lines a block each and the island palette (7 MOVEs at line 207), not the
+	// hills' band (a WAIT, 8 MOVEs); its strip's switch takes the ground band's place
+	_Static_assert(W2_COP_OCS > FLOOR_COP_OCS, "world 2's list is the bigger");
+	if(!s_isAga) s_uwCopCount = (UWORD)(COP_RAW_COUNT - 120 + 2 * (FLOOR_Y - PLAY_TOP) + W2_COP_OCS);
 	else {
 		s_ubFloorStride = 7;
 		s_uwCopCount = (UWORD)(COP_RAW_COUNT_AGA + W2_COP_AGA_MORE);
