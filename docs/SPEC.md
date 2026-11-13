@@ -208,7 +208,7 @@ from "Mountain Night" and "Coastal Dawn" (studio default). Pressure is a plannin
 - **World 1, Border Desert (missions 1-3):** flat desert, dusk / night / dawn, the shipped parallax and perspective plain.
   New: missile trucks and AA guns, garrisons at each barracks, the border convoy (a column crosses the road at about 50%;
   destroying the lead truck stops it; reward: a repair crate and a bonus).
-- **World 2, Coral Islands (4-6):** (*v1.10: the display is built, section 11 "World 2's display"; the gameplay is not.*) bright sea in morning, midday and storm dusk. Sky; clouds /8; distant volcanic islands /4;
+- **World 2, Coral Islands (4-6):** (*v1.11: the display is built, section 11 "World 2's display"; the gameplay is not.*) bright sea in morning, midday and storm dusk. Sky; clouds /8; distant volcanic islands /4;
   **the sea is the perspective floor** (re-cut to lines 180-207, wave rows in perspective, a 1 px shimmer by time); hills
   dropped; terrain strip from line 208 (48 rows, island height at most about 40 px). Water is not landable (touching it is a soft
   stop with a splash, no damage; decided by Paul). Pads (4.4), wind gusts, ship-deck winch, gunboats, radar sites, a timed
@@ -295,7 +295,7 @@ y197.
   (the plain's floor, 1.2 KB packed), `diskart.bin` (the chopper's frames, the BOBs and the bands, 74.5 KB,
   about 23 KB packed: `art/disk_art.toml`, `art/tools/make_disk_art.py`), the three songs `m_theme.mod.pk` (17.9 KB), `m_fanfare.mod.pk` (5.3 KB)
   and `m_gameover.mod.pk` (0.7 KB), 33 KB unpacked (`sound/sound.toml` `disk = true`), and the
-  hall of fame file `rrscores` (56 bytes) written by the game. About 420 KB of 880 KB used, derived. (v1.10: plus
+  hall of fame file `rrscores` (56 bytes) written by the game. About 420 KB of 880 KB used, derived. (v1.11: plus
   `world2.bin` (14.6 KB packed) and `world1.bin` (14.9 KB packed, world 1's bands again for the way back from world 2;
   `art/tools/make_world_disk.py`), section 11.)
 - **Boot to play:** the DPS logo loads before the first picture; the art (in a frame of its own),
@@ -766,7 +766,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   mountains cover: COLOR00 is also the overscan border beside the picture). The floor's art (640 x 19, 3 planes, 4.6 KB
   chip) is a floppy file, `plainfloor.bin` (1.2 KB packed), loaded with the title logo during the
   splash: in the program it pushed AROS's first picture to frame 2992 of its 3000.
-- **World 2's display** (v1.10, the first slice of world 2; `docs/STYLE-world2.md` section 2; *built*, behind the
+- **World 2's display** (v1.11, the first slice of world 2; `docs/STYLE-world2.md` section 2; *built*, behind the
   debug keys Ctrl+L, W, then 1-6 = missions 1-6, until the gameplay slice adds world 2's barracks, pads and enemies).
   `g->world` (0 desert, 1 islands) with `g->mission` the mission within the world (0-2), so missions 4-6 are world 1
   with missions 0-2, and every per-mission table keeps three rows. In world 2 the logic has the 4608 px map
@@ -859,7 +859,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 
 **Planned for the full game (approved, not built; 26 work items in `docs/CONTENT-PLAN.md` section 6 with tier and size).**
 - **Per-world arena and loader:** a world file (packed bands, BOB sheets, terrain tiles, map) loaded from the floppy into one reused chip arena (kit `loading`). **Band layout table:** the copper builder reads each world's lines, heights, speeds and palettes from a table (amiga-hw).
-- **Terrain strip** (amiga-hw, large; spiked first): a 1:1 PF2 ring buffer streamed a column at a time, a cloud-ceiling strip, the COLOR00 haze behind it; the copper list (465 of 496 entries used) must be enlarged for the strip, the ceiling strip and searchlight beams (about 3 KB chip more, estimated). *v1.10: world 2's low strip is built ("World 2's display" above); the tall strip and the ceiling strip are world 3's.* **Water:** the perspective floor as a sea with a BPLCON1 shimmer.
+- **Terrain strip** (amiga-hw, large; spiked first): a 1:1 PF2 ring buffer streamed a column at a time, a cloud-ceiling strip, the COLOR00 haze behind it; the copper list (465 of 496 entries used) must be enlarged for the strip, the ceiling strip and searchlight beams (about 3 KB chip more, estimated). *v1.11: world 2's low strip is built ("World 2's display" above); the tall strip and the ceiling strip are world 3's.* **Water:** the perspective floor as a sea with a BPLCON1 shimmer.
 - **Height-map logic** (amiga-game): `floorAt` / `ceilAt`, wall bump, altitude above the floor, enemies and people follow terrain.
 - **Set pieces and garrisons** with `wavescript` and its pacing checker. **Program diet:** resident title and world-1 art and samples move to disk; the executable stays at 430 KB or less. (Phase 0 did the chopper, the BOBs and the bands: 348.9 KB; the songs, 33 KB, followed in v1.8: 318.2 KB. Not moved: the sound effects, 62 KB of samples in the program, which play in the air where nothing can load.)
 - Frame budget: terrain streaming, more units and long maps get a measured budget; the target stays average <= 70%, worst < 100%.
@@ -906,7 +906,7 @@ writable disk.)
 | the jet's tell | WinUAE, play at normal: the nose-and-engine flash is noticed before the missile; the missile never comes from beyond the screen edge | Paul | unproven by a person |
 | shell and missile speeds | WinUAE, play: shells (1.5 px/frame) and missiles (2.5) read as dodgeable but still threatening; the tank gap 85 and the jet gap 40 keep the game hard enough | Paul | unproven; the compensation is a guess |
 | the tank quota | WinUAE, GODMODE 5 or normal: after 10 kills in a mission QUOTA 10 shows on the HUD and further tanks score nothing | Paul | scenario-tested in vAmiga only |
-| world 2's display (v1.10) | WinUAE A500 (Kickstart 1.3 and 3.1, cycle-exact) and A1200: Ctrl+L, W, 4 / 5 / 6, fly the whole map both ways at full speed: no strip column popping in at either edge, no tear or wrong colour on lines 179-180 and 207-208 (the copper's palette and pointer switches), the sea's rows lean and shear smoothly, no seam between the sea and the strip, the islands appear whole under the card; on a real floppy, how long the card's load takes | Paul | **unproven**: vAmiga only (`tests/world2.agk`, `tests/world2pal.agk`; copper timing by a COLOR00 probe, `W2_COP_PROBE`) |
+| world 2's display (v1.11) | WinUAE A500 (Kickstart 1.3 and 3.1, cycle-exact) and A1200: Ctrl+L, W, 4 / 5 / 6, fly the whole map both ways at full speed: no strip column popping in at either edge, no tear or wrong colour on lines 179-180 and 207-208 (the copper's palette and pointer switches), the sea's rows lean and shear smoothly, no seam between the sea and the strip, the islands appear whole under the card; on a real floppy, how long the card's load takes | Paul | **unproven**: vAmiga only (`tests/world2.agk`, `tests/world2pal.agk`; copper timing by a COLOR00 probe, `W2_COP_PROBE`) |
 | the approved new art (landed 567e6c5) | the scrolled bands show no seam at 1x on a real display; the palette reads on all three missions | Paul after the art merge | pending: Paul on WinUAE/real display |
 
 ## Open questions for Paul
@@ -937,4 +937,4 @@ writable disk.)
 | v1.7 | 2026-11-12 | content plan phase 0 (T25, program diet), not a design change: the chopper's frames, the BOBs and the bands are a floppy file loaded during the splash; the chopper's sprite DMA reads small per-buffer blocks; chip free in play and the boot times in sections 2, 4 and 11; `tests/memory.agk` |
 | v1.10 | 2026-11-13 | the hall of fame moves to the kit's `hiscore` technique (`src/hiscore.c/.h`, `hiscore_disk.c`, `hiscore_keys.c`): keyboard initials entry (section 10), the game's keys not read in the entry, the table lines from `hiRow`; file format and floppy save unchanged; `tests/hiscorekeys.agk`, `tests/unit/test_logic.c` |
 | v1.9 | 2026-11-13 | the frame-budget pass (section 11): skill-5 crash 180% -> 96%, hall of fame 135% -> 83%, perf 81% -> 70%; hovering damaged, a smoke puff every 6 frames, and the puffs go in the crash's explosion (section 3); the wait for the vertical blank after the swap (review A3); the land palette at the start of line 179 (review A2) |
-| v1.10 | 2026-11-13 | world 2's display engine (section 11, "World 2's display"): `g->world`, the sea (28 perspective lines), the terrain strip, the per-mission palettes, the world arena and its loads, copper lists sized per world, the debug keys Ctrl+L, W, 1-6; measured copper timing, chip and frame. Not a design change (STYLE-world2, approved) |
+| v1.11 | 2026-11-13 | world 2's display engine (section 11, "World 2's display"): `g->world`, the sea (28 perspective lines), the terrain strip, the per-mission palettes, the world arena and its loads, copper lists sized per world, the debug keys Ctrl+L, W, 1-6; measured copper timing, chip and frame. Not a design change (STYLE-world2, approved) |
