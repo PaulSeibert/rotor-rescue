@@ -728,6 +728,9 @@ static void chopperDestroy(tGame *g) {
 	}
 	g->aboard = 0;
 	boomAt(g, c->x, (int16_t)(c->y - 8));
+	// its smoke goes up in the explosion (drawn on through the crash, inside the
+	// boom, the puffs overran the A500's frame there)
+	for(uint8_t i = 0; i < SMOKE_MAX; ++i) g->pSmoke[i].active = 0;
 	g->events |= EV_CRASH;
 	if(g->lives) --g->lives;
 	setState(g, GS_LOST, LOST_FRAMES);

@@ -1363,7 +1363,8 @@ static tAgkText s_pHudText[2], s_pHudText2[2], s_pHudSkill[2];
 static char s_pHudSlotLine[2][2][HUD_SLOT_LEN + 4] __attribute__((aligned(4)));   // (rows of 12: textType reads longs)
 static char s_pHudSlotStage[2][2][HUD_SLOT_LEN + 4] __attribute__((aligned(4)));
 static UBYTE s_pHudSlotPending[2][2];
-static UBYTE s_pHudDraw[2];              // per buffer: texts staged, to draw (hudDraw): 1 the line, 2 left, 4 right
+static UBYTE s_pHudDraw[2];
+static ULONG s_pHudCols[2][3][2];        // per buffer and text (line, left, right): the columns staged, to draw              // per buffer: texts staged, to draw (hudDraw): 1 the line, 2 left, 4 right
 
 static void hudInit(void) {
 	for(UBYTE c = 0; c < AGK_FONT8_COUNT; ++c)
@@ -1388,11 +1389,41 @@ static void hudInit(void) {
 
 // Show szTarget in pText, at most ubBudget changed letters now (the rest
 // on later calls: text is slow to draw). Returns 1 when it's all shown.
+// One letter of a line drawn, and noted as shown: what agkTextSet() does for
+// each letter that differs (the kit's drawChar), without its scan of the whole
+// line: msgUpdate and hudDraw know which letters changed (the scans were ~20
+// lines of an A500 frame while CHOPPER DOWN showed over explosions). The HUD's
+// and the messages' pens (4, shadow 1, 3 planes) as three plain copies
+static const UBYTE s_pZero8[8];
+__attribute__((noinline)) static void msgChar(tAgkText *pT, UBYTE ubCol, char c) {
+	pT->szShown[ubCol] = c;
+	const tAgkFont *pFont = pT->pFont;
+	UBYTE ubChar = pFont->pIndex[(UBYTE)c & 0x7F];
+	UWORD uwStep = pT->uwRowBytes;
+	if(pT->ubColor == 4 && pT->ubShadow == 1 && pT->ubDepth == 3) {
+		const UBYTE *pS = pFont->pShadow[ubChar], *pL = pFont->pRows[ubChar];
+		UBYTE *p0 = pT->pPlane[0] + ubCol, *p1 = pT->pPlane[1] + ubCol, *p2 = pT->pPlane[2] + ubCol;
+		for(UBYTE r = 0; r < 8; ++r, p0 += uwStep, p1 += uwStep, p2 += uwStep) {
+			*p0 = pS[r];
+			*p1 = 0;
+			*p2 = pL[r];
+		}
+		return;
+	}
+	for(UBYTE p = 0; p < pT->ubDepth; ++p) {
+		UBYTE isL = (pT->ubColor >> p) & 1, isS = (pT->ubShadow >> p) & 1;
+		const UBYTE *pSrc = isL ? (isS ? pFont->pBoth[ubChar] : pFont->pRows[ubChar])
+		                        : (isS ? pFont->pShadow[ubChar] : s_pZero8);
+		UBYTE *pD = pT->pPlane[p] + ubCol;
+		for(UBYTE r = 0; r < 8; ++r, pD += uwStep) *pD = pSrc[r];
+	}
+}
+
 // (Only the stage here: hudDraw() draws it later in the picture, *pDraw set.
 // Both long-aligned, ubLen letters: four at a time where they match - the
 // 40-letter line, compared a letter at a time on every picture of its typing,
 // was 14 lines of the A500's frame after a lost chopper.)
-static UBYTE textType(char *pStage, const char *szTarget, UBYTE ubLen, UBYTE *pBudget, UBYTE *pDraw, UBYTE ubDrawBit) {
+static UBYTE textType(char *pStage, const char *szTarget, UBYTE ubLen, UBYTE *pBudget, UBYTE *pDraw, UBYTE ubDrawBit, ULONG *pCols) {
 	UBYTE isDone = 1, isChange = 0, ubBudget = *pBudget;
 	for(UBYTE c = 0; c < ubLen;) {
 		if(*(const tUlongAlias *)&pStage[c] == *(const tUlongAlias *)&szTarget[c]) {
@@ -1401,7 +1432,7 @@ static UBYTE textType(char *pStage, const char *szTarget, UBYTE ubLen, UBYTE *pB
 		}
 		for(UBYTE e = (UBYTE)(c + 4); c < e && c < ubLen; ++c) {
 			if(pStage[c] != szTarget[c]) {
-				if(ubBudget) { pStage[c] = szTarget[c]; --ubBudget; isChange = 1; }
+				if(ubBudget) { pStage[c] = szTarget[c]; --ubBudget; isChange = 1; pCols[c >> 5] |= 1UL << (c & 31); }
 				else isDone = 0;
 			}
 		}
@@ -1505,13 +1536,13 @@ __attribute__((noinline, noclone)) static void hudUpdate(UBYTE ubBfr) {
 	}
 	UBYTE *pDraw = &s_pHudDraw[ubBfr];
 	if(s_pHudSlotPending[ubBfr][0]) {
-		s_pHudSlotPending[ubBfr][0] = !textType(s_pHudSlotStage[ubBfr][0], s_pHudSlotLine[ubBfr][0], 8, &ubBudget, pDraw, 2);
+		s_pHudSlotPending[ubBfr][0] = !textType(s_pHudSlotStage[ubBfr][0], s_pHudSlotLine[ubBfr][0], 8, &ubBudget, pDraw, 2, s_pHudCols[ubBfr][1]);
 	}
 	if(s_pHudSlotPending[ubBfr][1]) {
-		s_pHudSlotPending[ubBfr][1] = !textType(s_pHudSlotStage[ubBfr][1], s_pHudSlotLine[ubBfr][1], 7, &ubBudget, pDraw, 4);
+		s_pHudSlotPending[ubBfr][1] = !textType(s_pHudSlotStage[ubBfr][1], s_pHudSlotLine[ubBfr][1], 7, &ubBudget, pDraw, 4, s_pHudCols[ubBfr][2]);
 	}
 	if(s_pHudPending[ubBfr]) {
-		s_pHudPending[ubBfr] = !textType(s_pHudStage[ubBfr], szLine, HUD_LEN, &ubBudget, pDraw, 1);
+		s_pHudPending[ubBfr] = !textType(s_pHudStage[ubBfr], szLine, HUD_LEN, &ubBudget, pDraw, 1, s_pHudCols[ubBfr][0]);
 	}
 }
 
@@ -1523,9 +1554,17 @@ __attribute__((noinline)) static void hudDraw(UBYTE ubBfr) {
 	UBYTE ubDraw = s_pHudDraw[ubBfr];
 	if(!ubDraw) return;
 	s_pHudDraw[ubBfr] = 0;
-	if(ubDraw & 2) agkTextSet(&s_pHudText2[ubBfr], s_pHudSlotStage[ubBfr][0]);
-	if(ubDraw & 4) agkTextSet(&s_pHudSkill[ubBfr], s_pHudSlotStage[ubBfr][1]);
-	if(ubDraw & 1) agkTextSet(&s_pHudText[ubBfr], s_pHudStage[ubBfr]);
+	tAgkText *pTexts[3] = {&s_pHudText[ubBfr], &s_pHudText2[ubBfr], &s_pHudSkill[ubBfr]};
+	const char *pStages[3] = {s_pHudStage[ubBfr], s_pHudSlotStage[ubBfr][0], s_pHudSlotStage[ubBfr][1]};
+	for(UBYTE t = 0; t < 3; ++t) {
+		if(!(ubDraw & (1 << t))) continue;
+		ULONG *pCols = s_pHudCols[ubBfr][t];
+		UBYTE c = 0;
+		for(ULONG m = pCols[0]; m; m >>= 1, ++c) if(m & 1) msgChar(pTexts[t], c, pStages[t][c]);
+		c = 32;
+		for(ULONG m = pCols[1]; m; m >>= 1, ++c) if(m & 1) msgChar(pTexts[t], c, pStages[t][c]);
+		pCols[0] = pCols[1] = 0;
+	}
 }
 
 // The radar: RADAR_W x RADAR_H px at HUD (RADAR_X0, RADAR_Y). Rows 0-4 move
@@ -1699,25 +1738,6 @@ __attribute__((noinline)) static void msgLayoutClear(UBYTE ubBfr) {
 	s_pMsgCover[ubBfr][l][0] = s_pMsgCover[ubBfr][l][1] = 0;
 }
 
-// One letter of a message line drawn, and noted as shown: what agkTextSet()
-// does for each letter that differs (the kit's drawChar), without its scan of
-// all 40: msgUpdate knows which ones it typed and which an erase crossed (the
-// scans were ~20 lines of an A500 frame while CHOPPER DOWN shows over explosions)
-static const UBYTE s_pZero8[8];
-__attribute__((noinline)) static void msgChar(tAgkText *pT, UBYTE ubCol, char c) {
-	pT->szShown[ubCol] = c;
-	const tAgkFont *pFont = pT->pFont;
-	UBYTE ubChar = pFont->pIndex[(UBYTE)c & 0x7F];
-	UWORD uwStep = pT->uwRowBytes;
-	for(UBYTE p = 0; p < pT->ubDepth; ++p) {
-		UBYTE isL = (pT->ubColor >> p) & 1, isS = (pT->ubShadow >> p) & 1;
-		const UBYTE *pSrc = isL ? (isS ? pFont->pBoth[ubChar] : pFont->pRows[ubChar])
-		                        : (isS ? pFont->pShadow[ubChar] : s_pZero8);
-		UBYTE *pD = pT->pPlane[p] + ubCol;
-		for(UBYTE r = 0; r < 8; ++r, pD += uwStep) *pD = pSrc[r];
-	}
-}
-
 static void msgCentre(char *szOut, const char *szText) {
 	UBYTE ubLen = 0;
 	while(szText[ubLen] && ubLen < MSG_LEN) ++ubLen;
@@ -1821,16 +1841,23 @@ static UWORD msgKeyNow(void) {
 		(g->state == GS_LOST && g->stateTimer < LOST_FRAMES - 40 ? 2 : 0));
 }
 
+__attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey);
+
+// Nothing new, nothing crossed: nothing to do (the usual case in play). The key
+// first, here, with no stack frame: the body's set-up (its text table, the
+// aligned line) was 4-5 lines of the A500's frame on every picture
 __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
+	UWORD uwKey = msgKeyNow();
+	if(uwKey == s_pMsgKey[ubBfr] && !s_pMsgAnyFix[ubBfr]) return;
+	msgUpdateBody(ubBfr, uwKey);
+}
+
+__attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey) {
 	const tGame *g = &s_sGame;
 	const char *pText[MSG_LINES] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 	char szA[24], szB[28];
 	static char pRows[SCORE_COUNT][32];   // (msgMenu keeps them while the table stays)
-	// Nothing new, nothing crossed: nothing to do (the usual case in play). The
-	// key first, the text only when there's typing to do
-	UWORD uwKey = msgKeyNow();
 	UBYTE isSettled = uwKey == s_pMsgKey[ubBfr];
-	if(isSettled && !s_pMsgAnyFix[ubBfr]) return;
 	if(!isSettled) switch(g->state) {
 		case GS_SCORES:
 		case GS_ENTRY:
@@ -1887,6 +1914,21 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 		default:
 			break;
 	}
+	UBYTE ubLayout = msgLayout();
+	if(!isSettled && !s_pMsgAnyFix[ubBfr]) {
+		// (a new key whose lines are all blank, on lines already blank - play
+		// starting, a chopper lost: settled at once)
+		UBYTE isBlank = 1;
+		for(UBYTE l = s_pMsgFirst[ubLayout]; l < s_pMsgEnd[ubLayout] && isBlank; ++l) {
+			isBlank = !pText[l][0] && !(s_pMsgInk[ubBfr][l][0] | s_pMsgInk[ubBfr][l][1]);
+		}
+		if(isBlank) {
+			s_pMsgTypeKey[ubBfr] = uwKey;
+			s_pMsgDone[ubBfr] = 0xFFFF;
+			s_pMsgKey[ubBfr] = uwKey;
+			return;
+		}
+	}
 	s_pMsgAnyFix[ubBfr] = 0;
 	if(uwKey != s_pMsgTypeKey[ubBfr]) {
 		// new text: every line to check again
@@ -1895,7 +1937,6 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	}
 	char szLine[MSG_LEN + 4] __attribute__((aligned(4)));
 	UBYTE ubBudget = MSG_TYPE_PER_FRAME;
-	UBYTE ubLayout = msgLayout();
 	// (just this layout's lines: msgLayoutClear() blanks the others)
 	for(UBYTE l = s_pMsgFirst[ubLayout]; l < s_pMsgEnd[ubLayout]; ++l) {
 		char *pStage = s_pMsgStage[ubBfr][l];
@@ -2111,11 +2152,18 @@ __attribute__((noinline)) static void chopperUpdate(UBYTE ubBfr) {
 	UWORD uwVStart = (UWORD)(s_pView->ubPosY + wY), uwVStop = (UWORD)(uwVStart + ART_CHOPPER_H);
 	tCopCmd *pList = s_pView->pCopList->pBackBfr->pList;
 	UBYTE ubPair = (UBYTE)(ubFrame >> 1);
-	if(s_pChopDmaPose[ubBfr] != ubPair) {
+	// The wreck (not alive) has no rotor phase but 0 (logicRotorPhase): only
+	// phase 0's block is shown, so only it is filled (half the blit, at a lost
+	// chopper beside the explosions); bit 7 notes the half, so a live pose
+	// later fills both
+	_Static_assert(ART_CHOPPER_FRAMES / 2 < 0x80, "the pose numbers leave bit 7 free");
+	UBYTE isHalf = !g->chop.alive;
+	UBYTE ubHeld = s_pChopDmaPose[ubBfr];
+	if(ubHeld != (UBYTE)(ubPair | (isHalf << 7)) && !(isHalf && ubHeld == ubPair)) {
 		// the pose's two frames' parts' rows (contiguous in the store) into the
 		// eight parts' row areas (each between its control words and its end
-		// words): A -> D, one blit of 8 x ART_CHOPPER_H * 2 words
-		s_pChopDmaPose[ubBfr] = ubPair;
+		// words): A -> D, one blit of 8 x ART_CHOPPER_H * 2 words (the wreck: 4)
+		s_pChopDmaPose[ubBfr] = (UBYTE)(ubPair | (isHalf << 7));
 		tAgkBlit *pB = agkBlitqSlot();
 		pB->uwCon0 = USEA | USED | MINTERM_A;
 		pB->uwCon1 = 0;
@@ -2125,7 +2173,7 @@ __attribute__((noinline)) static void chopperUpdate(UBYTE ubBfr) {
 		pB->pCD = s_pChopDma[ubBfr] + 4;
 		pB->wSrcMod = 0;
 		pB->wDstMod = CHOP_PART_BYTES - ART_CHOPPER_H * 4;
-		pB->uwSize = (UWORD)(((2 * ART_CHOPPER_PARTS) << 6) | (ART_CHOPPER_H * 2));
+		pB->uwSize = (UWORD)((((isHalf ? 1 : 2) * ART_CHOPPER_PARTS) << 6) | (ART_CHOPPER_H * 2));
 		agkBlitqPush();
 	}
 	UBYTE *pDma = s_pChopDma[ubBfr] + ((ubFrame & 1) ? CHOP_DMA_BYTES : 0);
@@ -2833,10 +2881,7 @@ void genericProcess(void) {
 	hudUpdate(ubBfr);   // (what to type: hudDraw types it)
 	agkBlitqPoll();
 	UBYTE ubStateBefore = s_sGame.state;
-	if(!s_isPaused) {
-		logicUpdate(&s_sGame, &sIn);
-		playSounds(ubStateBefore);
-	}
+	if(!s_isPaused) logicUpdate(&s_sGame, &sIn);
 	msgLayoutClear(ubBfr);
 	routeClear(ubBfr);
 	agkBlitqPoll();
@@ -2846,8 +2891,6 @@ void genericProcess(void) {
 	agkBlitqPoll();
 	chopperUpdate(ubBfr);
 	skyUpdate(ubBfr);
-	rotorUpdate();
-	reportState(ubStateBefore);
 	// The HUD's CPU work while the blitter finishes the objects (a busy
 	// picture ends waiting for the blitter): the radar once its strip's clear
 	// is done (blits run in order: a later one started, or the blitter idle
@@ -2872,6 +2915,13 @@ void genericProcess(void) {
 	copProcessBlocks();
 	s_ulSwapVbl = timerGet();
 	agkPerfEnd();
+	// What isn't in the picture, after its swap (the deadline is the swap before
+	// the vertical blank): the sounds this picture's events start and the serial
+	// report, still before the next frame's tick. (At a lost chopper they were a
+	// tenth of the A500's frame, beside the explosions and the HUD's typing)
+	if(!s_isPaused) playSounds(ubStateBefore);
+	rotorUpdate();
+	reportState(ubStateBefore);
 	// The new list is on screen from the next vertical blank (COP1LC): wait for
 	// the first one after the swap. (Waiting for one after this picture's start
 	// let a picture that ran over by less than a frame be followed at once by

@@ -1810,6 +1810,28 @@ static void testSmokeSparserWhenHovering(void) {
 	CHECK(iMax >= 6);                           // flying: the full trail
 }
 
+// The second hit: the chopper goes up in the explosion, and its smoke goes with
+// it (the puffs were drawn on through the crash's heaviest pictures, inside the
+// boom: the A500's frame overran there)
+static void testSmokeGoesWithTheCrash(void) {
+	newGame();
+	logicSetDifficulty(&g, DIFFICULTY_MAX);
+	g.spawnTimer = 60000;
+	flyAt(1500, 150);
+	g.chop.damaged = 1;
+	tDraw d[DRAW_MAX];
+	step(NONE, 20);
+	uint8_t n = logicDraw(&g, d);
+	int iPuffs = 0;
+	for(uint8_t i = 0; i < n; ++i) iPuffs += d[i].bob == BOB_SMOKE;
+	CHECK(iPuffs >= 2);                         // a damaged chopper trails smoke
+	shellOnChopper();
+	step(NONE, 1);
+	CHECK(!g.chop.alive);
+	n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_SMOKE);
+}
+
 static void testInvincibleIsNeverDamaged(void) {
 	newGame();
 	logicSetDifficulty(&g, DIFFICULTY_INVINCIBLE);
@@ -2386,6 +2408,7 @@ int main(void) {
 	testPadRepairs();
 	testSmokeTrailOnlyWhenDamaged();
 	testSmokeSparserWhenHovering();
+	testSmokeGoesWithTheCrash();
 	testInvincibleIsNeverDamaged();
 	testJetTellShowsFlash();
 	testTankShellSpeedAndGap();
