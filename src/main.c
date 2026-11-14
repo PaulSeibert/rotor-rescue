@@ -3346,11 +3346,13 @@ void genericProcess(void) {
 	// behind the ground, unseen in rain and dust)
 	if(!s_isSplash) weatherUpdate();
 	keyProcess();     // (the joystick: readInput(), from the hardware)
-	// In the initials the keyboard types (hiscore): the game's own keys (Esc,
-	// M, P, Ctrl+L...) are not read, so typing an M doesn't mute the music
+	// In the initials the keyboard types (hiscore): the game's own keys (M, P,
+	// Ctrl+L...) are not read, so typing an M doesn't mute the music. Esc there
+	// ends the entry and keeps the score (hiKeyPoll takes it); it quits only as a
+	// fresh press outside (keyUse: the Esc that ended the entry is still held)
 	UBYTE isEntry = s_sGame.state == GS_ENTRY;
 	if(!isEntry) {
-		if(keyCheck(KEY_ESCAPE)) {
+		if(keyUse(KEY_ESCAPE)) {
 			gameExit();
 			return;
 		}
@@ -3412,6 +3414,7 @@ void genericProcess(void) {
 	UBYTE ubStateBefore = s_sGame.state;
 	if(!s_isPaused) logicUpdate(&s_sGame, &sIn);
 	if(s_sGame.state == GS_ENTRY && ubStateBefore != GS_ENTRY) hiKeyFlush();   // (a key held from the game isn't a letter)
+	else if(ubStateBefore == GS_ENTRY && s_sGame.state != GS_ENTRY) hiKeyFlush();   // (an Esc behind another key isn't a quit)
 	msgLayoutClear(ubBfr);
 	routeClear(ubBfr);
 	agkBlitqPoll();

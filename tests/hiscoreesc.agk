@@ -1,0 +1,50 @@
+# Esc in the hall-of-fame initials (the kit's hiscore technique, Paul 2026-11-13): it ends the
+# entry at once and keeps the score with the initials so far, as the 30 s timeout does. It never
+# discards the score and never quits the game from the entry. The same trip home and three losses
+# as tests/hiscore.agk, then K (0x27) and Esc (0x45): the entry ends with "K  ", the table shows
+# it, the floppy has it, and the game goes on to the title (the held Esc must not quit from the
+# table).
+start-at rescued
+key 0x63
+key 0x28
+wait 5
+key 0x05
+wait 30
+press up 30
+press left 170
+wait 60
+press down 70
+wait-serial "chopper lost" 2000
+wait 170
+press up 30
+press left 170
+wait 60
+press down 70
+wait-serial "lives=1" 2000
+wait 170
+press up 30
+press left 170
+wait 60
+press down 70
+wait-serial "lives=0" 2000
+wait-serial "state=5" 300
+expect-serial "AGK music gameover"
+wait 120
+press fire 1
+wait-serial "state=8" 10
+wait 60
+wait 5
+key 0x27
+wait 3
+key 0x45
+wait-serial "state=7" 10
+wait-serial "scores names=" 600
+wait 40
+screenshot table
+expect-serial "AGK scores saved\nAGK scores names=DPS/PRS/ACE/AGK/K  \nAGK top=5000 last=16\d\d"
+expect-no-serial "AGK ERR"
+# still running: the table gives way to the title (a quit on the held Esc would never get here)
+wait-serial "state=0" 600
+expect-no-serial "AGK ERR"
+expect-no-dropped-frames
+expect-max-load 90

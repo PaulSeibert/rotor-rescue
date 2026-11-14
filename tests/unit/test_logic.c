@@ -238,6 +238,30 @@ static void testHighScoreKeys(void) {
 	CHECK(g.state == GS_SCORES && g.hi.pEntries[0].name[0] == 'K' && g.hi.pEntries[0].name[1] == ' ');
 }
 
+// Esc (raw 0x45) in the initials ends the entry at once and keeps the score, with the initials
+// so far: what the 30 s timeout does. It is not discarded, the table is shown (and saved).
+static void testHighScoreEsc(void) {
+	endGameWith(4500);
+	CHECK(g.state == GS_ENTRY && g.newRank == 1);
+	step(NONE, 3);
+	key(0x27);                                    // K
+	CHECK(g.state == GS_ENTRY);
+	key(0x45);                                    // Esc
+	CHECK(g.state == GS_SCORES && g.scoresChanged && g.scoresNext == GS_TITLE);
+	CHECK(!strncmp(g.hi.pEntries[1].name, "K  ", 3) && g.hi.pEntries[1].score == 4500 && g.hi.pEntries[1].reached == 1);
+	CHECK(g.hi.pEntries[0].score == 5000 && g.hiScore == 5000);
+	step(NONE, SCORES_FRAMES + 1);
+	CHECK(g.state == GS_TITLE);
+	// at once: the default initials stand and the score is on the table
+	endGameWith(9000);
+	CHECK(g.state == GS_ENTRY);
+	step(NONE, 3);
+	key(0x45);
+	CHECK(g.state == GS_SCORES && g.hi.pEntries[0].score == 9000 && g.hi.pEntries[0].name[0] == 'A' && g.hiScore == 9000);
+	step(NONE, SCORES_FRAMES + 1);
+	CHECK(g.state == GS_TITLE);
+}
+
 static void testNoEntryWhenInvincible(void) {
 	newGame();
 	logicSetDifficulty(&g, DIFFICULTY_INVINCIBLE);
@@ -3026,6 +3050,7 @@ int main(void) {
 	testScoresTable();
 	testHighScoreEntry();
 	testHighScoreKeys();
+	testHighScoreEsc();
 	testNoEntryWhenInvincible();
 	testAttractLoop();
 	testDemoEndsOnFire();
