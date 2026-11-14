@@ -791,7 +791,10 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
     1187 of **1339** (was 1278). Both worlds' lists have a sky MOVE on every line (v1.12: world 1's had one only where
     the colour changed), so a world's three missions share one layout: a new mission in the same world patches its
     colours into both lists (`copperMission`: the sky, the floor's or sea's ground, the PF2 palettes) instead of
-    writing them again; only a world's load writes them, with the bitplanes off.
+    writing them again; only a world's load writes them, with the bitplanes off. That includes world 1's load at
+    the title after a game in world 2: the title writes the game lists in those two dark pictures, so the next game's
+    start and the attract loop's hall of fame find them ready (`tests/w2over.agk`: 4 dropped pictures on the A500,
+    worst 247 %, before; none after).
   - **The sea's art** is 768 px wide on the floppy (`make_world_disk.py` widens the 640 px art by its own loops):
     row j loops every 4 (28 + 3 j) px, up to 436, and a row's 336 px fetch starts anywhere in its first loop.
   - **The strip**: a pointer-creep ring (the spike's), 3 separate planes of 44-byte rows (2,734 bytes each, 8.2 KB),

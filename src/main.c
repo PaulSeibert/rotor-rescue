@@ -1236,7 +1236,9 @@ __attribute__((noinline, optimize("Os"))) static void w2Update(tCopCmd *pList, U
 }
 
 // The back list: the jump to the title list or not; this mission's colours
-// (the game list rewritten once when it changes, the title list's patched),
+// (the game list rewritten once when its world changes, patched for a new
+// mission, written at the title too while a world's load has the bitplanes
+// off; the title list's patched),
 // then each band's scroll for the camera, in whichever list shows.
 __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 	static WORD pListCam[2][2] = {{-1, -1}, {-1, -1}};   // [title][buffer]: the camera each list's scroll is for
@@ -1247,9 +1249,8 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 		s_pListTitle[ubBfr] = isTitle;
 		copperJump(pList, ubBfr, isTitle);
 	}
-	if(isTitle) {
-		pList = s_pTitleList[ubBfr];
-		if(s_pTitleListMission[ubBfr] != s_sGame.mission) titleListMission(ubBfr, s_sGame.mission);
+	if(isTitle && !s_ubRasterOff) {
+		// (the game list waits for the game: a new mission's colours are a patch then)
 	}
 	else if(s_sGame.world != s_ubWorld) {
 		// (the other world's art loads at the next picture's start: no list for this one now)
@@ -1275,6 +1276,13 @@ __attribute__((noinline)) static void copperUpdate(UBYTE ubBfr) {
 			agkEnd();
 			if(s_uwCopUsed > s_uwCopCount) agkPrint("AGK ERR copper list overflow\n");
 		}
+	}
+	if(isTitle) {
+		// (world 1's load at the title, after a game in world 2: the game lists
+		// above are written now, while the bitplanes are off, not at the next
+		// game's start or the hall of fame's with them on: tests/w2over.agk)
+		pList = s_pTitleList[ubBfr];
+		if(s_pTitleListMission[ubBfr] != s_sGame.mission) titleListMission(ubBfr, s_sGame.mission);
 	}
 	if(!isTitle && s_ubWorld) {
 		w2Update(pList, ubBfr, wCam, &pListCam[0][ubBfr]);
