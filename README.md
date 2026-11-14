@@ -73,7 +73,7 @@ two-button pad) makes turning quicker.
 | Keyboard | Arrows, Space = fire, X = turn, P = pause, M = music on/off, Esc = quit |
 | Ctrl+L, then 0-5 | Difficulty (see below), on the title screen or during play |
 | Fire on the mission card | Skip it and start flying |
-| Initials (a new high score) | Stick up / down: the letter; Fire: the next; left: back one |
+| Initials (a new high score) | Stick up / down: the letter; Fire: the next; left: back one. Or type them on the keyboard: Return or Esc finishes (your score is kept with the initials so far) |
 
 ## Difficulty
 
