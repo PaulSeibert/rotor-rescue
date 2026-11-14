@@ -30,7 +30,7 @@ kind = "bitmap"
 depth = 3
 palette = "world2/palettes/m4_reef_run_sea.txt"
 
-[w2_patrol_boat]                  # 4 frame(s) 43 x 17
+[w2_patrol_boat]                  # 6 frame(s) 43 x 17
 source = "world2/patrol_boat.txt"
 kind = "bob"
 

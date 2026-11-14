@@ -274,8 +274,8 @@ def sheet(W, art, mi):
     sections.append(("PADS 48 / 64 / 96 px, the dark blink phase of 64, lamps red / yellow, 3x", [row_img([on(p) for p in pads], 3, BG, 8)]))
     b = [art.img("barracks", i) for i in range(4)] + [art.img("radar", i) for i in range(4)] + [art.img("windsock", i) for i in range(2)]
     sections.append(("BARRACKS intact / shot up / burning x2 | RADAR 4 frames | WINDSOCK limp / full, 3x", [row_img([on(x) for x in b], 3, BG, 8)]))
-    pb = [art.img("patrol_boat", i) for i in range(4)]
-    sections.append(("PATROL BOAT: left-facing wake 0 / 1, right-facing wake 0 / 1 (right is re-lit, light stays top left), 5x", [row_img([on(x) for x in pb], 5, BG, 8)]))
+    pb = [art.img("patrol_boat", i) for i in (0, 1, 4, 2, 3, 5)]
+    sections.append(("PATROL BOAT: left-facing wake 0 / 1 / TELL (gun up, lamp lit), right-facing wake 0 / 1 / TELL (right is re-lit, light stays top left), 5x", [row_img([on(x) for x in pb], 5, BG, 8)]))
     gl = [art.img("gunboat", i) for i in range(4)]
     gr = [art.img("gunboat", 4 + i) for i in range(4)]
     sections.append(("GUNBOAT left-facing: idle / tell 1 / tell 2 (flash) / fire; then right-facing, 4x", [row_img([on(x) for x in gl], 4, BG, 8), row_img([on(x) for x in gr], 4, BG, 8)]))

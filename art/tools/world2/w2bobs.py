@@ -133,9 +133,11 @@ def barrel(c, x0, y0, ang_deg, length, face=-1):
 
 
 # ----------------------------------------------------------------------------------------- patrol boat
-def patrol(wake=0, flip=False):
+def patrol(wake=0, flip=False, tell=False):
     """bow at the left (flip: right). Heading reads from three things: the deck sheers up toward the bow (raised bow and bow gun),
-    the masthead pennant streams toward the stern, and the wake trails only from the stern."""
+    the masthead pennant streams toward the stern, and the wake trails only from the stern.
+    tell=True is the shot warning (missions 5+): the bow gun swings up (its barrel from 14 deg to about 56 deg, as the gunboat's
+    rises) and a muzzle lamp lights at its tip (cream core, yellow, red), outlined with the rest; nothing else moves."""
     c = C(46, 18, flip)
     ox = 3
     c.poly([(ox + 0, 7), (ox + 40, 9), (ox + 37, 14), (ox + 8, 14)], "O")
@@ -157,7 +159,12 @@ def patrol(wake=0, flip=False):
         c.px(x, 3, "W")
     c.rect(ox + 5, 5, ox + 9, 6, "O")                       # bow gun, on the raised bow
     c.rect(ox + 5, 5, ox + 9, 5, "S")
-    c.line(ox + 5, 5, ox + 1, 4, "S")
+    if tell:
+        c.line(ox + 5, 5, ox + 3, 2, "S")                   # barrel up
+        for dx, dy, ch in [(0, 0, "W"), (-1, 0, "Y"), (1, 0, "Y"), (0, -1, "R"), (-1, -1, "R"), (1, -1, "R"), (0, 1, "Y")]:
+            c.px(ox + 2 + dx, 2 + dy, ch)                    # muzzle lamp at the tip
+    else:
+        c.line(ox + 5, 5, ox + 1, 4, "S")
     c.rect(ox + 30, 7, ox + 35, 7, "S")                     # stern rail
     c.outline()
     # stern wake only (cream), 2 frames; the bow is clean
