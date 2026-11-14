@@ -37,12 +37,12 @@ from agk import art as agkart   # noqa: E402
 
 PARTS = ["w2_clouds", "w2_far", "w2_sea", "w2_tiles"]
 # World 2's BOBs, loaded after the display art in the same file (the "set"): the art's name, the
-# frames kept (the converter's frames in the art file: patrol boat 0 and 2 = one wake a facing; the
+# frames kept (the converter's frames in the art file: patrol boat 0, 2, 4, 5 = one wake a facing and the shot tell a facing; the
 # gunboat's idle, tell 1 and tell 2 a facing, its fire frame being tell 2 held; the pad's lit
 # phase only), the game's name, and whether it has a mask: the pad's parts are only the pieces
 # main.c puts the whole pad together from at the card (one BOB a pad, not fifteen: padCompose),
 # so they have none. The levers of docs/STYLE-world2.md section 6.
-SET = [("w2_barracks", None, "W2_BARRACKS", True), ("w2_patrol_boat", [0, 2], "PATROL", True),
+SET = [("w2_barracks", None, "W2_BARRACKS", True), ("w2_patrol_boat", [0, 2, 4, 5], "PATROL", True),
        ("w2_gunboat", [0, 1, 2, 4, 5, 6], "GUNBOAT", True), ("w2_pad_cap", [0, 1], "PAD_CAP", False),
        ("w2_pad_slab", [0, 1, 2], "PAD_SLAB", False), ("w2_pad_centre", [0], "PAD_CENTRE", False),
        ("w2_pad_lamp", None, "PAD_LAMP", True), ("w2_splash", None, "SPLASH", True)]

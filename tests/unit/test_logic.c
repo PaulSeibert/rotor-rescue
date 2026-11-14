@@ -2902,6 +2902,139 @@ static void testW2OneBoatAttackAtATime(void) {
 	CHECK(wFirst >= 0 && pFirst != pOther);
 }
 
+// ---- patrol boats (decided by Paul, 2026-11-13): unarmed in mission 4, armed from mission 5 under
+// the gunboats' fairness rules, with a slower wind-up (PATROL_TELL_EXTRA more frames) and a longer rest
+
+// The mission's patrol boat (the last stretch of sea), alone on the map, dx px from a chopper hovering at (x, y)
+static tBoat *patrolNear(int16_t x, int16_t y, int16_t dx) {
+	hoverAt(x, y);
+	tBoat *p = 0;
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) {
+		if(g.pBoats[i].active && g.pBoats[i].kind == BOAT_PATROL && !p) p = &g.pBoats[i];
+		else g.pBoats[i].active = 0;
+	}
+	CHECK(p != 0);
+	if(!p) return &g.pBoats[0];
+	p->x0 = (int16_t)(x - 300);
+	p->x1 = (int16_t)(x + 300);
+	p->x = (int16_t)(x + dx);
+	p->cool = 0;
+	p->tell = 0;
+	p->dir = 1;
+	g.atkWait = 0;
+	return p;
+}
+
+static void testW2PatrolArmedFromMission5(void) {
+	newWorld2(0); CHECK(!logicPatrolArmed(&g));
+	newWorld2(1); CHECK(logicPatrolArmed(&g));
+	newWorld2(2); CHECK(logicPatrolArmed(&g));
+	newGame(); CHECK(!logicPatrolArmed(&g));
+	// the wind-up: the gunboat's table plus PATROL_TELL_EXTRA, never shorter than a gunboat's
+	newWorld2(1);
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		logicSetDifficulty(&g, d);
+		CHECK(logicPatrolTell(&g) == logicBoatTell(&g) + PATROL_TELL_EXTRA && logicPatrolTell(&g) >= 12);
+	}
+}
+
+// Mission 4: no skill ever sees a patrol shot (not even a tell), however it is set up for one
+static void testW2PatrolUnarmedInMission4(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(0);
+		logicSetDifficulty(&g, d);
+		tBoat *p = patrolNear(2400, GROUND_Y - 30, -150);
+		for(int i = 0; i < 600; ++i) {
+			p->cool = 0; g.atkWait = 0;
+			step(NONE, 1);
+			CHECK(!p->tell && !(g.events2 & (EV2_BOATTELL | EV2_BOATFIRE)) && !g.pEShots[0].active);
+		}
+	}
+}
+
+// Mission 5 and 6: a tell of logicPatrolTell() frames (the tell frame drawn, braced), then the shell
+static void testW2PatrolTellsThenShoots(void) {
+	for(uint8_t m = 1; m <= 2; ++m) {
+		for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			tBoat *p = patrolNear(2400, GROUND_Y - 30, -150);
+			uint8_t nTell = 0, nShells = 0, nTellDrawn = 0;
+			uint16_t nTellFrames = 0;
+			for(int i = 0; i < 400 && !nShells; ++i) {
+				int16_t xb = p->x;
+				uint8_t wasTell = p->tell != 0;
+				step(NONE, 1);
+				if(g.events2 & EV2_BOATTELL) { ++nTell; nTellFrames = 0; CHECK(!g.pEShots[0].active); }
+				if(p->tell) {
+					++nTellFrames;
+					CHECK(wasTell ? p->x == xb : 1);
+					tDraw pDraw[DRAW_MAX];
+					uint8_t n = logicDraw(&g, pDraw);
+					for(uint8_t k = 0; k < n; ++k) {
+						if(pDraw[k].bob == BOB_PATROL && pDraw[k].frame == PATROL_TELL_R) ++nTellDrawn;   // (it faces the chopper: to its right)
+					}
+				}
+				if(g.events2 & EV2_BOATFIRE) {
+					++nShells;
+					CHECK(nTellFrames + 1 >= logicPatrolTell(&g));
+					CHECK(g.pEShots[0].active && g.pEShots[0].vx > 0);
+				}
+			}
+			CHECK(nTell == 1 && nShells == 1 && nTellDrawn + 1 >= logicPatrolTell(&g));
+		}
+	}
+}
+
+// ...under the gunboats' fairness rules: not at a high chopper, from off screen, point-blank, out of
+// sight, just after take-off or a fresh landing, and one attack at a time with the gunboats
+static void testW2PatrolFairness(void) {
+	for(uint8_t m = 1; m <= 2; ++m) {
+		newWorld2(m); patrolNear(2400, 120, -150);
+		for(int i = 0; i < 300; ++i) { step(NONE, 1); CHECK(!g.events2 && !g.pEShots[0].active); }
+		tBoat *p;
+		newWorld2(m); p = patrolNear(2400, GROUND_Y - 30, -200);
+		for(int i = 0; i < 200; ++i) { g.cam = (int16_t)(2400 - 100); p->x = 2200; step(NONE, 1); CHECK(!p->tell); }
+		newWorld2(m); p = patrolNear(2400, GROUND_Y - 30, -40);
+		for(int i = 0; i < 200; ++i) { p->x = 2360; step(NONE, 1); CHECK(!p->tell); }
+		newWorld2(m); p = patrolNear(2400, GROUND_Y - 30, (int16_t)-(BOAT_RANGE + 20));
+		for(int i = 0; i < 200; ++i) { g.cam = (int16_t)(2400 - 300); p->x = (int16_t)(2400 - BOAT_RANGE - 20); step(NONE, 1); CHECK(!p->tell); }
+		newWorld2(m); p = patrolNear(2400, GROUND_Y - 30, -150);
+		for(int i = 0; i < 90; ++i) { g.airGrace = JET_TAKEOFF_GRACE; step(NONE, 1); CHECK(!p->tell); }
+	}
+	// a fresh landing: no tell before the ground dwell (never on skill 1-2)
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(1);
+		logicSetDifficulty(&g, d);
+		tBoat *p = patrolNear(g_pIslands[2].padX, GROUND_Y - 20, -140);
+		step((tInput){.dy = 1}, 30);
+		CHECK(g.chop.landed);
+		uint16_t uwDwell = logicGroundDwell(&g), uwFirstTell = 0;
+		for(uint16_t i = 0; i < 700 && !uwFirstTell; ++i) {
+			p->x = (int16_t)(g.chop.x - 140); p->cool = 0; g.atkWait = 0;
+			step(NONE, 1);
+			if(p->tell) uwFirstTell = g.landFrames;
+		}
+		if(uwDwell == GROUND_NEVER) CHECK(!uwFirstTell);
+		else CHECK(uwFirstTell >= uwDwell);
+	}
+	// one attack at a time: a gunboat that has begun its tell holds the patrol boat back BOAT_ATTACK_GAP frames
+	newWorld2(1);
+	logicSetDifficulty(&g, 4);
+	tBoat *p = patrolNear(2400, GROUND_Y - 30, -130);
+	tBoat *b = &g.pBoats[1];
+	b->active = 1; b->kind = BOAT_GUN; b->hp = 3; b->x0 = 2000; b->x1 = 2800; b->x = 2310; b->cool = 0; b->tell = 0; b->dir = 1;
+	int16_t wFirst = -1;
+	tBoat *pFirst = 0, *pOther = 0;
+	for(int i = 0; i < 400; ++i) {
+		step(NONE, 1);
+		if(wFirst < 0 && (p->tell || b->tell)) { wFirst = (int16_t)i; pFirst = p->tell ? p : b; pOther = p->tell ? b : p; }
+		if(wFirst >= 0 && i < wFirst + BOAT_ATTACK_GAP) CHECK(!pOther->tell);
+		CHECK(!(p->tell && b->tell));
+	}
+	CHECK(wFirst >= 0 && pFirst != pOther);
+}
+
 // Boats die to the cannon (3 hits for a gunboat) and to a bomb; they pay
 static void testW2BoatsCanBeShot(void) {
 	newWorld2(0);
@@ -3137,6 +3270,10 @@ int main(void) {
 	testW2GunboatFairness();
 	testW2LandedChopperHasGrace();
 	testW2OneBoatAttackAtATime();
+	testW2PatrolArmedFromMission5();
+	testW2PatrolUnarmedInMission4();
+	testW2PatrolTellsThenShoots();
+	testW2PatrolFairness();
 	testW2BoatsCanBeShot();
 	testW2MissionsFollowWorld1();
 	testW2CardBriefAndMap();

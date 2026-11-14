@@ -1,0 +1,23 @@
+# World 2's patrol boats in mission 4: unarmed. The same flight as tests/w2patrol.agk (Ctrl+L, W, 4):
+# take off, fly low toward the patrol boat west of the base island and hover there for 15 s: no
+# gunboat is in range, so there is no boat tell and no shot.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x04
+wait-serial "AGK world 2 loaded" 400
+press fire 2
+wait 40
+press up 20
+press left 80
+wait 60
+screenshot low
+wait 750
+screenshot later
+expect-no-serial "boat tell|boat fire|chopper lost|ERR|missing"
+expect-no-dropped-frames
+expect-max-load 85
+expect-min-chip-free 96
