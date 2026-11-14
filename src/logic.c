@@ -28,14 +28,14 @@ const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_PAD64] = PAD_ROWS, [BOB_PAD80] = PAD_ROWS, [BOB_PAD96] = PAD_ROWS, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24,
 };
 // (world 2's frames are the ones the floppy set carries: art/tools/make_world_disk.py picks
-// them from the art: one wake frame a facing, the gunboat's fire frame is its second tell's,
+// them from the art: one wake frame a facing and the patrol boat's tell a facing, the gunboat's fire frame is its second tell's,
 // the pad's lit phase only)
 const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_HANGAR] = 1, [BOB_FENCE] = 1, [BOB_BARRACKS] = 4, [BOB_TANK] = 10,
 	[BOB_HOSTAGE] = 8, [BOB_JET] = 4, [BOB_MINE] = 2, [BOB_SHOT] = 1,
 	[BOB_BOMB] = 1, [BOB_SHELL] = 1, [BOB_BOOM] = 5, [BOB_FLAG] = 2,
 	[BOB_SHADOW] = SHADOW_SIZES * 2, [BOB_SMOKE] = 3,
-	[BOB_W2_BARRACKS] = 4, [BOB_PATROL] = 2, [BOB_GUNBOAT] = 6, [BOB_PAD48] = 1,
+	[BOB_W2_BARRACKS] = 4, [BOB_PATROL] = 4, [BOB_GUNBOAT] = 6, [BOB_PAD48] = 1,
 	[BOB_PAD64] = 1, [BOB_PAD80] = 1, [BOB_PAD96] = 1, [BOB_PAD_LAMP] = 2, [BOB_SPLASH] = 5,
 };
 
@@ -530,6 +530,12 @@ uint8_t logicJetTell(const tGame *g) {
 
 uint8_t logicBoatTell(const tGame *g) {
 	return s_pBoatTell[g->difficulty];
+}
+uint8_t logicPatrolArmed(const tGame *g) {
+	return g->world && g->mission >= 1;
+}
+uint8_t logicPatrolTell(const tGame *g) {
+	return (uint8_t)(s_pBoatTell[g->difficulty] + PATROL_TELL_EXTRA);
 }
 
 // ---------------------------------------------------- world 2: the land ---
@@ -1473,15 +1479,18 @@ COLD static void boatsUpdate(tGame *g) {
 			// the wind-up: braced (it doesn't sail), barrel up, lamp flashing; then the shell,
 			// unless the chopper got away meanwhile
 			if(--b->tell) continue;
+			uint8_t ubGun = b->kind == BOAT_GUN;
 			tShot *s = boatTarget(g, b) ? eshotNew(g) : 0;
 			if(s) {
 				uint8_t ubMask = s_pAimMask[g->difficulty];
 				int16_t tx = (int16_t)(c->x + (c->vx >> 1) - b->x + (int16_t)(logicRandom(g) & ubMask) - (ubMask >> 1) - 1);
-				int16_t ty = (int16_t)(c->y - 8 - BOAT_MUZZLE_Y);
+				int16_t wMuzzleY = ubGun ? BOAT_MUZZLE_Y : PATROL_MUZZLE_Y;
+				int16_t ty = (int16_t)(c->y - 8 - wMuzzleY);
+				int16_t wMuzzleDx = ubGun ? 26 : PATROL_MUZZLE_DX;
 				s->active = 1;
 				s->kind = ESHOT_SHELL;
-				s->x = (int16_t)(b->x + (tx > 0 ? 26 : -26));
-				s->y = BOAT_MUZZLE_Y;
+				s->x = (int16_t)(b->x + (tx > 0 ? wMuzzleDx : -wMuzzleDx));
+				s->y = wMuzzleY;
 				s->fx = s->fy = 0;
 				aim(tx, ty, &s->vx, &s->vy);
 				s->life = SHELL_LIFE;
@@ -1490,15 +1499,16 @@ COLD static void boatsUpdate(tGame *g) {
 			}
 			int16_t wCool = (int16_t)(TANK_GAP_BASE - g->mission * 20 + s_pTankCool[g->difficulty]);
 			uint8_t ubMin = s_pTankCoolMin[g->difficulty];
-			b->cool = (uint8_t)((wCool < ubMin ? ubMin : wCool) - logicBoatTell(g));
+			b->cool = (uint8_t)((wCool < ubMin ? ubMin : wCool) - (ubGun ? logicBoatTell(g) : logicPatrolTell(g)));
+			if(!ubGun) b->cool = (uint8_t)(b->cool + PATROL_COOL_EXTRA);
 			b->cool = (uint8_t)(b->cool + (logicRandom(g) & 31));
 			continue;
 		}
 		if(b->cool) --b->cool;
-		else if(b->kind == BOAT_GUN && boatTarget(g, b) && (!g->atkWait || g->atkLast == i)) {
+		else if((b->kind == BOAT_GUN || logicPatrolArmed(g)) && boatTarget(g, b) && (!g->atkWait || g->atkLast == i)) {
 			// the tell: it turns to the chopper, stops, raises its barrel
 			b->dir = c->x > b->x ? 1 : -1;
-			b->tell = logicBoatTell(g);
+			b->tell = b->kind == BOAT_GUN ? logicBoatTell(g) : logicPatrolTell(g);
 			g->atkWait = BOAT_ATTACK_GAP;
 			g->atkLast = i;
 			g->events2 |= EV2_BOATTELL;
@@ -2036,7 +2046,7 @@ COLD static uint8_t seaDraw(const tGame *g, tDraw *pOut, uint8_t n) {
 		const tBoat *b = &g->pBoats[i];
 		if(!b->active || b->x + 34 < cam || b->x - 34 > cam + SCREEN_W) continue;   // (off screen: nothing to add)
 		if(b->kind == BOAT_PATROL) {
-			n = drawAddS(pOut, n, (int16_t)(b->x - 21 - cam), BOAT_BOTTOM_Y - 17, BOB_PATROL, b->dir > 0 ? PATROL_R : PATROL_L);
+			n = drawAddS(pOut, n, (int16_t)(b->x - 21 - cam), BOAT_BOTTOM_Y - 17, BOB_PATROL, (uint8_t)((b->dir > 0 ? PATROL_R : PATROL_L) + (b->tell ? PATROL_TELL_L : 0)));
 		}
 		else {
 			uint8_t f = b->tell ? ((b->tell & 4) ? GUNBOAT_FIRE_L : GUNBOAT_TELL_L) : b->fireAnim ? GUNBOAT_FIRE_L : GUNBOAT_L;

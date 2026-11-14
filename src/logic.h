@@ -112,8 +112,9 @@ enum { MAN_STAND, MAN_RUN0, MAN_RUN1, MAN_WAVE0, MAN_WAVE1, MAN_DEAD,
 enum { SMOKE_SMALL, SMOKE_BIG, SMOKE_THIN };   // a puff's life, in thirds
 enum { JET_L, JET_R, JET_FLASH_L, JET_FLASH_R };   // the tell: nose and engine glowing
 // World 2's BOB frames: a boat faces left or right (drawn, not mirrored); the gunboat's tell
-// is its barrel rising (TELL, then FIRE's flash, blinking), FIRE again for the shot's smoke
-enum { PATROL_L, PATROL_R };
+// is its barrel rising (TELL, then FIRE's flash, blinking), FIRE again for the shot's smoke; the
+// patrol boat's (missions 5 and 6) is its bow gun up and its lamp lit, held until the shot
+enum { PATROL_L, PATROL_R, PATROL_TELL_L, PATROL_TELL_R };
 enum { GUNBOAT_L, GUNBOAT_TELL_L, GUNBOAT_FIRE_L, GUNBOAT_R, GUNBOAT_TELL_R, GUNBOAT_FIRE_R };
 enum { PAD_LAMP_RED, PAD_LAMP_YELLOW };                  // off the pad, over it (no green in PF1)
 // A pad is one BOB a width (BOB_PAD48 + (px - 48) / 16: PAD_ROWS tall, an end cap with its pylon, the
@@ -185,9 +186,9 @@ typedef struct {
 	uint8_t timer;
 } tBarracks;
 
-// World 2's boats (SPEC 6): placed on a stretch of sea, they patrol it. A patrol boat is
-// unarmed (its art has no tell frame: the bow gun waits for one); a gunboat shells a low or
-// landed chopper in range, after a tell, under the shared ground-threat rules.
+// World 2's boats (SPEC 6): placed on a stretch of sea, they patrol it. A gunboat shells a low or
+// landed chopper in range, after a tell, under the shared ground-threat rules; a patrol boat does
+// the same from mission 5 (logicPatrolArmed), a little slower, and is unarmed in mission 4.
 #define BOAT_MAX 6
 enum { BOAT_PATROL, BOAT_GUN };
 typedef struct {
@@ -461,6 +462,14 @@ uint8_t logicJetTell(const tGame *g);
 // Gunboats (world 2): the barrel rises and the lamp flashes this many frames before every
 // shell: 22 / 18 / 16 / 14 / 12 by skill (16 for GODMODE), longer than a tank's on the low skills
 uint8_t logicBoatTell(const tGame *g);
+// Patrol boats (mission 5 on): the same attack as a gunboat's, weaker: PATROL_TELL_EXTRA more frames
+// of wind-up, PATROL_COOL_EXTRA more of rest, its bow gun a little lower; mission 4's are unarmed
+uint8_t logicPatrolArmed(const tGame *g);
+uint8_t logicPatrolTell(const tGame *g);
+#define PATROL_TELL_EXTRA 4
+#define PATROL_COOL_EXTRA 30
+#define PATROL_MUZZLE_Y 233  // where a patrol boat's shell leaves (its bow gun), and PATROL_MUZZLE_DX from its centre
+#define PATROL_MUZZLE_DX 19
 #define BOAT_RANGE 220       // a gunboat's sight: no longer than its shell flies (SHELL_LIFE at 1.5 px a frame)
 #define BOAT_MIN_RANGE 56    // and no shot from closer than this
 #define BOAT_ATTACK_GAP 150  // 3 s between one boat's tell starting and the next boat's

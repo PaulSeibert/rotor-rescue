@@ -41,11 +41,13 @@ def boat_sets():
     """every directional BOB, as {asset: (frames, comment)}; left-facing first, then right-facing (drawn facing right and
     re-lit, see w2bobs.C): the light stays top left in both. Also the crop offsets the destroyer's mounts need."""
     sets = {}
-    p = []
-    for flip in (False, True):
-        fr, _ = B.common([B.patrol(w, flip) for w in (0, 1)])
-        p += fr
-    sets["patrol_boat"] = (p, "Patrol boat, 2 wake frames x 2 facings: frames 0-1 face left, 2-3 face right (re-lit, not mirrored).")
+    per = []
+    for flip in (False, True):                                 # cropped per facing, as the approved frames were
+        fr, _ = B.common([B.patrol(0, flip), B.patrol(1, flip), B.patrol(0, flip, tell=True)])
+        per.append(fr)
+    p = per[0][:2] + per[1][:2] + [per[0][2], per[1][2]]
+    sets["patrol_boat"] = (p, "Patrol boat, 2 wake frames x 2 facings: frames 0-1 face left, 2-3 face right (re-lit, not mirrored).\n"
+                              "Frames 4 (left) and 5 (right) are the shot tell (missions 5 on): the bow gun swings up and its muzzle lamp lights; drawn by the same code.")
     g = []
     for flip in (False, True):
         fr, _ = B.common([B.gunboat(s, w, flip, crop=False) for s, w in (("idle", 0), ("tell1", 1), ("tell2", 0), ("fire", 1))])

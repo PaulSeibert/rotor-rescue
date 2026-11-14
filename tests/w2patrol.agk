@@ -1,0 +1,31 @@
+# World 2's patrol boats from mission 5 (decided by Paul, 2026-11-13; SPEC 6): Ctrl+L, W, 5 starts
+# mission 5 at the base pad. The patrol boat sails the stretch of sea just west of the base island
+# (x 3620-3960): take off, fly low toward it and hover there, and its bow gun swings up with the
+# lamp lit (the tell, 4 frames longer than a gunboat's), then a shell, and only then. Mission 4's
+# patrol boats never shoot (tests/w2patrol4.agk); the unit tests (tests/unit/test_logic.c,
+# testW2Patrol*) hold the rules: the tell table, no shot at a high chopper, from off screen,
+# point-blank, out of sight or just after take-off, the landed grace, one attack at a time.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x05
+wait-serial "AGK world 2 loaded" 400
+press fire 2
+wait 40
+press up 20
+press left 80
+wait 60
+screenshot low
+wait-serial "boat tell" 900
+screenshot tell
+wait-serial "boat fire" 60
+wait 5
+screenshot fire
+expect-serial "boat tell[\s\S]*boat fire"
+expect-no-serial "chopper lost|ERR|missing"
+expect-no-dropped-frames
+expect-max-load 85
+expect-min-chip-free 96
