@@ -9,6 +9,12 @@ key 0x11
 wait 5
 key 0x04
 wait-serial "AGK world 2 loaded" 400
+# skill 2: mission 4's patrol boat is armed from skill 3 (Paul, 2026-11-14)
+key 0x63
+key 0x28
+wait 5
+key 0x02
+wait 5
 press fire 2
 wait 40
 press up 20

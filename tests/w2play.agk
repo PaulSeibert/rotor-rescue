@@ -14,6 +14,12 @@ key 0x11
 wait 5
 key 0x04
 wait-serial "AGK world 2 loaded" 400
+# skill 2: mission 4's patrol boat is armed from skill 3 (Paul, 2026-11-14)
+key 0x63
+key 0x28
+wait 5
+key 0x02
+wait 5
 wait 30
 screenshot card
 press fire 2
@@ -31,7 +37,7 @@ wait 40
 press down 120
 wait 60
 screenshot pad
-expect-color pad 184 210 0xFC3
+expect-color pad 176 210 0xFC3 # (skill 2: the pad is 80 px wide, not skill 3's 64)
 press fire 1
 wait 30
 press fire 1
