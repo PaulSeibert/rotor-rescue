@@ -464,7 +464,8 @@ uint8_t logicJetTell(const tGame *g);
 uint8_t logicBoatTell(const tGame *g);
 // Patrol boats (mission 5 on): the same attack as a gunboat's, weaker: PATROL_TELL_EXTRA more frames
 // of wind-up, PATROL_COOL_EXTRA more of rest, its bow gun a little lower; mission 4's are unarmed
-uint8_t logicPatrolArmed(const tGame *g);
+uint8_t logicPatrolArmed(const tGame *g);   // mission 5 on, and mission 4 from skill 3
+uint8_t logicBoatGap(const tGame *g);        // frames between a boat's shells (tell included): the tank's table, faster from skill 3
 uint8_t logicPatrolTell(const tGame *g);
 #define PATROL_TELL_EXTRA 4
 #define PATROL_COOL_EXTRA 30

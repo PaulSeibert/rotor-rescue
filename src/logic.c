@@ -532,7 +532,14 @@ uint8_t logicBoatTell(const tGame *g) {
 	return s_pBoatTell[g->difficulty];
 }
 uint8_t logicPatrolArmed(const tGame *g) {
-	return g->world && g->mission >= 1;
+	return g->world && (g->mission >= 1 || g->difficulty >= 3);   // M5 on; M4 too from skill 3 (Paul, 2026-11-14: M4 was too easy)
+}
+// A boat's extra speed-up per skill (frames off the pause between shells, on top of the tank table)
+static const int8_t s_pBoatCool[DIFFICULTY_MAX + 1] = {0, 0, 0, -15, -25, -30};
+uint8_t logicBoatGap(const tGame *g) {
+	int16_t wCool = (int16_t)(TANK_GAP_BASE - g->mission * 20 + s_pTankCool[g->difficulty] + s_pBoatCool[g->difficulty]);
+	uint8_t ubMin = s_pTankCoolMin[g->difficulty];
+	return (uint8_t)(wCool < ubMin ? ubMin : wCool);
 }
 uint8_t logicPatrolTell(const tGame *g) {
 	return (uint8_t)(s_pBoatTell[g->difficulty] + PATROL_TELL_EXTRA);
@@ -1497,9 +1504,7 @@ COLD static void boatsUpdate(tGame *g) {
 				b->fireAnim = 8;
 				g->events2 |= EV2_BOATFIRE;
 			}
-			int16_t wCool = (int16_t)(TANK_GAP_BASE - g->mission * 20 + s_pTankCool[g->difficulty]);
-			uint8_t ubMin = s_pTankCoolMin[g->difficulty];
-			b->cool = (uint8_t)((wCool < ubMin ? ubMin : wCool) - (ubGun ? logicBoatTell(g) : logicPatrolTell(g)));
+			b->cool = (uint8_t)(logicBoatGap(g) - (ubGun ? logicBoatTell(g) : logicPatrolTell(g)));
 			if(!ubGun) b->cool = (uint8_t)(b->cool + PATROL_COOL_EXTRA);
 			b->cool = (uint8_t)(b->cool + (logicRandom(g) & 31));
 			continue;

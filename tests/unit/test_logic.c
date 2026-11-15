@@ -2660,6 +2660,7 @@ static void testW2PadWidthBySkill(void) {
 // life is lost; one splash a touch (a new one after lifting off the water again)
 static void testW2WaterIsASoftStop(void) {
 	newWorld2(0);
+	logicSetDifficulty(&g, 2);                            // (skill 3 arms mission 4's patrol boat, which patrols this sea)
 	hoverAt(800, 150);                                    // the open sea between islands 0 and 1
 	uint8_t nSplash = 0;
 	tInput down = {.dy = 1};
@@ -2926,7 +2927,8 @@ static tBoat *patrolNear(int16_t x, int16_t y, int16_t dx) {
 }
 
 static void testW2PatrolArmedFromMission5(void) {
-	newWorld2(0); CHECK(!logicPatrolArmed(&g));
+	newWorld2(0); logicSetDifficulty(&g, 2); CHECK(!logicPatrolArmed(&g));
+	newWorld2(0); logicSetDifficulty(&g, 3); CHECK(logicPatrolArmed(&g));   // skill 3 up: armed from mission 4 too (Paul, 2026-11-14)
 	newWorld2(1); CHECK(logicPatrolArmed(&g));
 	newWorld2(2); CHECK(logicPatrolArmed(&g));
 	newGame(); CHECK(!logicPatrolArmed(&g));
@@ -2938,9 +2940,9 @@ static void testW2PatrolArmedFromMission5(void) {
 	}
 }
 
-// Mission 4: no skill ever sees a patrol shot (not even a tell), however it is set up for one
+// Mission 4: skills 1-2 never see a patrol shot (not even a tell), however it is set up for one
 static void testW2PatrolUnarmedInMission4(void) {
-	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+	for(uint8_t d = 1; d < 3; ++d) {
 		newWorld2(0);
 		logicSetDifficulty(&g, d);
 		tBoat *p = patrolNear(2400, GROUND_Y - 30, -150);
@@ -2950,6 +2952,22 @@ static void testW2PatrolUnarmedInMission4(void) {
 			CHECK(!p->tell && !(g.events2 & (EV2_BOATTELL | EV2_BOATFIRE)) && !g.pEShots[0].active);
 		}
 	}
+}
+
+// A gunboat's pause between shells: never longer on a higher skill, and from skill 3 shorter than the tank's table alone gave
+static void testW2GunboatFiresFasterWithSkill(void) {
+	newWorld2(0);
+	uint8_t prev = 255;
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		logicSetDifficulty(&g, d);
+		uint8_t gap = logicBoatGap(&g);
+		CHECK(gap <= prev);
+		prev = gap;
+	}
+	logicSetDifficulty(&g, 2); uint8_t g2 = logicBoatGap(&g);
+	logicSetDifficulty(&g, 3); uint8_t g3 = logicBoatGap(&g);
+	logicSetDifficulty(&g, 5); uint8_t g5 = logicBoatGap(&g);
+	CHECK(g3 + 10 <= g2 && g5 + 20 <= g3);
 }
 
 // Mission 5 and 6: a tell of logicPatrolTell() frames (the tell frame drawn, braced), then the shell
@@ -3272,6 +3290,7 @@ int main(void) {
 	testW2OneBoatAttackAtATime();
 	testW2PatrolArmedFromMission5();
 	testW2PatrolUnarmedInMission4();
+	testW2GunboatFiresFasterWithSkill();
 	testW2PatrolTellsThenShoots();
 	testW2PatrolFairness();
 	testW2BoatsCanBeShot();
