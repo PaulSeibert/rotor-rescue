@@ -1,3 +1,4 @@
+# Run: agk run -f sound/capture/rotorcapw2.agk -p a500
 # Capture scenario: world 2 (Ctrl+L, W, 4: a floppy load) then a flight, for the rotor's audio.
 wait-serial "AGK t0" 1000
 key 0x63

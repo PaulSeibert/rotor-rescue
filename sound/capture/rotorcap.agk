@@ -1,3 +1,4 @@
+# Run: agk run -f sound/capture/rotorcap.agk -p a500   (audio.wav and its marks land in build/agk-run/a500/rotorcap/; sound/tools/check_rotor_audio.py reads them)
 # Capture scenario: a scripted flight for the rotor's audio (marks name each state; the
 # analysis tool slices audio.wav at them). Empty chopper, world 1, no music in play.
 wait-serial "AGK t0" 1000

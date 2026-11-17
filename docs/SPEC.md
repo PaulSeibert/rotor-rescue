@@ -665,7 +665,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   *What he heard, measured.* The game was played in WinUAE with Paul's own `first.uae` settings (no sound keys: defaults) from his
   `first.adf` of 2026-11-14 15:47, with real key events and the default playback device recorded (WASAPI loopback; the windows were named
   `RRDBG-rotor-*`), through a scripted flight (idle, lift-off, hover, cruise, climb, descend, cannon) and a scripted whole rescue; and in
-  vAmiga (`agk run tests/rotorcap.agk`, `rotorcapw2.agk` for world 2, `rescue.agk`). Results:
+  vAmiga (`agk run -f sound/capture/rotorcap.agk`, `rotorcapw2.agk` for world 2, `tests/rescue.agk`; WinUAE: `sound/tools/winuae_capture.py`). Results:
   - **v3 is what plays.** Period and volume in the serial lines are the unit-tested numbers (hover 591/40 = 5.0 thumps a second, cruise 6.2,
     climb 6.1, idle 3.4, loaded and damaged lower), the thump rate measured in the recordings agrees (5.0 / 6.2 / 6.2, idle 3.5), and the waveform
     of one blade pass in WinUAE is the synthesised loop through a sample-and-hold. The A500 profile, world 2 (a floppy load first) and
