@@ -1,0 +1,44 @@
+# The chip-squeeze check (docs/SPEC.md 11, "World 2's jets"): WinUAE's A500 has about 23 KB less chip RAM free than
+# vAmiga's at the same point (Rotor Raider's measurement, 134 -> 111 KB; its unmade BOBs wiped the screen). Ctrl+L, Q at
+# the title is the test hook that takes CHIP_SQUEEZE_KB (23) of it away for the run (main.c chipSqueeze).
+# World 2 is the biggest chip user (the art block with its set and the jet's copy, the terrain ring made at its load):
+# with the squeeze every allocation must still be made (no "AGK ERR out of chip RAM"), the jet BOB drawn from the
+# set must show (a jet BOB that was not made would have wiped the frame), and the floor of the game, 64 KB (SPEC 2),
+# must hold. Skill 5, ghost: the jets come from the first trip.
+wait-serial "AGK t0" 3000
+key 0x63
+key 0x28
+wait 5
+key 0x10
+wait 30
+expect-serial "AGK chip squeezed"
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x04
+wait-serial "AGK world 2 loaded" 400
+key 0x63
+key 0x28
+wait 5
+key 0x05
+wait 30
+key 0x63
+key 0x28
+wait 5
+key 0x24
+wait 30
+press fire 2
+wait 60
+press up 90
+press left 120
+wait-serial "jet warn" 400
+wait-serial "jet tell" 600
+wait 2
+screenshot jettell
+wait 60
+screenshot after
+expect-no-serial "AGK ERR|missing|out of chip"
+expect-no-dropped-frames
+expect-min-chip-free 64

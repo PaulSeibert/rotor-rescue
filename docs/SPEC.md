@@ -208,7 +208,7 @@ from "Mountain Night" and "Coastal Dawn" (studio default). Pressure is a plannin
 - **World 1, Border Desert (missions 1-3):** flat desert, dusk / night / dawn, the shipped parallax and perspective plain.
   New: missile trucks and AA guns, garrisons at each barracks, the border convoy (a column crosses the road at about 50%;
   destroying the lead truck stops it; reward: a repair crate and a bonus).
-- **World 2, Coral Islands (4-6):** (*v1.11: the display, section 11 "World 2's display". v1.13: the gameplay slice, section 11 "World 2's gameplay": islands, pads and their guide, barracks and people, water, patrol boats and gunboats, the way in from mission 3 and out after mission 6. Not built yet: wind, the winch, radar and jets, the timed freighter, the destroyer. Until the winch is, missions 5 and 6 are mission 4's islands with more gunboats and four barracks of 16.*) bright sea in morning, midday and storm dusk. Sky; clouds /8; distant volcanic islands /4;
+- **World 2, Coral Islands (4-6):** (*v1.11: the display, section 11 "World 2's display". v1.13: the gameplay slice, section 11 "World 2's gameplay": islands, pads and their guide, barracks and people, water, patrol boats and gunboats, the way in from mission 3 and out after mission 6. Not built yet: wind, the winch, radar sites, the timed freighter, the destroyer. v1.16: jets, section 6. Until the winch is, missions 5 and 6 are mission 4's islands with more gunboats and four barracks of 16.*) bright sea in morning, midday and storm dusk. Sky; clouds /8; distant volcanic islands /4;
   **the sea is the perspective floor** (re-cut to lines 180-207, wave rows in perspective, a 1 px shimmer by time); hills
   dropped; terrain strip from line 208 (48 rows, island height at most about 40 px). Water is not landable (touching it is a soft
   stop with a splash, no damage; decided by Paul). Pads (4.4), wind gusts, ship-deck winch, gunboats, radar sites, a timed
@@ -437,6 +437,37 @@ do not call the pacing "tuned".
 | *destroyer* (world 2 M6 set piece) | two turrets of 6 HP, 4 AA | slow, patrols the strait | turret shells; a barrage at 40 s | turret turns and flashes; 28 / 24 / 20 / 18 / 16 frames | 400 |
 | *gunship* (world 4 M12 finale) | 24 (cannon); a bomb 4; core exposed below 50% | strafes the roof line, always reachable | a 5-shot arc, a marked rocket volley, calls the AA | big nose flash, rocket marker; 30 / 26 / 22 / 18 / 16 frames | 1000 |
 
+- **Jets in world 2** (v1.16; Paul's playtest, 2026-11-14: mission 4 at skill 3, "nobody firing at me, not enough things to dodge,
+  no airplanes"; studio tuning, pending Paul's playtest; the numbers are the studio's proposal, flagged in "Open questions" 15). World 1's jets, with
+  the same fairness rules and the same code (`jetsUpdate`), come to world 2, scaled by mission and skill so that the low skills stay gentle:
+  - **When** (`s_pW2JetsFrom`, `s_pW2JetsTrip` in `logic.c`; a *trip* is one delivery home, `g->trip`): the trip a mission's jets begin on, and the
+    most jets that may appear between one landing on the base pad and the next (the budget, as world 1's `s_pJetsTrip`; 255 = none at that skill):
+
+    | | skill 1 | skill 2 | skill 3 (and GODMODE) | skill 4 | skill 5 |
+    |---|---|---|---|---|---|
+    | mission 4, Reef Run: from trip / jets a trip | none | none | 1 / **3** | 1 / 4 | 0 / 5 |
+    | mission 5, Trade Winds | none | 2 / 2 | 0 / 4 | 0 / 5 | 0 / 6 |
+    | mission 6, Typhoon Strait | 3 / 1 | 1 / 3 | 0 / 5 | 0 / 6 | 0 / 6 |
+
+    So mission 4 at skill 3, Paul's playtest, has its first trip quiet (the pads and the water are new) and from the second trip home 3 jets a trip;
+    skill 1-2 never see one in mission 4 and skill 1 none in mission 5; budgets never fall with the skill or the mission (`testW2JetsOnlyFromTheAllowedSkillAndMission`).
+  - **How many at once:** the world 1 tables (`s_pJetsMax`, `s_pJetsMaxM3`): one jet out at a time on skill 1-3 and pairs on skill 4-5 in missions 4 and 5, pairs from
+    skill 3 (and GODMODE) up in mission 6 (it takes world 1's mission 3 row); the second jet's attack run at least `JET_PAIR_GAP` (3 s) after the first's.
+  - **Warning, tell, attack:** exactly world 1's (section 5, "Jet pacing"): a jet appears `JET_LEAD` (384 px) off screen ahead (576 px, `JET_WARN_BEHIND` 150 frames,
+    when 1 in 4 comes from behind), its radar blip flashes and the two-beep alert plays at once, no attack run until `JET_WARN_FRAMES` (100) frames after,
+    then the nose-and-engine flash for `s_pJetTell` (24 / 20 / 16 / 14 / 12 frames by skill; 16 for GODMODE), and a missile only if the whole jet is on screen and
+    the chopper is airborne, 56-200 px ahead and within 14 px of its height; a bomb only on a landed chopper under it after the ground dwell.
+  - **Fairness (R1, R2, R3):** never at a landed chopper on skill 1-2 and not before the dwell on 3-5 (6 s / 4 s / 3 s; `s_pLandDwell`, the table the boats share), none
+    starts an attack run in the 2 s after a take-off (`JET_TAKEOFF_GRACE`), and **one attack at a time across jets and boats**: a jet's tell holds a boat's off and a
+    boat's tell a jet's, for `BOAT_ATTACK_GAP` (3 s) (the boats' `g->atkWait`, the jet marks it `ATK_JET`; world 1 has no boats and does not use it).
+  - **Where:** while the chopper is left of `W2_JET_SAFE_X` (3800: the base island's approach, 336 px before its pad), so none appears in the intro, while the chopper sits at the base or
+    on its way in; jets already in the air when it passes that x stay. They fly the whole map over sea and islands at the chopper's height (0.5 px/frame
+    follow, clamped to the play area), so a hovering chopper over a pad is as visible a target as over the water; a bomb falls on a landed chopper (a pad is the only place it lands).
+    There are no radar sites yet: when the radar site (mission 5 on) is built, its coverage zone limits where jets may appear (row above) and this budget stays the cap.
+  - **Scoring and HUD:** a jet is shot down by the cannon (1 HP; a bomb on its way down hits one too) for 100, as in world 1. Its blip is on the HUD radar's row 1, white and double-width
+    while it flashes its warning (the radar there already carries the boats on row 4). The mission card's brief is unchanged (it names what the mission *starts* with).
+  - **Art:** world 1's jet (`art/jet.txt`, 32 x 12, 4 frames, PF1 pens 1-7: the pens are the same in both worlds) is a copy in world 2's set (`BOB_W2_JET`, `[w2_jet]` in
+    `world2_art.toml`); no recolour was needed: it reads against every mission's sky and sea. Chip: +1,152 bytes (section 11).
 - **Tell units:** tanks and jets, section 7 table. A unit test (`testNoShellWithoutTell`) and a
   scenario (`tests/tell.agk`: no `AGK sfx tankfire` without a `tank tell` before it) enforce it for
   every shell; `testNoMissileWithoutTell` does the same for every jet missile (decided by Paul, 2026-11-11).
@@ -494,6 +525,9 @@ and fails on any difference.
 | jets out at once (missions 1-2 / mission 3) | 1 / 1 | 1 / 1 | 1 / 2 | 2 / 2 | 2 / 2 |
 | jets that may appear in one trip (base pad to base pad; Paul's playtest, 2026-11-12, section 5) | 2 | 3 | 5 | 6 | 6 |
 | a jet from behind: lead (px) and warning (frames) | 576, 150 on every skill (from ahead 384, 100) |||||
+| **world 2** jets: from trip / jets a trip, mission 4 (v1.16, section 6, "Jets in world 2") | none | none | 1 / 3 | 1 / 4 | 0 / 5 |
+| mission 5 | none | 2 / 2 | 0 / 4 | 0 / 5 | 0 / 6 |
+| mission 6 | 3 / 1 | 1 / 3 | 0 / 5 | 0 / 6 | 0 / 6 |
 
 - **Jet fairness** (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest): the jet rows above, and section 5's rules. Also by the way, a jet's cool-down was
   8 bits and wrapped for skill 1's rest of 240-303 frames (it was often 0-47 instead); it is 16 bits now. `testNoBombOnLandedChopper`,
@@ -861,6 +895,19 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
     (5,616) and windsock (480), mission 6 the destroyer (one facing 5,280, both 10,560), its turret (4 frames 1,824, 8: 3,648) and the
     whitecaps (1,080): a set of 31.8 KB (M5) or 33.9 KB (M6) with the pads' composites, against 25.7 KB today: chip free would be about **92 KB (M5) and 90 KB
     (M6) on the a500, below the asserted 96**. (v1.15: the patrol boat stays in M5/M6 and is armed there, with its tell frames, +1.1 KB: the projection is about 91 KB (M5) and 89 KB (M6).) Levers left: compose only the pad widths the skill uses (1.9 KB at skill 3 for 5.0), one destroyer facing, load a mission's own set at its card (the loader is `bobsBind`), or lower the floor (SPEC 2: 64).
+  - **Jets** (v1.16; section 6, "Jets in world 2"; `testW2Jet*`, `tests/w2jets.agk`, `tests/chipwinuae.agk`): the jet is the set's last BOB (`BOB_W2_JET`, world 1's art as it is: 576 + 576 bytes
+    for the 4 frames and their masks, 1,152 bytes of the floppy file and of the art block's chip, `WORLD2_EXTRA` 7,592 -> 8,744), 4 more blit templates (`TPL_MAX` 54 -> 58: 28 shared + 29 world 2's = 57), the radar's
+    jet blips on world 2's 4608 px, the jets' table, the safe x and the shared attack token in `logic.c`. **Chip free in play, lowest on the a500: 98 -> 97 KB** (the gate asserts 96: a margin of about 1 KB), and
+    **74 KB with the squeeze below**. Levers (docs/STYLE-world2.md section 6) in use: none new for the jet, it costs only its own frames; the ones already taken stay (the gunboat's fire frame, one wake frame, the pad's
+    lit phase, the pad as one BOB a width). Left, with their bytes (measured sizes, 48,240 as drawn): compose only the pad widths the skill uses (skill 3: widths 48 and 64 only, 1,936 of 4,976 bytes, **-3,040**;
+    skill 2 -1,656; skill 4-5 -4,144; skill 1 none, and a mid-mission skill change, Ctrl+L, would need the pads composed again), one destroyer facing (-5,280 image and mask, mission 6), a mission's own set loaded at its
+    card (`bobsBind`, -the radar and destroyer parts when a mission lacks them), the floor of 96 KB lowered (SPEC 2 keeps 64 as the game's own). Missions 5 and 6's radar, windsock, destroyer and whitecaps still need them
+    (section 11, "Per-mission sets": about 91 / 89 KB before, 1.1 KB less with the jet).
+  - **Chip allocations are all checked, and a squeeze test reproduces WinUAE's smaller chip** (v1.16; lessons from Rotor Raider's blank screen, whose unmade BOBs wiped the frame on WinUAE, which has about 23 KB less chip
+    free than vAmiga at the same point): `main.c` makes every chip allocation through a check (`CHIP_CHECK`: the art block, the plain's floor, the frame buffers, the HUD, the blank row, the title's memory, the chopper's
+    sprite blocks, the sky and weather lists, world 2's terrain ring; `AGK ERR out of chip RAM: <what>` on serial and a halt for the essentials, the rotor's wave degrades to no rotor sound); the BOBs of this game are
+    bitmaps inside the art block, so none can be "unmade" on its own (the block is the one allocation), and none is drawn before it is made. **Ctrl+L, Q** (test hook) takes `CHIP_SQUEEZE_KB` (23) of chip away, **Ctrl+L, E**
+    four times that; `tests/chipwinuae.agk` plays world 2 from the title with the squeeze (jets, the HUD, the drawn jet BOB, no `AGK ERR`, the lowest chip free 74 KB against the game's floor of 64).
   - **The program**: the unused ACE code was in the executable (the tile and scroll buffers, pak files, chunky and fix-point maths: 77 KB);
     `-ffunction-sections -fdata-sections` and `-Wl,--gc-sections` (CMakeLists.txt, `-D AGK_GC_SECTIONS=OFF` for `agk profile`, which maps code by
     object file) drop it: 325,364 -> 248,464 bytes with all of this gameplay in it (332,536 without the link change). AROS's first picture
@@ -960,6 +1007,7 @@ writable disk.)
 | the tank quota | WinUAE, GODMODE 5 or normal: after 10 kills in a mission QUOTA 10 shows on the HUD and further tanks score nothing | Paul | scenario-tested in vAmiga only |
 | world 2's display (v1.11) | WinUAE A500 (Kickstart 1.3 and 3.1, cycle-exact) and A1200: Ctrl+L, W, 4 / 5 / 6, fly the whole map both ways at full speed: no strip column popping in at either edge, no tear or wrong colour on lines 179-180 and 207-208 (the copper's palette and pointer switches), the sea's rows lean and shear smoothly, no seam between the sea and the strip, the islands appear whole under the card; on a real floppy, how long the card's load takes | Paul | **unproven**: vAmiga only (`tests/world2.agk`, `tests/world2pal.agk`; copper timing by a COLOR00 probe, `W2_COP_PROBE`) |
 | world 2's gameplay (v1.13) | WinUAE A500 (Kickstart 1.3 and 3.1, cycle-exact) and A1200, Ctrl+L, W, 4 at skills 1, 3 and 5: the card's strip map reads; the pad's H, chevrons and lamps read at 1x from landing height and the landing feels forgiving (6 px tolerance, the nudge on skill 1-3, a 48 px pad on skill 4-5); the splash and the soft stop at the water; a gunboat's barrel rising and its lamp flashing are noticed 12-22 frames before the shell on a real display; the people come out six at a time without the rescue feeling slow; the unloading run into the hangar; no stutter with a pad, a barracks, six people and a boat on screen (real A500 timing: the game's meter is vAmiga's); the whole of missions 4-6 on the floppy with the card's load (how long it takes) | Paul | **unproven**: vAmiga only (`tests/w2play.agk`, `tests/w2boats.agk`) |
+| world 2's jets (v1.16) | WinUAE A500 (Kickstart 1.3 and 3.1, cycle-exact) and A1200, Ctrl+L, W, 4 / 5 / 6 at skills 1 to 5: the first trip of mission 4 at skill 3 is quiet, from the second a jet is announced (the radar blip flashes white, the two-beep alert) well before it is on screen, its nose flashes before its missile, a landed chopper on a pad is not bombed before its grace, jets and boats take turns, the jet reads against the sky and the sea in all three missions, the skill 1-2 flights stay free of jets in mission 4, and (WinUAE's smaller chip) the game boots and plays world 2 with no `AGK ERR`; Paul says whether "3 jets a trip from the second" is enough for "not enough things to dodge" | Paul | **unproven**: vAmiga only (`tests/w2jets.agk`, `tests/chipwinuae.agk`, `testW2Jet*`); the squeeze is vAmiga's model of WinUAE's chip, not WinUAE's |
 | the program without the unused ACE code (v1.13) | the game on a real A500 and on WinUAE: nothing the linker dropped was in use (the title, a mission, the hall of fame, the demo, both worlds, the music, all effects; `-Wl,--gc-sections` can only drop what nothing references, but a code path the scenarios never take is the risk) | Paul, WinUAE | **unproven**: all 4 profiles pass their scenarios; no real hardware |
 | the approved new art (landed 567e6c5) | the scrolled bands show no seam at 1x on a real display; the palette reads on all three missions | Paul after the art merge | pending: Paul on WinUAE/real display |
 
@@ -978,6 +1026,9 @@ writable disk.)
 12. ~~**People out at once**~~ Decided by Paul, 2026-11-13 (v1.15): keep `W2_OUT_MAX` = 6 people out at once. (Original question, v1.13: world 2's barracks release at most 6 at a time and the unloading run is 2 px a frame, because 16 on a beach beside a pad dropped frames. Does the rescue still feel like a rescue at 6, or is a bigger crowd worth a cheaper pad (art) or a cheaper person (the radar dot, the erase)?)
 13. ~~**Pad width on skill 4-5**~~ Decided by Paul, 2026-11-13 (v1.15): keep 48 px pads on skills 4-5 with no nudge, and no HUD PAD tick. (Original question, v1.13: 48 px on every island (the 56 and 48 of the table land on the 16 px grid at 48), 6 px of tolerance, no nudge. Too tight, or the intended edge? And the HUD's PAD tick (not built): wanted, given the lamps?)
 14. ~~**Missions 5 and 6**~~ Decided by Paul, 2026-11-13 (v1.15): the mission 5/6 interim (mission 4's islands plus more gunboats) is accepted for the playtest build. (Original question, v1.13: (v1.13) are mission 4's four islands with more gunboats until the winch, the deck, the freighter, wind, radar and the destroyer are built: is that a fair interim for a playtest gate, or should they wait?)
+15. **World 2's jets** (v1.16, studio proposal, flagged for Paul): is mission 4 at skill 3, from the second trip with 3 jets a trip one at a time, enough "airplanes" for "not enough things to dodge"
+    (the alternatives: from the first trip, or 4-5 a trip; each is one number in `s_pW2JetsFrom` / `s_pW2JetsTrip`)? Should the brief on the mission card say "AND JETS" (it would change every world 2 card golden and says
+    nothing true for the first trip)? Should skills 1-2 in mission 4 see none at all (the proposal) or one a trip?
 10. Studio defaults awaiting a playtest gate (v1.5): the upgrade list and currency (4.5); the field pad on maps over 4000 px; world and mission names; the ending thresholds (90% / 60%) and tone, no named villain; music (own themes on cards, ending, credits); the tunnel; the scoring caps (first 6 kills a mission for trucks, AA and boats).
 
 ## Version history
@@ -1000,3 +1051,4 @@ writable disk.)
 | v1.13 | 2026-11-13 | world 2's gameplay slice (section 11, "World 2's gameplay"; sections 4.1, 4.4, 6, 2, 12): islands and pads and their guide, the island barracks and people (at most 6 out at once), water as a soft stop with a splash, patrol boats (unarmed: no tell frame) and gunboats under the shared ground-threat rules, mission 3 on to mission 4 and mission 6 to the end, the card's brief and strip map, the hall of fame's six missions; the BOB set on the floppy over world 1's BOB chip; **the unused ACE code linked out (325 -> 248 KB)**; not built: wind, winch, radar and jets, the timed freighter, the destroyer (missions 5-6 are mission 4's islands with more gunboats until then) |
 | v1.14 | 2026-11-13 | decided by Paul: Esc in the hall-of-fame initials ends the entry at once and keeps the score with the initials so far (as the 30 s timeout does); it never discards the score and never quits from the entry. Sections 2 (keys) and 10; the kit's `hiscore` technique the same; `tests/hiscoreesc.agk`, `tests/unit/test_logic.c` testHighScoreEsc |
 | v1.15 | 2026-11-13 | decided by Paul, 2026-11-13: open questions 11-14 resolved (patrol boats armed from mission 5 with the tell the art now has; 6 people out at once; 48 px pads on skills 4-5, no nudge, no PAD tick; the mission 5/6 interim accepted for the playtest). Section 6 (the patrol boat row), section 11 (boats, memory: the set gains the 2 tell frames, +1,088 bytes, chip free 98 KB on the a500 in play): `logicPatrolArmed`, `logicPatrolTell` (the gunboat's table + 4), a 30-frame longer rest, the bow gun as muzzle; `tests/w2patrol.agk`, `tests/w2patrol4.agk`, `tests/unit/test_logic.c` testW2Patrol* |
+| v1.16 | 2026-11-16 | Paul's playtest, 2026-11-14 ("mission 4 at skill 3: nobody firing, not enough to dodge, no airplanes"; studio tuning, pending his playtest). Also records what `c4b5fbc` (merged in 9886ad1) did and the spec never said: the patrol boat is armed in mission 4 from skill 3 (`logicPatrolArmed`; unarmed on skill 1-2), boats fire faster from skill 3 (`logicBoatGap`, `s_pBoatCool`: 0 / 0 / 0 / -15 / -25 / -30 frames on the tank's pause). Jets come to world 2 (section 6, "Jets in world 2"; section 7 table; section 11: `BOB_W2_JET`, +1,152 bytes of chip, a500 chip free 98 -> 97 KB, `TPL_MAX` 58; open question 15; section 12): mission 4 skill 3 from the second trip, 3 a trip, scaled up by skill and mission, nothing on skill 1-2 in mission 4, one attack at a time across jets and boats. Every chip allocation in `main.c` is checked and a squeeze hook (Ctrl+L, Q / E) with `tests/chipwinuae.agk` reproduces WinUAE's smaller chip |

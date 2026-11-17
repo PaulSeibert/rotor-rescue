@@ -38,6 +38,7 @@
 #include <ace/managers/sprite.h>
 #include <ace/managers/system.h>
 #include <ace/managers/timer.h>
+#include <proto/exec.h>   // (AllocMem: the chip squeeze test hook)
 #include <ace/utils/custom.h>
 #include <ace/utils/disk_file.h>
 #include <ace/utils/extview.h>
@@ -212,6 +213,19 @@ static UBYTE s_ubFloorStride = 4;   // copper entries a floor line (7 on AGA)
 // mountains, title mountains, hills and ground, loaded back (disk/world1.bin)
 // when the game returns to world 1. The strip's ring is a chip block of its own
 // while the game is in world 2.
+// Chip RAM the game can't run without, and none left (a machine with less of it than the tests have: WinUAE's A500
+// has about 23 KB less free than vAmiga's at the same point): say so on the serial log and stop, rather than
+// read and write through a null pointer (on a 68000 that is the exception vectors). Every chip allocation below is
+// checked; the optional ones degrade instead (the songs, the rotor's wave).
+static void chipFatal(const char *szWhat) {
+	agkPrint("AGK ERR out of chip RAM: ");
+	agkPrint(szWhat);
+	agkPrint("\n");
+	agkDebugFlush();
+	for(;;) continue;
+}
+#define CHIP_CHECK(p, szWhat) do { if(!(p)) chipFatal(szWhat); } while(0)
+
 #define ARENA_OFFS DISK_ART_CLOUDS_OFFS
 #define ARENA_BYTES ((ULONG)(DISK_ART_FENCE_OFFS - DISK_ART_CLOUDS_OFFS))
 // World 2's BOBs (its "set", after its display art in disk/world2.bin) take the rest of the arena
@@ -315,6 +329,20 @@ static void scoresReport(void) {
 static const UBYTE s_pDigitKeys[DIFFICULTY_MAX + 1] = {KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5};
 
 // Ctrl+L, then 0-5 within 2 s: the difficulty (0 = invincible, for testing)
+// Test hook (tests/chipwinuae.agk, Ctrl+L then Q): takes CHIP_SQUEEZE_KB of chip RAM away for the rest of the run, as
+// WinUAE's A500 has about that much less free than vAmiga's at the same point (Rotor Raider's measurement: 111 KB
+// against 134 KB). Ctrl+L then E takes four times as much: how far the margin goes before an allocation fails.
+// (Keys on the splash are not seen by the harness: the floppy loads run under it. Both are pressed at the title.)
+#define CHIP_SQUEEZE_KB 23
+static void chipSqueeze(ULONG ulKb) {
+	// exec's AllocMem straight (a Forbid and a Permit): ACE's memAllocChip wakes the OS up
+	if(AllocMem(ulKb << 10, MEMF_CHIP)) {
+		agkPrint("AGK chip squeezed\n");
+		agkMemReport();
+	}
+	else agkPrint("AGK chip squeeze failed\n");
+}
+
 __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 	static UBYTE s_ubWorldKeyWait;   // Ctrl+L, W: frames left to press 1-6 (a mission, testing)
 	if(keyCheck(KEY_CONTROL) && keyUse(KEY_L)) s_ubSkillKeyWait = 100;
@@ -351,6 +379,16 @@ __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 		s_ubSkillKeyWait = 0;
 		agkState("ghost", s_sGame.ghost);
 		agkEnd();
+		return;
+	}
+	if(keyUse(KEY_Q)) {
+		chipSqueeze(CHIP_SQUEEZE_KB);
+		s_ubSkillKeyWait = 0;
+		return;
+	}
+	if(keyUse(KEY_E)) {
+		chipSqueeze(4 * CHIP_SQUEEZE_KB);
+		s_ubSkillKeyWait = 0;
 		return;
 	}
 	if(keyUse(KEY_N)) {
@@ -1355,7 +1393,7 @@ static UBYTE s_pMsgAnyFix[2];
 static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
-#define TPL_MAX 54
+#define TPL_MAX 58   // the shared BOBs' 28 frames + world 2's 29 (world 1's own: 23); one more than the last template made
 static tAgkBlitArea s_pErase[2][DRAW_MAX];
 static UBYTE s_pErased[2];
 static UBYTE s_ubLastDrawn;          // objects in the last picture (the HUD types less after a busy one)
@@ -1529,6 +1567,7 @@ __attribute__((noinline, optimize("Os"))) static void bobsBind(UBYTE ubWorld) {
 		padCompose();
 		BOB_W2(BOB_PAD_LAMP, PAD_LAMP);
 		BOB_W2(BOB_SPLASH, SPLASH);
+		BOB_W2(BOB_W2_JET, W2_JET);
 		b0 = BOB_W2_FIRST;
 		b1 = BOB_TYPES;
 	}
@@ -2076,16 +2115,17 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 		const tBoat *b = &g->pBoats[i];   // (world 2's boats: a gunboat red, a patrol boat stone)
 		if(b->active) radarDot(pRow[4], logicRadarX2(b->x), b->kind == BOAT_GUN ? 5 : 3);
 	}
-	for(UBYTE i = 0; !isW2 && i < JET_MAX; ++i) {
+	WORD wRadarW = isW2 ? W2_W : WORLD_W;   // (world 2's jets: the same blips on its 4608 px)
+	for(UBYTE i = 0; i < JET_MAX; ++i) {
 		const tJet *pJet = &g->pJets[i];
 		WORD x = pJet->x;
 		if(!pJet->active) continue;
 		if(pJet->warn) {
 			// the incoming-jet warning (its first 2 s): the blip, wider and a row taller, flashes white,
 			// and holds at the radar's edge while the jet is still beyond the battlefield
-			x = x < 0 ? 0 : x >= WORLD_W ? WORLD_W - 1 : x;
+			x = x < 0 ? 0 : x >= wRadarW ? wRadarW - 1 : x;
 			if(g->frame & 8) {
-				UBYTE ubX = logicRadarX(x);
+				UBYTE ubX = isW2 ? logicRadarX2(x) : logicRadarX(x);
 				radarDot(pRow[1], ubX, 7);
 				radarDot(pRow[2], ubX, 7);
 				radarDot(pRow[1], (UBYTE)(ubX + 1), 7);
@@ -2093,7 +2133,7 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 				continue;
 			}
 		}
-		if(x >= 0 && x < WORLD_W) radarDot(pRow[1], logicRadarX(x), 5);
+		if(x >= 0 && x < wRadarW) radarDot(pRow[1], isW2 ? logicRadarX2(x) : logicRadarX(x), 5);
 	}
 	for(UBYTE i = 0; !isW2 && i < MINE_MAX; ++i) {
 		WORD x = g->pMines[i].x;
@@ -2545,6 +2585,7 @@ static UBYTE s_pChopDmaPose[2];   // the pose (frame / 2) each buffer holds (0xF
 static void chopperCreate(void) {
 	for(UBYTE b = 0; b < 2; ++b) {
 		s_pChopDma[b] = memAllocChipClear(2 * CHOP_DMA_BYTES);
+		CHIP_CHECK(s_pChopDma[b], "the chopper's sprite blocks");
 		s_pChopDmaPose[b] = 0xFF;
 	}
 }
@@ -2580,7 +2621,10 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 			isGradients = 1;
 			world2Gradients();
 		}
-		if(!s_pStripMem) s_pStripMem = memAllocChipClear(3 * STRIP_PLANE_BYTES);
+		if(!s_pStripMem) {
+			s_pStripMem = memAllocChipClear(3 * STRIP_PLANE_BYTES);
+			CHIP_CHECK(s_pStripMem, "world 2's terrain ring");
+		}
 		if(agkLoadFile("world2.bin.pk", pArena, WORLD2_BYTES) != WORLD2_BYTES) agkPrint("AGK ERR world2 art missing\n");
 		s_pCloudsBm = &s_sW2Clouds;
 		s_pFarBm = &s_sW2Far;
@@ -2730,6 +2774,7 @@ static void skyCreate(void) {
 	for(UBYTE b = 0; b < 2; ++b) {
 		for(UBYTE k = 0; k < 2; ++k) {
 			s_pDotList[b][k] = memAllocChip(DOT_WORDS * sizeof(UWORD));
+			CHIP_CHECK(s_pDotList[b][k], "the sky's dot lists");
 			skyListFill(s_pDotList[b][k], k ? s_pStars : s_pWisp);
 		}
 	}
@@ -2843,6 +2888,7 @@ static void weatherCreate(void) {
 	for(UBYTE k = 0; k < 3; ++k) {
 		for(UBYTE c = 0; c < 2; ++c) {
 			s_pWxList[k][c] = memAllocChipClear(WX_WORDS * sizeof(UWORD));
+			CHIP_CHECK(s_pWxList[k][c], "the weather's lists");
 			weatherFill(s_pWxList[k][c], s_pWxDots[k][c]);
 		}
 	}
@@ -2971,6 +3017,10 @@ static void rotorSetup(void) {
 
 static void rotorCreate(void) {
 	s_pRotorWave = memAllocChipClear(ROTOR_SAMPLES);  // silent until rotorSetup fills it
+	if(!s_pRotorWave) {
+		agkPrint("AGK ERR out of chip RAM: the rotor's wave (no rotor sound)\n");
+		return;
+	}
 	s_isRotorPending = 1;
 	ptplayerSetChannelsForPlayer(0xF & ~(1 << ROTOR_CHANNEL));
 	volatile struct AudChannel *pAud = &g_pCustom->aud[ROTOR_CHANNEL];
@@ -3075,6 +3125,7 @@ static tBitMap *bandAt(UBYTE ubBand, ULONG ulOffs, UWORD uwW, UWORD uwH) {
 
 __attribute__((noinline, optimize("Os"))) static void diskArtCreate(void) {
 	s_pDiskArt = memAllocChipClear(DISK_ART_ALLOC);
+	CHIP_CHECK(s_pDiskArt, "the art block");
 	s_pChopStore = s_pDiskArt + DISK_ART_CHOPPER_OFFS;
 	s_pCloudsBm = bandAt(0, DISK_ART_CLOUDS_OFFS, ART_CLOUDS_BITMAP_W, ART_CLOUDS_H);
 	s_pMountains = bandAt(1, DISK_ART_MOUNTAINS_OFFS, ART_MOUNTAINS_BITMAP_W, ART_MOUNTAINS_H);
@@ -3089,6 +3140,7 @@ __attribute__((noinline, optimize("Os"))) static void diskArtCreate(void) {
 // the ground under it per mission and line (AGA: 24 bits, split as the sky's)
 __attribute__((noinline, optimize("Os"))) static void floorCreate(void) {
 	s_pPlainFloor = bitmapCreate(PLAIN_FLOOR_W, FLOOR_LINES, 3, BMF_CLEAR | BMF_INTERLEAVED);   // (empty: transparent until titleLoad)
+	CHIP_CHECK(s_pPlainFloor, "the plain's floor");
 	s_sHillsPlay = *s_pHills;
 	for(UBYTE p = 0; p < 3; ++p) s_sHillsPlay.Planes[p] += PLAY_HILLS_ROW * s_pHills->BytesPerRow;
 	for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
@@ -3140,14 +3192,25 @@ __attribute__((optimize("Os"))) void genericCreate(void) {   // (startup: small 
 		TAG_DONE);
 	s_pVPort = vPortCreate(0, TAG_VPORT_VIEW, s_pView, TAG_VPORT_BPP, 6, TAG_DONE);
 
-	for(UBYTE b = 0; b < 2; ++b) s_pFb[b] = bitmapCreate(FB_W, FB_H, FB_BPP, BMF_CLEAR | BMF_INTERLEAVED);
-	for(UBYTE b = 0; b < 2; ++b) s_pHud[b] = bitmapCreate(HUD_W, PLAY_TOP, FB_BPP, BMF_CLEAR | BMF_INTERLEAVED);
+	for(UBYTE b = 0; b < 2; ++b) {
+		s_pFb[b] = bitmapCreate(FB_W, FB_H, FB_BPP, BMF_CLEAR | BMF_INTERLEAVED);
+		CHIP_CHECK(s_pFb[b], "a frame buffer");
+	}
+	for(UBYTE b = 0; b < 2; ++b) {
+		s_pHud[b] = bitmapCreate(HUD_W, PLAY_TOP, FB_BPP, BMF_CLEAR | BMF_INTERLEAVED);
+		CHIP_CHECK(s_pHud[b], "the HUD");
+	}
 	s_pBlankRow = memAllocChipClear(FETCH_BYTES);
+	CHIP_CHECK(s_pBlankRow, "the blank row");
 	// the title logo's memory and the title's copper lists (filled by titleLoad())
 	s_pTitleLogo = memAllocChip(s_ulTitleLogoBytes);
+	CHIP_CHECK(s_pTitleLogo, "the title logo");
 	s_pTitleFixed = (const UWORD *)s_pTitleLogo;
 	s_pTitleRows = (const UWORD (*)[TITLE_LOGO_ROW_REGS])(s_pTitleLogo + TITLE_LOGO_ROWS_OFFS);
-	for(UBYTE b = 0; b < 2; ++b) s_pTitleList[b] = memAllocChip(s_uwTitleCopCount * sizeof(tCopCmd));
+	for(UBYTE b = 0; b < 2; ++b) {
+		s_pTitleList[b] = memAllocChip(s_uwTitleCopCount * sizeof(tCopCmd));
+		CHIP_CHECK(s_pTitleList[b], "the title's copper list");
+	}
 	floorCreate();
 	bobsCreate();
 	hudInit();

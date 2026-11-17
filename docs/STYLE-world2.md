@@ -137,6 +137,13 @@ order: do not mirror the destroyer (3.9 KB), do the pad's dark phase by recolour
 share the gunboat's fire frame with tell 2 (1.2 KB): about 8 KB. The estimated **packed disk size is about 33 KB** (zlib -9 plus 12 % for LHA on the planar data, BOBs at 55 %),
 far below the 150 KB per-world limit, so loading is not the limit, chip RAM is. Not counted: the chopper, hostages, shots, explosions (already resident), the HUD, music.
 
+### Update, the jet (SPEC v1.16, 2026-11-16)
+
+World 2 gets world 1's jet (`art/jet.txt`, 32 x 12, 4 frames: left, right, the nose-and-exhaust flash left and right) as a copy in its set (`[w2_jet]`, 1,152 bytes of
+image and mask, +1,152 of chip). No recolour: its pens are PF1's 1-7, the same in both worlds, and it reads against mission 4's sky and sea (olive and stone with a
+dark outline on the pale morning sky: `tests/w2jets.agk`); mission 6's storm dusk (a dark sky, 0x233 at the top, against the jet's 0x111 outline) was not looked at in a run: check it on WinUAE. Chip levers still unused, with their
+measured bytes: compose only the pad widths the skill uses (-3,040 at skill 3), one destroyer facing (-5,280), a mission's own set at its card.
+
 ## 7 Retro Diffusion
 
 Every request carries `input_palette` = the exact pens of the target layer (the 1-px strips; PF1 for objects, the mission palette for bands) and **never** other games' art.

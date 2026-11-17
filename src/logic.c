@@ -17,7 +17,7 @@ const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_BOMB] = 16, [BOB_SHELL] = 16, [BOB_BOOM] = 32, [BOB_FLAG] = 16,
 	[BOB_SHADOW] = 32, [BOB_SMOKE] = 16,
 	[BOB_W2_BARRACKS] = 51, [BOB_PATROL] = 43, [BOB_GUNBOAT] = 61, [BOB_PAD48] = 48,
-	[BOB_PAD64] = 64, [BOB_PAD80] = 80, [BOB_PAD96] = 96, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24,
+	[BOB_PAD64] = 64, [BOB_PAD80] = 80, [BOB_PAD96] = 96, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 32,
 };
 const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_HANGAR] = 40, [BOB_FENCE] = 32, [BOB_BARRACKS] = 28, [BOB_TANK] = 14,
@@ -25,7 +25,7 @@ const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_BOMB] = 6, [BOB_SHELL] = 4, [BOB_BOOM] = 32, [BOB_FLAG] = 24,
 	[BOB_SHADOW] = 4, [BOB_SMOKE] = 8,
 	[BOB_W2_BARRACKS] = 31, [BOB_PATROL] = 17, [BOB_GUNBOAT] = 30, [BOB_PAD48] = PAD_ROWS,
-	[BOB_PAD64] = PAD_ROWS, [BOB_PAD80] = PAD_ROWS, [BOB_PAD96] = PAD_ROWS, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24,
+	[BOB_PAD64] = PAD_ROWS, [BOB_PAD80] = PAD_ROWS, [BOB_PAD96] = PAD_ROWS, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 12,
 };
 // (world 2's frames are the ones the floppy set carries: art/tools/make_world_disk.py picks
 // them from the art: one wake frame a facing and the patrol boat's tell a facing, the gunboat's fire frame is its second tell's,
@@ -36,7 +36,7 @@ const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_BOMB] = 1, [BOB_SHELL] = 1, [BOB_BOOM] = 5, [BOB_FLAG] = 2,
 	[BOB_SHADOW] = SHADOW_SIZES * 2, [BOB_SMOKE] = 3,
 	[BOB_W2_BARRACKS] = 4, [BOB_PATROL] = 4, [BOB_GUNBOAT] = 6, [BOB_PAD48] = 1,
-	[BOB_PAD64] = 1, [BOB_PAD80] = 1, [BOB_PAD96] = 1, [BOB_PAD_LAMP] = 2, [BOB_SPLASH] = 5,
+	[BOB_PAD64] = 1, [BOB_PAD80] = 1, [BOB_PAD96] = 1, [BOB_PAD_LAMP] = 2, [BOB_SPLASH] = 5, [BOB_W2_JET] = 4,
 };
 
 // World 2's islands (logic.h): the tile map's "island" lines (art/world2/tilemap.txt), px
@@ -472,6 +472,19 @@ static const uint8_t s_pJetsMax[DIFFICULTY_MAX + 1] = {1, 1, 1, 1, 2, 2};
 static const uint8_t s_pJetsMaxM3[DIFFICULTY_MAX + 1] = {2, 1, 1, 2, 2, 2};
 // Jets that may appear in one trip, base pad to base pad (Paul's playtest, 2026-11-12: the far barracks)
 static const uint8_t s_pJetsTrip[DIFFICULTY_MAX + 1] = {5, 2, 3, 5, 6, 6};
+// World 2's jets (SPEC 6, "Jets in world 2"; Paul's playtest, 2026-11-14: mission 4 at skill 3 had no airplanes), by the
+// mission within the world (4 / 5 / 6) and the skill. The trip they begin on (a trip is one delivery home: 255 = none
+// at this skill, so skill 1-2 in mission 4 and skill 1 in mission 5 stay gentle) and the jets that may appear in a trip
+static const uint8_t s_pW2JetsFrom[3][DIFFICULTY_MAX + 1] = {
+	{1, 255, 255, 1, 1, 0},
+	{0, 255, 2, 0, 0, 0},
+	{0, 3, 1, 0, 0, 0},
+};
+static const uint8_t s_pW2JetsTrip[3][DIFFICULTY_MAX + 1] = {
+	{3, 0, 0, 3, 4, 5},
+	{4, 0, 2, 4, 5, 6},
+	{5, 1, 3, 5, 6, 6},
+};
 
 // Every per-difficulty table, for the unit test that index 0 (GODMODE) equals
 // index 3 (normal) in each. A new table goes in this list.
@@ -492,6 +505,12 @@ static const tDiffTable s_pDiffTables[] = {
 	{"jetsMax", s_pJetsMax, sizeof(s_pJetsMax[0])},
 	{"jetsMaxM3", s_pJetsMaxM3, sizeof(s_pJetsMaxM3[0])},
 	{"jetsTrip", s_pJetsTrip, sizeof(s_pJetsTrip[0])},
+	{"w2JetsFromM4", s_pW2JetsFrom[0], sizeof(s_pW2JetsFrom[0][0])},
+	{"w2JetsFromM5", s_pW2JetsFrom[1], sizeof(s_pW2JetsFrom[0][0])},
+	{"w2JetsFromM6", s_pW2JetsFrom[2], sizeof(s_pW2JetsFrom[0][0])},
+	{"w2JetsTripM4", s_pW2JetsTrip[0], sizeof(s_pW2JetsTrip[0][0])},
+	{"w2JetsTripM5", s_pW2JetsTrip[1], sizeof(s_pW2JetsTrip[0][0])},
+	{"w2JetsTripM6", s_pW2JetsTrip[2], sizeof(s_pW2JetsTrip[0][0])},
 };
 
 const tDiffTable *logicDiffTables(uint8_t *pCount) {
@@ -513,7 +532,11 @@ uint8_t logicTankLimit(const tGame *g) {
 }
 
 uint8_t logicJetsOn(const tGame *g) {
-	return !g->world && g->trip + g->mission >= s_pJetsFrom[g->difficulty];
+	if(g->world) {
+		uint8_t ubFrom = s_pW2JetsFrom[g->mission][g->difficulty];
+		return ubFrom != 255 && g->trip >= ubFrom;
+	}
+	return g->trip + g->mission >= s_pJetsFrom[g->difficulty];
 }
 
 uint8_t logicMinesOn(const tGame *g) {
@@ -588,6 +611,7 @@ uint16_t logicGroundDwell(const tGame *g) {
 }
 
 uint8_t logicJetsTripMax(const tGame *g) {
+	if(g->world) return s_pW2JetsTrip[g->mission][g->difficulty];
 	return s_pJetsTrip[g->difficulty];
 }
 
@@ -1350,7 +1374,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 	for(uint8_t i = 0; i < JET_MAX; ++i) {
 		tJet *j = &g->pJets[i];
 		if(!j->active) {
-			if(!logicJetsOn(g) || !c->alive || c->x > BORDER_X + 120 || i >= ubMax) continue;
+			if(!logicJetsOn(g) || !c->alive || c->x > (g->world ? W2_JET_SAFE_X : BORDER_X + 120) || i >= ubMax) continue;
 			if(g->jetsTrip >= logicJetsTripMax(g)) continue;   // this trip's jets are all out
 			if(j->cool) { --j->cool; continue; }
 			// mostly from ahead (where the chopper is heading: you see it coming),
@@ -1423,7 +1447,8 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 			}
 		}
 		else if(c->alive && !j->cool && !j->warn && jetNearlyOnScreen(g, j, ubTell) && (c->landed ? isBombOk : isMissileOk) &&
-			(!g->jetWait || g->jetLast == i) && (ubMax > 1 || !jetEarlierOut(g, i))) {
+			(!g->jetWait || g->jetLast == i) && (ubMax > 1 || !jetEarlierOut(g, i)) &&
+			(!g->world || !g->atkWait || g->atkLast == ATK_JET)) {
 			// start the flash if a shot is on, allowing for how far the jet flies meanwhile
 			// (4 px a frame): a missile needs JET_AHEAD_MIN left at the end, a bomb the chopper under it
 			int16_t wRun = (int16_t)(ubTell * 4);
@@ -1435,6 +1460,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 				++g->jetAttacks;
 				g->jetLast = i;
 				g->jetWait = JET_PAIR_GAP;
+				if(g->world) { g->atkWait = BOAT_ATTACK_GAP; g->atkLast = ATK_JET; }   // (R3: one attack at a time, jets and boats)
 				g->events2 |= EV2_JETTELL;
 			}
 		}
@@ -2114,7 +2140,7 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		if(j->active) {
 			// the tell: the nose and engine glow, blinking every 4 frames
 			uint8_t f = (uint8_t)((j->dir < 0 ? JET_L : JET_R) + ((j->tell & 4) ? 2 : 0));
-			n = drawAdd(pOut, n, (int16_t)(j->x - 16 - cam), (int16_t)(j->y - 6), BOB_JET, f);
+			n = drawAdd(pOut, n, (int16_t)(j->x - 16 - cam), (int16_t)(j->y - 6), g->world ? BOB_W2_JET : BOB_JET, f);
 		}
 	}
 	for(uint8_t i = 0; i < MINE_MAX; ++i) {

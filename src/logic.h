@@ -73,6 +73,9 @@ extern const tIsland g_pIslands[W2_ISLANDS];
 // out as those boarded or killed leave the list. Every person on screen costs about 1.5 % of an A500
 // frame (draw, erase, update, the radar dot), and 16 on a beach beside a pad dropped frames.
 #define W2_OUT_MAX 6
+// World 2's jets (SPEC 6, v1.16): none appear while the chopper is right of this x (the base island's approach: 336 px before its pad),
+// as world 1's stop at BORDER_X + 120
+#define W2_JET_SAFE_X 3800
 
 #define TANK_MAX 5
 #define JET_MAX 2
@@ -92,11 +95,11 @@ enum {
 	BOB_HOSTAGE, BOB_SHOT, BOB_BOMB, BOB_SHELL, BOB_BOOM, BOB_SHADOW, BOB_SMOKE, BOB_HANGAR,
 	BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_JET, BOB_MINE, BOB_FLAG,
 	BOB_W2_BARRACKS, BOB_PATROL, BOB_GUNBOAT, BOB_PAD48, BOB_PAD64, BOB_PAD80, BOB_PAD96,
-	BOB_PAD_LAMP, BOB_SPLASH,
+	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET,
 	BOB_TYPES
 };
 #define BOB_W1_FIRST BOB_FENCE       // world 1's own BOBs: BOB_FENCE .. BOB_FLAG
-#define BOB_W2_FIRST BOB_W2_BARRACKS // world 2's: BOB_W2_BARRACKS .. BOB_SPLASH
+#define BOB_W2_FIRST BOB_W2_BARRACKS // world 2's: BOB_W2_BARRACKS .. BOB_W2_JET (the jet is world 1's, a copy in the set)
 // The chopper's shadow on the track: frame = size * 2 + dither phase (x & 1),
 // size 0 (on the ground) .. SHADOW_SIZES - 1 (high up)
 #define SHADOW_Y (GROUND_Y + 1)
@@ -474,6 +477,7 @@ uint8_t logicPatrolTell(const tGame *g);
 #define BOAT_RANGE 220       // a gunboat's sight: no longer than its shell flies (SHELL_LIFE at 1.5 px a frame)
 #define BOAT_MIN_RANGE 56    // and no shot from closer than this
 #define BOAT_ATTACK_GAP 150  // 3 s between one boat's tell starting and the next boat's
+#define ATK_JET 0xFE         // atkLast when a jet started the attack (world 2: jets and boats take turns)
 #define BOAT_BOTTOM_Y 248    // the waterline: a boat's last row
 #define BOAT_MUZZLE_Y 224    // where a gunboat's shell leaves
 #define SPLASH_FRAMES 20     // the splash's life (5 frames of 4)

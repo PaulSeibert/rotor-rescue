@@ -66,6 +66,10 @@
 #define ART_SPLASH_H 24
 #define ART_SPLASH_FRAMES 5
 #define ART_SPLASH_BITMAP_W 32
+#define ART_W2_JET_W 32
+#define ART_W2_JET_H 12
+#define ART_W2_JET_FRAMES 4
+#define ART_W2_JET_BITMAP_W 32
 #define WORLD2_W2_BARRACKS_OFFS 42720
 #define WORLD2_W2_BARRACKSMASK_OFFS 45696
 #define WORLD2_PATROL_OFFS 48672
@@ -79,12 +83,14 @@
 #define WORLD2_PAD_LAMPMASK_OFFS 60760
 #define WORLD2_SPLASH_OFFS 60824
 #define WORLD2_SPLASHMASK_OFFS 62264
-#define WORLD2_BYTES 63704
+#define WORLD2_W2_JET_OFFS 63704
+#define WORLD2_W2_JETMASK_OFFS 64280
+#define WORLD2_BYTES 64856
 // the pads' composed BOBs (padCompose): chip past the file's end, one a width, 3 planes, 46 rows, no mask
-#define WORLD2_PAD48_OFFS 63704
-#define WORLD2_PAD64_OFFS 64536
-#define WORLD2_PAD80_OFFS 65640
-#define WORLD2_PAD96_OFFS 67024
+#define WORLD2_PAD48_OFFS 64856
+#define WORLD2_PAD64_OFFS 65688
+#define WORLD2_PAD80_OFFS 66792
+#define WORLD2_PAD96_OFFS 68176
 #define WORLD2_PAD_COMPOSED_BYTES 4976
 
 // Per mission (4, 5, 6): PF2 pens 1-7 (index 0 unused), dark to light; the sky gradient
