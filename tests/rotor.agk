@@ -9,15 +9,17 @@ wait 50
 mark idle_end
 expect-sound idle idle_end
 expect-serial "rotorPer=845"
+# v4: Paula plays the loop at twice the rate, so its period is half the logic's (the images move to 12 kHz)
+expect-serial "rotorPer=845 rotorHw=423 "
 press up 6
 mark takeoff
 wait 90
 mark takeoff_end
 expect-sound takeoff takeoff_end
-expect-serial "rotorPer=[34][0-9][0-9] "
+expect-serial "rotorPer=[34][0-9][0-9] rotorHw=1[5-9][0-9] "
 wait 250
 mark hover
 wait 50
 mark hover_end
 expect-sound hover hover_end
-expect-serial "rotorPer=591 "
+expect-serial "rotorPer=591 rotorHw=296 "

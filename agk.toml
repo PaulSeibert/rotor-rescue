@@ -6,7 +6,7 @@ boot = "AGK ready"                                   # serial text that means "f
 unit_sources = ["src/logic.c", "src/hiscore.c"]                     # host-compiled for agk unit (no Amiga headers!)
 
 [lint]
-allow = ["logicSkyColor", "logicSkyColorDither", "logicRotorThumpsX10", "copperMission", "copperWriteList", "logicGrad24", "bobsCrop", "agkBlitBob"]   # host-test-only helpers (the skies, the thump rate); copperMission and copperWriteList (-Os), the gradients and the BOBs' templates and crop run once at a mission's or a world's start
+allow = ["logicSkyColor", "logicSkyColorDither", "logicRotorThumpsX10", "copperMission", "copperWriteList", "logicGrad24", "bobsCrop", "agkBlitBob", "logicRotorSynth"]   # host-test-only helpers (the skies, the thump rate); copperMission and copperWriteList (-Os), the gradients and the BOBs' templates and crop run once at a mission's or a world's start; logicRotorSynth makes the rotor loop once, after the splash (it was rotorSynth in main.c, a *Setup helper lint left out)
 
 [cmake]                                              # build options, see CMakeLists.txt
 # ACE_BOB_WRAP_Y = false
