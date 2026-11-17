@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""ROTOR RESCUE's rotor: the loop main.c's rotorSynth() makes at startup, with
-the same integer arithmetic (keep the two in step), and WAV previews of how it
-plays on Paula in the game.
+"""ROTOR RESCUE's rotor: the loop logic.c's logicRotorSynth() makes at startup, with
+the same integer arithmetic (keep the two in step: `--check` compiles logic.c and
+compares them), and WAV previews of how it plays on Paula in the game.
+
+v4 (SPEC section 9, Paul's playtest of 2026-11-14): make_v4() is the loop the game plays now: made at
+twice the rate (Paula's period is half the logic's, so the sample-rate lines sit at 12 kHz, not 6),
+a softer, lower slap. make_new() is v3's loop (one rate, 4 passes of 1200), kept to compare and for
+the v3 previews.
 
     python3 sound/tools/make_rotor.py [OUTDIR]            # the loop + analysis
     python3 sound/tools/make_rotor.py OUTDIR --render     # + the in-game previews
@@ -109,6 +114,65 @@ def make_new(verbose=False):
     return out, peak
 
 
+OS4 = 2                      # v4: the loop is stored at this many times the logic's rate
+PASS4 = PASS * OS4           # 2400 samples a blade pass as stored
+PASSES4 = 2
+N4 = PASS4 * PASSES4         # 4800 bytes of chip RAM, as v3's
+A1_4 = (32722, 32614, 32396)   # 2 r cos w, Q14, for 12003 Hz (q14(f0, tau, 12003))
+A2_4 = (16352, 16306, 16248)   # r^2, Q14
+KICK_4 = (750, 1150, 600)
+STRENGTH_4 = (70, 60)
+
+
+def make_v4(verbose=False):
+    """exactly logicRotorSynth()'s integer loop (logic.c): a warm-up pass (the last pass again), then the loop"""
+    lfsr = 0x1D2B
+    y1 = [0, 0, 0]
+    y2 = [0, 0, 0]
+    lp1 = lp1b = lp2 = rum = 0
+    raw = []
+    for run in range(PASSES4 + 1):
+        k = run - 1 if run else PASSES4 - 1
+        for t in range(PASS4):
+            lfsr = lfsr_step(lfsr)
+            noise = (lfsr & 0xFF) - 128
+            thump = 0
+            for j in range(3):
+                y = asr(A1_4[j] * y1[j] - A2_4[j] * y2[j], 14) + (KICK_4[j] if t == 0 else 0)
+                y2[j], y1[j] = y1[j], y
+                thump += y
+            thump = asr(thump, 4)
+            lp1 += asr((noise * 16 - lp1) * 40, 8)
+            lp1b += asr((lp1 - lp1b) * 40, 8)
+            lp2 += asr((lp1b - lp2) * 12, 8)
+            band = asr(lp1b - lp2, 2)
+            ts = t - 20
+            env = 0 if ts < 0 or ts >= 300 else (ts * 16 if ts < 16 else 256 - asr((ts - 16) * 230, 8))
+            slap = asr(asr(band * env, 7) * STRENGTH_4[k], 7)
+            rum += asr(noise * 16 - rum, 7)
+            if run:
+                raw.append(thump + slap + asr(rum, 4))
+    peak = max(abs(v) for v in raw) or 1
+    scale = (126 << 8) // peak
+    out = [max(-128, min(127, asr(v * scale, 8))) for v in raw]
+    if verbose:
+        print(f"v4 raw peak {peak}, scale {scale}, loop peak {max(abs(v) for v in out)}")
+    return out, peak
+
+
+def check_against_c():
+    """compile logic.c (+ hiscore.c) with a host stub, dump logicRotorSynth's bytes, compare with make_v4()"""
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src")
+    prog = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rotor_dump.c")
+    exe = "/tmp/rotor_dump_check"
+    subprocess.run(["gcc", "-I", src, "-o", exe, prog, os.path.join(src, "logic.c"), os.path.join(src, "hiscore.c")], check=True)
+    c = [v - 256 if v > 127 else v for v in subprocess.run([exe], capture_output=True, check=True).stdout]
+    py, _ = make_v4()
+    same = c == py
+    print("logicRotorSynth (C) and make_v4 (Python):", "identical, %d bytes" % len(c) if same else "DIFFER at %d" % next(i for i, (a, b) in enumerate(zip(c, py)) if a != b))
+    return 0 if same else 1
+
+
 def make_old():
     """the loop commit 6ab2ff8 made (3008 samples, period 428), for comparison"""
     pass_, passes = 752, 4
@@ -165,14 +229,17 @@ def write_wav16(path, data, rate=44100):
         w.writeframes(struct.pack("<%dh" % len(data), *data))
 
 
-def render(loop, sched, rate=44100):
+def render(loop, sched, rate=44100, os_=1):
     """Paula playing the loop: a sample-and-hold of the 8-bit bytes at the
     period of the moment (sched = [(period, volume)] a frame, 50 a second), times
-    volume / 64; the DMA position runs on across frames."""
+    volume / 64; the DMA position runs on across frames. os_: the loop's oversampling
+    (v4: 2, Paula's period is the logic's (period + 1) // 2, as logicRotorHwPeriod)."""
     out = []
     pos = 0.0
     n = len(loop)
     for per, vol in sched:
+        if os_ > 1:
+            per = (per + os_ // 2) // os_
         step = (CLOCK / max(per, 124)) / rate
         for _ in range(rate // 50):
             out.append(int(loop[int(pos) % n] * 256 * vol / 64))
@@ -201,6 +268,8 @@ def old_schedule(kind):
 
 
 def main():
+    if "--check" in sys.argv:
+        sys.exit(check_against_c())
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     outdir = args[0] if args else os.path.join(os.path.dirname(__file__), "..", "..", "build", "rotor")
     os.makedirs(outdir, exist_ok=True)

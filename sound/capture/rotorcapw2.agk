@@ -1,0 +1,35 @@
+# Capture scenario: world 2 (Ctrl+L, W, 4: a floppy load) then a flight, for the rotor's audio.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x04
+wait-serial "AGK world 2 loaded" 400
+key 0x63
+key 0x28
+wait 5
+key 0x02
+wait 5
+mark card
+wait 60
+press fire 2
+wait 50
+mark idle
+wait 40
+mark idle_end
+press up 8
+mark takeoff
+wait 110
+mark takeoff_end
+wait 100
+mark hover
+wait 60
+mark hover_end
+hold right
+wait 100
+mark cruise_end
+release
+wait 40
+mark fin

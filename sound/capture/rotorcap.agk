@@ -1,0 +1,47 @@
+# Capture scenario: a scripted flight for the rotor's audio (marks name each state; the
+# analysis tool slices audio.wav at them). Empty chopper, world 1, no music in play.
+wait-serial "AGK t0" 1000
+press fire 2
+wait 125
+mark idle
+wait 60
+mark idle_end
+press up 8
+mark takeoff
+wait 110
+mark takeoff_end
+wait 150
+mark hover
+wait 60
+mark hover_end
+mark cruise
+hold right
+wait 130
+mark cruise_end
+release
+wait 40
+mark coast
+press up 30
+mark climb
+hold up
+wait 40
+mark climb_end
+release
+wait 30
+mark hover2
+wait 40
+mark hover2_end
+hold right
+wait 30
+mark cruise2
+hold down
+wait 30
+mark descend_end
+release
+wait 20
+press fire 1
+wait 5
+mark cannon
+wait 60
+mark cannon_end
+wait 100
