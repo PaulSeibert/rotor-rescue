@@ -2892,71 +2892,18 @@ __attribute__((noinline)) static void weatherUpdate(void) {
 }
 
 // ------------------------------------------------------------------ rotor ---
-// Paula channel 2: the rotor, a loop made at startup (sound/tools/make_rotor.py
-// previews it with the same integer arithmetic: keep the two in step). A deep
-// blade thump, like a Huey's whop-whop-whop: on every blade pass three damped
-// resonators (~55, ~130 and ~230 Hz: the weight and the body small speakers
-// still play), a short band-passed noise slap (~250 Hz-1.2 kHz, under a fifth of
-// the thump), a quiet rumble between. Four passes of ROTOR_PASS samples a loop,
-// each a little different. The rate is the Paula period (logicRotorPeriod):
-// 5 thumps a second at hover, 6.5 flat out, a louder, faster spin-up at
-// lift-off. SPEC section 9.
+// Paula channel 2: the rotor, a loop made at startup (logicRotorSynth, logic.c: the same integer
+// arithmetic as sound/tools/make_rotor.py, which previews it: keep the two in step). A deep blade
+// thump, like a Huey's whop-whop-whop: on every blade pass three damped resonators (~55, ~130 and
+// ~230 Hz: the weight and the body small speakers still play), a soft band-passed noise slap, a quiet
+// rumble. Two passes of ROTOR_LOOP_PASS samples a loop, each a little different. The rate is the
+// Paula period, the logic's (logicRotorPeriod: 5 thumps a second at hover, 6.5 flat out, a faster
+// spin-up at lift-off) divided by ROTOR_OS: the loop is stored at twice that rate, so Paula's
+// sample-and-hold images sit at 12 kHz instead of gliding through the ears' keenest 4-8 kHz.
+// SPEC section 9 (rotor v4).
 
 #define ROTOR_CHANNEL 2
-#define ROTOR_PASSES 4
-#define ROTOR_SAMPLES (ROTOR_PASS * ROTOR_PASSES)   // 4800 bytes of chip RAM
 static BYTE *s_pRotorWave;   // chip RAM
-
-// One run of the loop's synthesis: a warm-up pass (the last pass again, so the
-// resonators' tails are in the first one: it loops seamlessly), then the loop.
-// wScale 0: returns the peak; else writes the samples times wScale / 256.
-static LONG rotorSynth(WORD wScale) {
-	// resonators, Q14 (a1 = 2 r cos w, a2 = r^2), and their kicks
-	static const WORD pA1[3] = {32650, 32311, 31559};
-	static const WORD pA2[3] = {16320, 16229, 16113};
-	static const WORD pKick[3] = {1500, 2300, 2000};
-	static const UBYTE pStrength[ROTOR_PASSES] = {96, 84, 92, 78};
-	UWORD uwLfsr = 0x1D2B;
-	LONG pY1[3] = {0, 0, 0}, pY2[3] = {0, 0, 0};
-	LONG lLp1 = 0, lLp2 = 0, lRum = 0, lMax = 0;
-	for(UWORD n = 0; n < ROTOR_PASS + ROTOR_SAMPLES; ++n) {
-		UWORD i = n < ROTOR_PASS ? (UWORD)(ROTOR_SAMPLES - ROTOR_PASS + n) : (UWORD)(n - ROTOR_PASS);
-		UBYTE k = (UBYTE)(i / ROTOR_PASS);
-		UWORD t = (UWORD)(i - k * ROTOR_PASS);
-		UWORD uwLsb = uwLfsr & 1;
-		uwLfsr >>= 1;
-		if(uwLsb) uwLfsr ^= 0xB400;
-		LONG lNoise = (LONG)(uwLfsr & 0xFF) - 128;
-		// the thump: three resonators kicked at the pass start (16 x 16 multiplies: MULS.W)
-		LONG lThump = 0;
-		for(UBYTE j = 0; j < 3; ++j) {
-			LONG lY = ((((LONG)pA1[j] * (WORD)pY1[j]) - ((LONG)pA2[j] * (WORD)pY2[j])) >> 14) + (t == 0 ? pKick[j] : 0);
-			pY2[j] = pY1[j];
-			pY1[j] = lY;
-			lThump += lY;
-		}
-		lThump >>= 4;
-		// the slap: noise band-passed (a fast low-pass minus a slow one), enveloped
-		lLp1 += (lNoise * 16 - lLp1) >> 1;
-		lLp2 += (lLp1 - lLp2) >> 2;
-		LONG lBand = (lLp1 - lLp2) >> 2;
-		WORD wTs = (WORD)t - 10;
-		LONG lEnv = wTs < 0 || wTs >= 150 ? 0 : wTs < 8 ? (LONG)wTs * 32 : 256 - (((LONG)(WORD)(wTs - 8) * (WORD)461) >> 8);
-		LONG lSlap = (((LONG)(WORD)lBand * (WORD)lEnv >> 7) * (WORD)pStrength[k]) >> 7;
-		// the rumble: noise low-passed hard, quiet
-		lRum += (lNoise * 16 - lRum) >> 6;
-		LONG v = lThump + lSlap + (lRum >> 4);
-		if(n < ROTOR_PASS) continue;
-		if(!wScale) {
-			LONG lAbs = v < 0 ? -v : v;
-			if(lAbs > lMax) lMax = lAbs;
-			continue;
-		}
-		LONG s = ((LONG)(WORD)v * wScale) >> 8;
-		s_pRotorWave[i] = (BYTE)(s > 127 ? 127 : s < -128 ? -128 : s);
-	}
-	return lMax;
-}
 
 static UBYTE s_isRotorPending;
 
@@ -2964,8 +2911,7 @@ static UBYTE s_isRotorPending;
 // at startup it pushed AROS past the harness's boot window)
 static void rotorSetup(void) {
 	s_isRotorPending = 0;
-	LONG lPeak = rotorSynth(0);
-	rotorSynth((WORD)((126L << 8) / (lPeak ? lPeak : 1)));   // peak at ~124
+	logicRotorSynth((int8_t *)s_pRotorWave);
 	agkPerfSkip();                                    // (more than a frame of work, on purpose)
 }
 
@@ -2977,7 +2923,7 @@ static void rotorCreate(void) {
 	pAud->ac_ptr = (UWORD *)s_pRotorWave;
 	pAud->ac_len = ROTOR_SAMPLES / 2;
 	pAud->ac_vol = 0;
-	pAud->ac_per = 591;   // (the hover; rotorUpdate takes over from the first frame)
+	pAud->ac_per = logicRotorHwPeriod(591);   // (the hover; rotorUpdate takes over from the first frame)
 	g_pCustom->dmacon = DMAF_SETCLR | (DMAF_AUD0 << ROTOR_CHANNEL);
 }
 
@@ -2985,7 +2931,7 @@ static void rotorCreate(void) {
 __attribute__((noinline)) static void rotorUpdate(void) {
 	const tGame *g = &s_sGame;
 	volatile struct AudChannel *pAud = &g_pCustom->aud[ROTOR_CHANNEL];
-	pAud->ac_per = logicRotorPeriod(g);
+	pAud->ac_per = logicRotorHwPeriod(logicRotorPeriod(g));
 	pAud->ac_vol = s_isPaused ? 0 : logicRotorVolume(g);
 }
 
@@ -3308,6 +3254,7 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 		agkState("trip", g->trip);
 		agkState("score", (LONG)g->score);
 		agkState("rotorPer", logicRotorPeriod(g));
+		agkState("rotorHw", logicRotorHwPeriod(logicRotorPeriod(g)));
 		agkState("rotorVol", logicRotorVolume(g));
 		agkEnd();
 		if(g->demo && g->state != ubStateBefore) agkPrint("AGK demo\n");

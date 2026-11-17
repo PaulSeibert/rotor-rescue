@@ -2219,6 +2219,136 @@ static void testRotorDamagedWobbleIsGentle(void) {
 	CHECK(iMin >= 501 + 32);                         // always lower than the empty cruise
 }
 
+// ---- rotor v4 (Paul's playtest, 2026-11-14: "tinny or harsh in flight, like an alarm bell") ----
+// What WinUAE and vAmiga showed: the rotor is the approved loop and it is never stolen or
+// restarted, but at 6 kHz (period 591) Paula's sample-and-hold puts bright, gliding lines at the
+// sample rate (4.2 kHz idling, 6 kHz hovering, 7.8 flat out; they sweep during the spin-up and
+// wobble when damaged) over the thump, and the loop's slap sat at 250 Hz-1.2 kHz where ears and small
+// speakers are keenest. v4: the loop is made at twice the rate (ROTOR_OS) so Paula's period is half
+// the logical one (every approved period and thump rate stays as it was) and the lines move to 12 kHz,
+// the slap is softer and lower.
+
+static double cosT(double w) {            // (no libm on the host build) w in 0..pi
+	double t = 1, s = 1, w2 = w * w;
+	for(int i = 1; i < 14; ++i) { t *= -w2 / ((2 * i - 1) * (2 * i)); s += t; }
+	return s;
+}
+
+static double aWeightPower(double f) {    // IEC 61672 A-weighting as a power ratio (linear, 1 kHz = 1)
+	double f2 = f * f, a = 12194.0 * 12194.0;
+	double r = (a * a * f2 * f2 * f2 * f2) / ((f2 + 20.6 * 20.6) * (f2 + 20.6 * 20.6) * (f2 + 107.7 * 107.7) * (f2 + 737.9 * 737.9) * (f2 + a) * (f2 + a));
+	double f1 = 1000.0 * 1000.0;
+	double r1 = (a * a * f1 * f1 * f1 * f1) / ((f1 + 20.6 * 20.6) * (f1 + 20.6 * 20.6) * (f1 + 107.7 * 107.7) * (f1 + 737.9 * 737.9) * (f1 + a) * (f1 + a));
+	return r / r1;
+}
+
+// shares of the loop's power (percent) as played at Paula period uwHwPeriod: plain below 120 Hz and
+// above 300 Hz, and A-weighted (what the ear counts) for 250 Hz-1 kHz and above 1 kHz
+static void rotorLoopShares(const int8_t *pLoop, uint16_t uwHwPeriod, double *pLow, double *pOver300, double *pAmid, double *pAhigh) {
+	double dRate = (double)ROTOR_CLOCK / uwHwPeriod, dMean = 0;
+	for(int i = 0; i < ROTOR_SAMPLES; ++i) dMean += pLoop[i];
+	dMean /= ROTOR_SAMPLES;
+	double dAll = 0, dLow = 0, dOver = 0, dAtot = 0, dAmid = 0, dAhigh = 0;
+	for(int k = 1; k < ROTOR_SAMPLES / 2; ++k) {        // Goertzel for bin k (the loop repeats, so bins are exact)
+		double w = 2 * 3.14159265358979 * k / ROTOR_SAMPLES;
+		double c = (w <= 3.14159265358979) ? cosT(w) : -cosT(6.28318530717959 - w), q0, q1 = 0, q2 = 0;
+		for(int i = 0; i < ROTOR_SAMPLES; ++i) { q0 = 2 * c * q1 - q2 + (pLoop[i] - dMean); q2 = q1; q1 = q0; }
+		double p = q1 * q1 + q2 * q2 - 2 * c * q1 * q2;
+		double f = dRate * k / ROTOR_SAMPLES, a = p * aWeightPower(f);
+		if(f >= 20) { dAll += p; dAtot += a; }
+		if(f >= 40 && f < 120) dLow += p;
+		if(f >= 300) dOver += p;
+		if(f >= 250 && f < 1000) dAmid += a;
+		if(f >= 1000) dAhigh += a;
+	}
+	*pLow = 100 * dLow / dAll;
+	*pOver300 = 100 * dOver / dAll;
+	*pAmid = 100 * dAmid / dAtot;
+	*pAhigh = 100 * dAhigh / dAtot;
+}
+
+static void testRotorHardwarePeriodIsOversampled(void) {
+	CHECK(ROTOR_OS >= 2);
+	uint16_t uwPrev = 0;
+	for(uint16_t per = 290; per <= 900; ++per) {
+		uint16_t hw = logicRotorHwPeriod(per);
+		CHECK(hw >= 124);                                          // Paula's shortest period
+		CHECK(hw >= uwPrev);                                       // monotonic: a lower pitch never jumps up
+		uwPrev = hw;
+		// the thump rate (loop pass * period) is what the logic decided, to 1 %
+		long lLogic = ROTOR_CLOCK * 100L / ((long)per * ROTOR_PASS);
+		long lHw = ROTOR_CLOCK * 100L / ((long)hw * ROTOR_LOOP_PASS);
+		CHECK(lHw >= lLogic * 99 / 100 && lHw <= lLogic * 101 / 100);
+	}
+	// the sample rate the images sit at: >= 11.5 kHz hovering, >= 8 kHz idling (was 6.0 and 4.2)
+	CHECK(ROTOR_CLOCK / logicRotorHwPeriod(591) >= 11500);
+	CHECK(ROTOR_CLOCK / logicRotorHwPeriod(845) >= 8000);
+	// what the game writes to Paula follows the logic: hover 5 a second, idle 3.5
+	newGame();
+	flyAt(1500, 120);
+	step(NONE, 150);
+	CHECK(logicRotorPeriod(&g) == 591);
+	int iHw = logicRotorThumpsX10(logicRotorPeriod(&g));
+	CHECK(iHw >= 49 && iHw <= 51);
+}
+
+static void testRotorLoopIsDeepAndSoft(void) {
+	static int8_t s_pLoop[ROTOR_SAMPLES];
+	logicRotorSynth(s_pLoop);
+	int iPeak = 0;
+	for(int i = 0; i < ROTOR_SAMPLES; ++i) iPeak = s_pLoop[i] < 0 ? (-s_pLoop[i] > iPeak ? -s_pLoop[i] : iPeak) : (s_pLoop[i] > iPeak ? s_pLoop[i] : iPeak);
+	CHECK(iPeak >= 110 && iPeak <= 127);                           // uses the 8 bits, never wraps
+	CHECK(absi(s_pLoop[0] - s_pLoop[ROTOR_SAMPLES - 1]) <= 16);    // the loop closes without a click
+	double dLow, dOver, dMid, dHigh;
+	rotorLoopShares(s_pLoop, logicRotorHwPeriod(591), &dLow, &dOver, &dMid, &dHigh);
+	CHECK(dLow >= 80);       // the body: 40-120 Hz (v3 loop: 84 %)
+	CHECK(dOver <= 0.3);     // under 0.3 % of the power above 300 Hz (v3 loop: 0.51 %)
+	CHECK(dMid <= 14);       // what the ear counts at 250 Hz-1 kHz (v3 loop: 27 %)
+	CHECK(dHigh <= 3);       // ... and above 1 kHz (v3 loop: 11 %)
+	// the same holds at the idle's and the flat-out rate (the same samples, another pitch)
+	rotorLoopShares(s_pLoop, logicRotorHwPeriod(845), &dLow, &dOver, &dMid, &dHigh);
+	CHECK(dMid <= 22 && dHigh <= 5);     // idling: everything a third lower in pitch (v3 loop: 35 % and 12 %)
+	rotorLoopShares(s_pLoop, logicRotorHwPeriod(455), &dLow, &dOver, &dMid, &dHigh);
+	CHECK(dMid <= 22 && dHigh <= 3);     // flat out (v3 loop: 33 % and 11 %)
+}
+
+// States (Paul: "slight pitch and tempo adjustments for different states"): descending settles the
+// rotor a little lower and slower than the hover (never above it), the empty take-off spin-up peaks at
+// 8 a second (it was 11.8, a buzz), and everything else stays as approved
+static void testRotorDescendSettlesLower(void) {
+	newGame();
+	flyAt(1500, 60);
+	step(NONE, 150);
+	int iHoverPer = logicRotorPeriod(&g), iHoverVol = logicRotorVolume(&g);
+	CHECK(iHoverPer == 591 && iHoverVol == 40);
+	int iMaxPer = 0;
+	for(int i = 0; i < 30; ++i) {
+		step((tInput){.dy = 1}, 1);
+		if(logicRotorPeriod(&g) > iMaxPer) iMaxPer = logicRotorPeriod(&g);
+		CHECK(logicRotorVolume(&g) <= iHoverVol);
+	}
+	CHECK(iMaxPer >= iHoverPer + 8);                               // you can hear it settle ...
+	CHECK(iMaxPer <= iHoverPer + 30);                              // ... a few percent, not another engine
+	// and climbing is still quicker, never lower
+	newGame();
+	flyAt(1500, 150);
+	step(NONE, 150);
+	step((tInput){.dy = -1}, 20);
+	CHECK(logicRotorPeriod(&g) < iHoverPer - 20);
+}
+
+static void testRotorEmptyTakeoffIsNoBuzz(void) {
+	newGame();
+	step(NONE, 100);
+	int iPeak = 0;
+	for(int i = 0; i < 200; ++i) {
+		step((tInput){.dy = i < 25 ? -1 : 0}, 1);             // a second of up, as a player lifts off (the climb quickens it too)
+		if(thumpsX10() > iPeak) iPeak = thumpsX10();
+	}
+	CHECK(iPeak >= 70);                                            // still a lively spin-up ...
+	CHECK(iPeak <= 80);                                            // ... at 8 a second at the most (v3 with a climb: 9.8)
+}
+
 // Effects: none plays twice inside its gap, while damaged or not (the gate main.c uses)
 static void testSfxGapsWhileDamaged(void) {
 	for(int isDmg = 0; isDmg < 2; ++isDmg) {
@@ -3178,6 +3308,10 @@ int main(void) {
 	testRotorLoadedAndDamagedNeverFasterThanEmpty();
 	testRotorHeavyLiftoffIsCalm();
 	testRotorDamagedWobbleIsGentle();
+	testRotorHardwarePeriodIsOversampled();
+	testRotorLoopIsDeepAndSoft();
+	testRotorDescendSettlesLower();
+	testRotorEmptyTakeoffIsNoBuzz();
 	testSfxGapsWhileDamaged();
 	testFirstHitDamages();
 	testDamagedFliesSlower();

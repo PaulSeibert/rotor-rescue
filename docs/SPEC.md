@@ -644,7 +644,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 
 | channel | in play | title, card, hall of fame, jingles |
 |---|---|---|
-| 2 | the rotor loop, always (a 4800-byte looped blade thump; period 591 = 6 kHz at hover) | silent |
+| 2 | the rotor loop, always (a 4800-byte looped blade thump, v4: stored at twice the rate, so Paula's period is half the logic's, 296 = 12 kHz at hover) | silent |
 | 0, 1, 3 | effects: `sfx_channels = [1, 3]`; **no music in play** | music |
 
 - Music plays on 0, 1, 3 only (the player's mask excludes 2). Effects borrow 1 and 3.
@@ -659,6 +659,56 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   26 %). The take-off spin-up (3 less per frame for 100 frames, up to 300, and +10 volume) is unchanged. Unit tests
   `testRotorRateFollowsSpeedAndClimb` (6-6.5 flat out, 5.5-6 at cruise, no more than 6.5 climbing flat out, volume at most hover + 5). Previews:
   `sound-preview/rotor-v2/` (hover, cruise, full, take-off; `v1-previous-*` is the 2026-11-12 morning version).
+- **Rotor v4 (Paul's playtest, 2026-11-14, WinUAE: "the rotor sound in flight is still really bad: too tinny or harsh in flight; it sounds
+  like an alarm bell - it should be a low thump that is huey-like and satisfying, chop-chop-chop, and slight pitch / tempo adjustments for
+  different states. I liked the v3 sounds, it seemed like I was not hearing them"; branch `rotor-sound`, pending Paul's ears).**
+  *What he heard, measured.* The game was played in WinUAE with Paul's own `first.uae` settings (no sound keys: defaults) from his
+  `first.adf` of 2026-11-14 15:47, with real key events and the default playback device recorded (WASAPI loopback; the windows were named
+  `RRDBG-rotor-*`), through a scripted flight (idle, lift-off, hover, cruise, climb, descend, cannon) and a scripted whole rescue; and in
+  vAmiga (`agk run tests/rotorcap.agk`, `rotorcapw2.agk` for world 2, `rescue.agk`). Results:
+  - **v3 is what plays.** Period and volume in the serial lines are the unit-tested numbers (hover 591/40 = 5.0 thumps a second, cruise 6.2,
+    climb 6.1, idle 3.4, loaded and damaged lower), the thump rate measured in the recordings agrees (5.0 / 6.2 / 6.2, idle 3.5), and the waveform
+    of one blade pass in WinUAE is the synthesised loop through a sample-and-hold. The A500 profile, world 2 (a floppy load first) and
+    the title music on or off make no difference: **music is off during flight** (`musicFor` stops it at lift-off), so there is nothing to
+    mix with.
+  - **Nothing steals the rotor's channel.** `ptplayerSetMusicChannelMask(0x5)` keeps effects on 1 and 3 and `ptplayerSetChannelsForPlayer(0xB)`
+    keeps the player off 2; across a whole rescue in WinUAE (16 boards, 16 saves, cannon, barracks) the 5-a-second comb never drops out, restarts
+    or changes channel; `ptplayerStop` leaves 2 alone. (Checked because the loop is started once, at boot, outside ACE's DMA bookkeeping.)
+  - **What is wrong with v3 in the player's ears** (A-weighted, IEC 61672, as shares of the total, rotor channel, real WinUAE play):
+    the loop's slap and mid band count for 27-36 % at 250 Hz-1 kHz and about 8 % at 1-3 kHz in cruise, climb and hover: "the crack", not
+    the thump, is most of what the ear gets (the 40-120 Hz body is 84 % of the *power* but weighs almost nothing in A, and a laptop speaker
+    plays none of it). On top, Paula's sample-and-hold has **no filter in WinUAE** and v3 stores the loop at 6.0 kHz at hover (period 591;
+    4.2 kHz idling, 7.8 flat out), so its sampling-rate lines (5.9-6.1 kHz hovering) are bright lines in the spectrogram that **glide** with
+    every speed change (10 kHz to 4 kHz through the spin-up, 5.7-8 kHz in cruise and climb), stand steady at idle (4.2 and 8.4 kHz) and wobble
+    with the damaged pitch: 19 dB over their surroundings in the vAmiga hover. A gliding whistle in the keenest part of hearing over a
+    5-a-second thump is what an alarm sounds like. (vAmiga and the v3 preview WAVs have the same lines; the preview WAVs are mono and have
+    no effects, which may be why they sounded right: not established.)
+  - **Effects, not the rotor, are the other alarm-like thing in the recordings** and were left alone (a design call, below): `board` (square
+    880/1320 Hz, one a person, up to 16 in a row), `saved` (a pulse25 arpeggio 1047-1568 Hz, 16 in a row at the hangar) and `jetwarn` (square,
+    1.8-2.3 kHz) weigh 45-70 % in A at 1-3 kHz and run 3-7 dB louder than the rotor (rms -17..-20 dBFS against -23): bell-like. Paula channel 2
+    is the right channel only (the rotor is 14 dB lower in the left: WinUAE's 70 % stereo separation).
+  *The fix, in the loop and the rules, not in the approved numbers* (empty hover 591/40 and cruise 501/42 are pinned bit for bit by
+  `testRotorApprovedEmptyStaysExactly`, which still passes unchanged):
+  - **The loop is made at twice the rate** (`ROTOR_OS` 2, two passes of 2400 samples, the same 4800 bytes of chip RAM): Paula's period is the logic's
+    divided by two (`logicRotorHwPeriod`, (p+1)/2: hover 296, idle 423, flat out 228), so every thump rate in this section is unchanged (to 0.2 %) and
+    the sampling lines sit at 12 kHz hovering (8.4 idling, 15.6 flat out), 6 dB weaker and out of the ears' keenest range. The serial state line
+    prints `rotorHw=`. The loop is made by `logicRotorSynth` (logic.c, unit-tested; `make_rotor.py --check` compares it with its Python mirror byte for byte).
+  - **A softer, lower slap** (two low-pass poles, about 120-450 Hz, strength 70/60 of 128 against 96/84/92/78 at 250 Hz-1.2 kHz) and the 230 Hz resonator
+    kicked less than a third as hard: the same three resonators (55, 130, 230 Hz), the body unchanged (40-120 Hz = 84 % of the power, 120-250 Hz = 12 %),
+    power above 300 Hz 0.15 % (was 0.51 %); A-weighted 250 Hz-1 kHz 12 % and above 1 kHz 2 % at hover in the loop (was 27 % and 11 %). Measured in the real
+    WinUAE play (250 Hz-1 kHz and 1-3 kHz, v3 then v4): hover 26 % and 7.9 % became 12 % and 1.0 % (world 1, clean 2.5 s windows; world 2: 26/7.9 became 11/1.1),
+    the flight out to the barracks 35 % and 9.7 % became 19 % and 1.6 %, the flight home with 16 aboard 29 % and 7.4 % became 7.5 % and 1.1 %; in the vAmiga flight
+    every state fell from 25-35 % and 7-8 % to 9-20 % and 1 %, and the 5-9 kHz share from 0.8-1.6 % to 0.1 %. What is left of the sampling lines: at idle (period 845)
+    the image sits at 8.4 kHz, 3 % in A (v3: 4.2 and 8.4 kHz, 13 %), at a volume of 16-26.
+  - **States** (small; never faster than the approved ones except the lively spin-up): *descending* settles the pitch a little lower (period + vy/2, up to +16 =
+    2.7 %: 4.9 a second flat down), the *take-off spin-up* of the empty chopper peaks at **7.8 a second** (`ROTOR_PER_MIN_BOOST` 380; was 300 = 9.8 with a
+    climb: a buzz; the v3 text's "9.8-11.8" was the unslewed target, play showed 7.8-9.8), a loaded or damaged lift-off stays calm (6.5 at most), loaded and damaged are lower
+    and heavier (v3), climbing quickens to 6.1 (v2), hover 5.0, idle 3.4.
+  - Unit tests (red on v3 first): `testRotorHardwarePeriodIsOversampled`, `testRotorLoopIsDeepAndSoft` (a DFT of the loop: body, power over 300 Hz, A-weighted mid
+    and high shares at hover, idle and flat out), `testRotorDescendSettlesLower`, `testRotorEmptyTakeoffIsNoBuzz`; `tests/rotor.agk` expects `rotorHw=` (red on v3);
+    `sound/tools/check_rotor_audio.py` measures a recording (v3's vAmiga hover: 26.9 % mid, 10.9 % high, a 19 dB line at 6.06 kHz = FAIL; v4: 10.2 %, 1.6 %, 11 dB = PASS).
+  - Not decided by ear (nobody has listened to v4 or to its previews, `C:\Users\admin\Downloads\rotor-v4`); if it is still not Huey enough the levers are the slap
+    strength (70/60), the 230 Hz kick (600), a rotor on two channels (0 and 2) so it is not in one ear, and `board`/`saved`/`jetwarn` softer (Paul's call).
 - **Rotor v3 (Paul's playtest, 2026-11-12, later: "when damaged, the sound is very annoying when flying, and the sound when
   cruising with passengers is not good and irritating as well"; studio tuning, pending Paul's playtest).** What the code and
   the emulator showed (a500, scripted trip, serial `rotorPer`/`rotorVol` and every `AGK sfx`): the rotor did **not** know about
@@ -689,7 +739,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   - Not decided by ear yet: Paul listens in WinUAE. If the empty take-off's 9.8-11.8 a second is also too much, the same
     fix applies to it (`ROTOR_PER_MIN_BOOST` 455 and the 3 per frame); left alone because Paul approved hover and cruise only.
 - **Rotor (decided by Paul, 2026-11-12: a deep blade thump; numbers below are v1, see v2 above):** a low, heavy whop-whop-whop like a Huey, made
-  from scratch (`sound/tools/make_rotor.py`, mirrored bit for bit by `rotorSynth` in `main.c`; no samples). Why the
+  from scratch (`sound/tools/make_rotor.py`, mirrored bit for bit by `logicRotorSynth` in `logic.c` (v4; `rotorSynth` in `main.c` before); no samples). Why the
   loop of 6ab2ff8 was still tinny: its blade pass was 752 samples at 8287 Hz, so **11 thumps a second**, a
   buzz, not a whop; its 75 Hz thump was 40 ms long and its noise slap was louder (raw peak 229 against 190) and
   sits at 300 Hz-1 kHz where the ear and small speakers are most sensitive, so the slap, not the thump, was what
@@ -950,7 +1000,7 @@ writable disk.)
 | 24-bit sky and 224-colour title on a real A1200 | by eye on real hardware or WinUAE AGA: smooth sky, no steps; `tools/checkaga.py` already checks vAmiga screenshots pixel by pixel | Paul | README: "hasn't been tried on real hardware yet" |
 | line-dithered OCS sky | by eye on a CRT and an LCD: half steps read as a smooth gradient, no visible flicker or lines | Paul | unproven (`tools/checksky.py` checks the table, not the look) |
 | tank tell (16 frames) readable in play | played: the barrel-up flash is noticed before the shell on a real display | Paul playtest | unproven by a person |
-| deep rotor thump by ear | listened to on speakers and on headphones in WinUAE: a heavy whop-whop at 5 a second, faster with speed and climb, a louder spin-up at lift-off, full not thin, no clicks at the loop; with the A500's LED filter on and off | Paul | unproven (agk records it; previews in `sound-preview/rotor`; nobody has judged it by ear) |
+| deep rotor thump by ear | listened to on speakers and on headphones in WinUAE: a heavy whop-whop at 5 a second, faster with speed and climb, a louder spin-up at lift-off, full not thin, no clicks at the loop; with the A500's LED filter on and off | Paul | unproven (agk records it; previews in `sound-preview/rotor`; nobody has judged it by ear; v4, 2026-11-16: the loop made at twice the rate and a softer slap after Paul's 2026-11-14 playtest, WinUAE recordings and previews in `C:\Users\admin\Downloads\rotor-v4`, still **unproven by ear**: listen to before-* and after-* there, then in play at hover, cruise, climb, descend, loaded, damaged and at lift-off) |
 | initials typed on a real keyboard (v1.10) | WinUAE (and a real A500 if possible), a PC keyboard through the host-to-Amiga key map: a score that ranks, then letters with and without Shift, digits on the row and on the keypad, Space, Backspace, Return; Esc ends the entry with the score on the table and the game carries on to the title (never quits); P and M in the middle of an entry type or do nothing, never pause or mute; German-layout Y/Z swap noted (US positions); the stick still works and mixes with the keys | Paul, WinUAE with a real keyboard | **unproven** (vAmiga injects raw codes: `tests/hiscorekeys.agk`) |
 | attract loop and demo | left alone 12 s + 8 s: the hall of fame, then the demo plays the same trip and ends with 16 aboard; fire returns to the title | Paul in WinUAE | scenario-tested in vAmiga only |
 | boot time from a real floppy | fire-to-play measured with a stopwatch on a real A500 or WinUAE at floppy speed | Paul | **not measured** |
@@ -1000,3 +1050,4 @@ writable disk.)
 | v1.13 | 2026-11-13 | world 2's gameplay slice (section 11, "World 2's gameplay"; sections 4.1, 4.4, 6, 2, 12): islands and pads and their guide, the island barracks and people (at most 6 out at once), water as a soft stop with a splash, patrol boats (unarmed: no tell frame) and gunboats under the shared ground-threat rules, mission 3 on to mission 4 and mission 6 to the end, the card's brief and strip map, the hall of fame's six missions; the BOB set on the floppy over world 1's BOB chip; **the unused ACE code linked out (325 -> 248 KB)**; not built: wind, winch, radar and jets, the timed freighter, the destroyer (missions 5-6 are mission 4's islands with more gunboats until then) |
 | v1.14 | 2026-11-13 | decided by Paul: Esc in the hall-of-fame initials ends the entry at once and keeps the score with the initials so far (as the 30 s timeout does); it never discards the score and never quits from the entry. Sections 2 (keys) and 10; the kit's `hiscore` technique the same; `tests/hiscoreesc.agk`, `tests/unit/test_logic.c` testHighScoreEsc |
 | v1.15 | 2026-11-13 | decided by Paul, 2026-11-13: open questions 11-14 resolved (patrol boats armed from mission 5 with the tell the art now has; 6 people out at once; 48 px pads on skills 4-5, no nudge, no PAD tick; the mission 5/6 interim accepted for the playtest). Section 6 (the patrol boat row), section 11 (boats, memory: the set gains the 2 tell frames, +1,088 bytes, chip free 98 KB on the a500 in play): `logicPatrolArmed`, `logicPatrolTell` (the gunboat's table + 4), a 30-frame longer rest, the bow gun as muzzle; `tests/w2patrol.agk`, `tests/w2patrol4.agk`, `tests/unit/test_logic.c` testW2Patrol* |
+| v1.16 | 2026-11-16 | rotor v4 (Paul's playtest 2026-11-14, studio tuning, pending his ears): the rotor loop is stored at twice the rate (Paula period = the logic's / 2: sampling lines at 12 kHz, the same 4.8 KB of chip), a softer, lower slap, descending settles lower, the empty take-off peaks at 7.8 a second (was 9.8 with a climb); the approved empty hover and cruise numbers unchanged. Section 9 (cause measured in WinUAE and vAmiga), 12; `logicRotorSynth`, `logicRotorHwPeriod`; tests; `sound/tools/check_rotor_audio.py`, `make_rotor_v4.py` |

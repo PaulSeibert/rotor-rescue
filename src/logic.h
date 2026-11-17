@@ -513,10 +513,16 @@ uint8_t logicRotorPhase(const tGame *g);
 // two seconds after lift-off. logicUpdate slews both toward their targets
 // (the pitch never jumps); main.c writes them to channel 2.
 #define ROTOR_PASS 1200          // samples a blade pass in the loop
+#define ROTOR_OS 2               // v4: the loop is made at this many times the logical rate (period / ROTOR_OS)
+#define ROTOR_LOOP_PASS (ROTOR_PASS * ROTOR_OS)   // samples a blade pass as stored
+#define ROTOR_PASSES 2
+#define ROTOR_SAMPLES (ROTOR_LOOP_PASS * ROTOR_PASSES)   // bytes of chip RAM the loop takes
 #define ROTOR_CLOCK 3546895L     // Paula's PAL clock: rate = clock / period
 uint16_t logicRotorPeriod(const tGame *g);   // Paula period
 uint8_t logicRotorVolume(const tGame *g);    // 0-64 (0 when the chopper is gone)
 int logicRotorThumpsX10(uint16_t uwPeriod);  // thumps a second times ten
+uint16_t logicRotorHwPeriod(uint16_t uwLogical);   // what main.c writes to AUD2PER (the logical period / ROTOR_OS)
+void logicRotorSynth(int8_t *pOut);          // the loop (ROTOR_SAMPLES bytes): main.c at startup, the unit test, make_rotor.py's mirror
 
 // Effects that can repeat (SPEC 9, rotor v3): main.c asks logicSfxAllow before it plays one, and
 // the same effect is not played again inside its gap (logicSfxGap frames). pLast: SFXK_COUNT

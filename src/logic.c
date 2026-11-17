@@ -1907,12 +1907,12 @@ uint8_t logicChopperFrame(const tGame *g) {
 // ---- the rotor's sound. Periods: 845 idle (3.5 thumps/s), 591 hover (5), 45/16 less
 // per 1/16 px of speed (523 at 24: 5.6, 500 at 32: 5.9, 455 at 48: 6.5/s; Paul's
 // playtest, 2026-11-12: 8.4 at top speed was irritating), 4 less per climb unit; the
-// spin-up takes 3 per boosted frame off (up to 300). Never below 455 (6.5/s)
-// outside the spin-up.
+// spin-up takes 3 per boosted frame off (up to 380, 7.8/s). Never below 455 (6.5/s)
+// outside the spin-up. v4 adds half the descent speed to the period (settling down).
 #define ROTOR_PER_IDLE 845
 #define ROTOR_PER_HOVER 591
 #define ROTOR_PER_MIN 455
-#define ROTOR_PER_MIN_BOOST 300
+#define ROTOR_PER_MIN_BOOST 380    // v4: the empty spin-up peaks at 7.8 thumps/s (was 300: 9.8/s with a climb, a buzz)
 #define ROTOR_BOOST_FRAMES 100
 #define ROTOR_HEAVY_PER_HEAD 2   // v3: period units a person aboard adds (16 aboard: 32, 6 %: lower, never higher)
 #define ROTOR_HURT_BASE 32       // v3: a damaged chopper's rotor is this much lower, plus the wobble
@@ -1943,6 +1943,7 @@ static void rotorTick(tGame *g) {
 			int16_t wSpeed = absw(c->vx);
 			int16_t wClimb = c->vy < 0 ? (int16_t)-c->vy : 0;
 			wPer = (int16_t)(ROTOR_PER_HOVER - ((wSpeed * 45) >> 4) - wClimb * 4);
+			if(c->vy > 0) wPer = (int16_t)(wPer + (c->vy >> 1));   // v4: settling down, a little lower and slower (2 px/frame: +16, 2.7 %)
 			wVol = (int16_t)(40 + ((wSpeed * 11) >> 7) + (wClimb ? 3 : 0));   // (speed/3 rose to 56 flat out)
 			// v3: a load or a hurt engine only ever sounds lower and heavier, never faster
 			int16_t wHeavy = (int16_t)(ubLoad * ROTOR_HEAVY_PER_HEAD);
@@ -1974,6 +1975,65 @@ static void rotorTick(tGame *g) {
 }
 
 uint16_t logicRotorPeriod(const tGame *g) { return g->rotorPer; }
+uint16_t logicRotorHwPeriod(uint16_t uwLogical) { return (uint16_t)((uwLogical + ROTOR_OS / 2) / ROTOR_OS); }
+
+// The loop (v4: made at ROTOR_OS times the rate the logic's periods are for, so Paula's sample-rate images
+// sit at 12 kHz, not 6): a deep blade thump on every pass. Three damped resonators kicked together (the
+// weight, 55 Hz, and the body, 130 and 230 Hz), a soft band-passed noise slap (two poles, ~120-450 Hz), a
+// quiet rumble. A warm-up pass first (the last pass again, so the resonators' tails are in the first one and
+// the loop closes seamlessly), then the loop. Peak ~124. sound/tools/make_rotor.py mirrors this with the
+// same integer arithmetic: keep the two in step.
+static int32_t rotorSynthRun(int8_t *pOut, int16_t wScale) {
+	static const int16_t pA1[3] = {32722, 32614, 32396};     // 2 r cos w, Q14, for 12003 Hz
+	static const int16_t pA2[3] = {16352, 16306, 16248};     // r^2, Q14
+	static const int16_t pKick[3] = {750, 1150, 600};
+	static const uint8_t pStrength[ROTOR_PASSES] = {70, 60};
+	uint16_t uwLfsr = 0x1D2B;
+	int32_t pY1[3] = {0, 0, 0}, pY2[3] = {0, 0, 0};
+	int32_t lLp1 = 0, lLp1b = 0, lLp2 = 0, lRum = 0, lMax = 0;
+	for(uint8_t ubRun = 0; ubRun < ROTOR_PASSES + 1; ++ubRun) {
+		uint8_t k = ubRun ? (uint8_t)(ubRun - 1) : ROTOR_PASSES - 1;   // (run 0 is the warm-up: the last pass)
+		for(uint16_t t = 0; t < ROTOR_LOOP_PASS; ++t) {
+			uint16_t uwLsb = uwLfsr & 1;
+			uwLfsr >>= 1;
+			if(uwLsb) uwLfsr ^= 0xB400;
+			int32_t lNoise = (int32_t)(uwLfsr & 0xFF) - 128;
+			int32_t lThump = 0;
+			for(uint8_t j = 0; j < 3; ++j) {
+				int32_t lY = ((((int32_t)pA1[j] * (int16_t)pY1[j]) - ((int32_t)pA2[j] * (int16_t)pY2[j])) >> 14) + (t == 0 ? pKick[j] : 0);
+				pY2[j] = pY1[j];
+				pY1[j] = lY;
+				lThump += lY;
+			}
+			lThump >>= 4;
+			// the slap: noise through two low-pass poles minus a slow one, enveloped
+			lLp1 += ((int32_t)(int16_t)(lNoise * 16 - lLp1) * 40) >> 8;
+			lLp1b += ((int32_t)(int16_t)(lLp1 - lLp1b) * 40) >> 8;
+			lLp2 += ((int32_t)(int16_t)(lLp1b - lLp2) * 12) >> 8;
+			int32_t lBand = (lLp1b - lLp2) >> 2;
+			int16_t wTs = (int16_t)t - 20;
+			int32_t lEnv = wTs < 0 || wTs >= 300 ? 0 : wTs < 16 ? (int32_t)wTs * 16 : 256 - (((int32_t)(int16_t)(wTs - 16) * (int16_t)230) >> 8);
+			int32_t lSlap = (((int32_t)(int16_t)lBand * (int16_t)lEnv >> 7) * (int16_t)pStrength[k]) >> 7;
+			lRum += (lNoise * 16 - lRum) >> 7;
+			int32_t v = lThump + lSlap + (lRum >> 4);
+			if(!ubRun) continue;
+			if(!wScale) {
+				int32_t lAbs = v < 0 ? -v : v;
+				if(lAbs > lMax) lMax = lAbs;
+				continue;
+			}
+			int32_t s = ((int32_t)(int16_t)v * wScale) >> 8;
+			pOut[(uint16_t)(k * ROTOR_LOOP_PASS + t)] = (int8_t)(s > 127 ? 127 : s < -128 ? -128 : s);
+		}
+	}
+	return lMax;
+}
+
+void logicRotorSynth(int8_t *pOut) {
+	int32_t lPeak = rotorSynthRun(pOut, 0);
+	rotorSynthRun(pOut, (int16_t)((126L << 8) / (lPeak ? lPeak : 1)));   // peak at ~124
+}
+
 uint8_t logicRotorVolume(const tGame *g) { return g->rotorVol; }
 int logicRotorThumpsX10(uint16_t uwPeriod) {
 	return (int)((ROTOR_CLOCK * 10) / ((int32_t)uwPeriod * ROTOR_PASS));
