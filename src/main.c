@@ -2283,6 +2283,7 @@ static UWORD msgKeyNow(void) {
 	return (UWORD)(g->state << 8 | g->world << 6 | g->mission << 4 | uwKeyLow |
 		(g->state == GS_TITLE ? (g->frame >> 5) & 1 : 0) |
 		(g->state == GS_INTRO && logicJetsPossible(g) ? 1 : 0) |   // (the card's brief follows the skill: "AND JETS")
+		(g->hint ? logicHintKey(g) : 0) |   // (in play: the bomb prompt, 0-3; its two wordings alternate)
 		(g->state == GS_LOST && g->stateTimer < LOST_FRAMES - 40 ? 2 : 0));
 }
 
@@ -2334,6 +2335,9 @@ __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey) {
 				pText[2] = "64 HELD ON 4 ISLANDS";
 			}
 		} break;
+		case GS_PLAY:
+			pText[0] = logicHintText(logicHintKey(g));   // the first-use bomb prompt (SPEC 3): empty most of the time
+			break;
 		case GS_LOST:
 			if(g->stateTimer < LOST_FRAMES - 40) {
 				pText[1] = "CHOPPER DOWN";
@@ -3254,6 +3258,12 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	if(g->events2 & EV2_JETFIRE) agkPrint("AGK jet fire\n");
 	if(g->events2 & EV2_DAMAGE) agkPrint("AGK chopper damaged\n");
 	if(g->events2 & EV2_REPAIR) agkPrint("AGK chopper repaired\n");
+	// the bomb prompt starting and ending (tests/hint.agk): "AGK hint=bomb", "=stance", "=none"
+	static UBYTE s_ubHintSeen;
+	if(g->hint != s_ubHintSeen) {
+		s_ubHintSeen = g->hint;
+		agkPrint(g->hint == HINT_BOMB ? "AGK hint=bomb\n" : g->hint == HINT_STANCE ? "AGK hint=stance\n" : "AGK hint=none\n");
+	}
 	if(s_ubScrollTrace) {
 		// the mountains' and hills' fine scroll as written to the copper: the
 		// quarter pixels (BPLCON1 bits 13-12, AGA; always 0 on OCS)

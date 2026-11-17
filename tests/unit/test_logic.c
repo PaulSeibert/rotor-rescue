@@ -3741,6 +3741,252 @@ static void testW2JetIsDrawnFromTheSet(void) {
 	CHECK(g_pBobW[BOB_W2_JET] == g_pBobW[BOB_JET] && g_pBobH[BOB_W2_JET] == g_pBobH[BOB_JET] && g_pBobFrames[BOB_W2_JET] == g_pBobFrames[BOB_JET]);
 }
 
+// ---- The first-use bomb prompt (Paul, 2026-11-17: "can't figure out how to bomb with keyboard controls").
+// A timed line while a bombable target is on screen ahead of the cannon-stance chopper in flight, one while
+// it is in the bomb stance; F-35's rules: HINT_FRAMES long, HINT_SHOWS a kind, HINT_COOL apart, off after
+// HINT_USES bombs, kept through a continue, reset by a new game, the two wordings alternating.
+
+// One frame with the chopper hovering at (2000, 100) facing as it faces and the tank (if any) where it is
+static void hintFrame(tInput in, int16_t wTankX) {
+	g.chop.x = 2000;
+	g.chop.y = 100;
+	g.chop.vx = g.chop.vy = 0;
+	g.cam = (int16_t)(g.chop.x - SCREEN_W / 2);
+	g.spawnTimer = 60000;
+	if(wTankX) g.pTanks[0] = (tTank){.x = wTankX, .active = 1, .hp = 2, .dir = 0, .cool = 255};
+	else g.pTanks[0].active = 0;
+	logicUpdate(&g, &in);
+}
+static void hintRun(int frames, tInput in, int16_t wTankX) {
+	for(int i = 0; i < frames; ++i) hintFrame(in, wTankX);
+}
+
+// A game in play, the chopper flying at (2000, 100), no barracks closed (so only the tank counts)
+static void hintGame(void) {
+	newGame();
+	flyAt(2000, 100);
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) g.pBarracks[b].hp = 0;
+	g.hintHold = 0;   // (testHintWaitsForTheCardToClear has the wait)
+}
+
+static void testHintWaitsForTheCardToClear(void) {
+	newGame();                         // play has just begun
+	flyAt(2000, 100);
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) g.pBarracks[b].hp = 0;
+	for(int i = 0; i < HINT_HOLD - 5; ++i) {
+		hintFrame(NONE, 1900);
+		CHECK(logicHint(&g) == HINT_NONE);
+	}
+	hintRun(10, NONE, 1900);
+	CHECK(logicHint(&g) == HINT_BOMB);
+	// a continue's card holds it again
+	g.chop.alive = 0;
+	logicChopperRespawn(&g);
+	step(NONE, INTRO_FRAMES + 1);
+	flyAt(2000, 100);
+	hintRun(HINT_HOLD - 5, NONE, 1900);
+	CHECK(logicHint(&g) == HINT_NONE);
+}
+
+static void testHintShowsForATankAhead(void) {
+	hintGame();
+	hintRun(1, NONE, 1900);   // 100 px ahead of the left-facing chopper, on screen
+	CHECK(logicHint(&g) == HINT_BOMB);
+	CHECK(logicHintKey(&g) == HINT_KEY_DOWN);
+	CHECK(strstr(logicHintText(HINT_KEY_DOWN), "DOWN") && strstr(logicHintText(HINT_KEY_DOWN), "FIRE") && strstr(logicHintText(HINT_KEY_DOWN), "BOMB"));
+	CHECK(strlen(logicHintText(HINT_KEY_DOWN)) <= 40 && strlen(logicHintText(HINT_KEY_BUTTON)) <= 40 && strlen(logicHintText(HINT_KEY_STANCE)) <= 40);
+	CHECK(logicHintText(HINT_KEY_NONE)[0] == 0);
+	// facing right, the same tank is behind it
+	hintGame();
+	g.chop.face = g.chop.faceTarget = g.chop.lastSide = FACE_RIGHT;
+	hintRun(1, NONE, 1900);
+	CHECK(logicHint(&g) == HINT_NONE);
+	hintRun(1, NONE, 2100);
+	CHECK(logicHint(&g) == HINT_BOMB);
+	// a tank out of range, or behind the chopper, or off the screen: nothing
+	hintGame();
+	hintRun(1, NONE, 2000 - HINT_RANGE - 40);
+	CHECK(logicHint(&g) == HINT_NONE);
+	hintRun(1, NONE, 2100);
+	CHECK(logicHint(&g) == HINT_NONE);
+	hintRun(1, NONE, 0);
+	CHECK(logicHint(&g) == HINT_NONE);
+	// right under it still counts (a bomb falls there)
+	hintRun(1, NONE, 2000 + 10);
+	CHECK(logicHint(&g) == HINT_BOMB);
+}
+
+static void testHintForABarracksAndNotAnOpenOne(void) {
+	hintGame();
+	hintRun(1, NONE, 0);
+	CHECK(logicHint(&g) == HINT_NONE);          // every barracks open: no target
+	g.pBarracks[0].x = 1900;
+	g.pBarracks[0].hp = 3;
+	hintRun(1, NONE, 0);
+	CHECK(logicHint(&g) == HINT_BOMB);          // a closed one ahead
+	hintGame();
+	g.pBarracks[0].x = 1900;
+	g.pBarracks[0].hp = 0;
+	hintRun(1, NONE, 0);
+	CHECK(logicHint(&g) == HINT_NONE);
+}
+
+static void testHintNotForABoat(void) {
+	// a boat is not what the bombs are for (the cannon sinks it): world 2's open water asks for nothing
+	newWorld2(0);
+	flyAt(2000, 100);
+	for(uint8_t b = 0; b < BOAT_MAX; ++b) g.pBoats[b].active = 0;
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) g.pBarracks[b].hp = 0;
+	g.pBoats[0] = (tBoat){.x = 1900, .x0 = 1900, .x1 = 1900, .kind = BOAT_PATROL, .active = 1, .hp = 3, .dir = 0};
+	for(int i = 0; i < 3; ++i) {
+		g.chop.x = 2000; g.chop.y = 100; g.chop.vx = g.chop.vy = 0;
+		g.cam = (int16_t)(g.chop.x - SCREEN_W / 2);
+		g.pBoats[0].x = 1900;
+		logicUpdate(&g, &NONE);
+	}
+	CHECK(logicHint(&g) == HINT_NONE);
+}
+
+static void testHintOnlyInTheCannonStanceInFlight(void) {
+	// landed: nothing (the chopper is on the pad, the tank is in range)
+	hintGame();
+	g.chop.landed = 1; g.chop.y = GROUND_Y;
+	for(int i = 0; i < 5; ++i) { g.chop.x = 2000; g.chop.y = GROUND_Y; g.pTanks[0] = (tTank){.x = 1900, .active = 1, .hp = 2, .cool = 255}; logicUpdate(&g, &NONE); }
+	CHECK(logicHint(&g) == HINT_NONE);
+	// a dead chopper
+	hintGame();
+	g.chop.alive = 0;
+	hintRun(2, NONE, 1900);
+	CHECK(logicHint(&g) == HINT_NONE);
+	// the demo plays by itself: no prompt
+	hintGame();
+	g.demo = 1;
+	hintRun(2, NONE, 1900);
+	CHECK(logicHint(&g) == HINT_NONE);
+	// the preview card
+	hintGame();
+	g.state = GS_INTRO;
+	g.stateTimer = 100;
+	hintRun(2, NONE, 1900);
+	CHECK(logicHint(&g) == HINT_NONE);
+	// the bomb stance: the target prompt gives way to the stance's own
+	hintGame();
+	hintRun(2, NONE, 1900);
+	CHECK(logicHint(&g) == HINT_BOMB);
+	hintRun(1, (tInput){.fire2 = 1}, 1900);
+	CHECK(g.chop.faceTarget == FACE_FRONT);
+	CHECK(logicHint(&g) == HINT_STANCE && logicHintKey(&g) == HINT_KEY_STANCE);
+	CHECK(strstr(logicHintText(HINT_KEY_STANCE), "FIRE") && strstr(logicHintText(HINT_KEY_STANCE), "UP AND FIRE"));
+	// ... and going back to the cannon ends it
+	hintRun(1, (tInput){.dy = -1, .fire = 1}, 1900);
+	CHECK(g.chop.faceTarget != FACE_FRONT);
+	CHECK(logicHint(&g) == HINT_NONE);
+}
+
+static void testHintStanceNeedsNoTarget(void) {
+	hintGame();
+	hintRun(1, (tInput){.fire2 = 1}, 0);   // second button: front, no tank anywhere
+	CHECK(logicHint(&g) == HINT_STANCE);
+	hintRun(HINT_FRAMES + 2, NONE, 0);
+	CHECK(logicHint(&g) == HINT_NONE);
+}
+
+static void testHintLastsAndAlternates(void) {
+	hintGame();
+	hintFrame(NONE, 1900);
+	CHECK(logicHintKey(&g) == HINT_KEY_DOWN);
+	hintRun(HINT_ALT_FRAMES, NONE, 1900);   // (frame 51: 50 frames old)
+	CHECK(logicHintKey(&g) == HINT_KEY_BUTTON);
+	CHECK(strstr(logicHintText(HINT_KEY_BUTTON), "BTN 2") && strstr(logicHintText(HINT_KEY_BUTTON), "FIRE") && strstr(logicHintText(HINT_KEY_BUTTON), "BOMB"));
+	hintRun(HINT_ALT_FRAMES, NONE, 1900);
+	CHECK(logicHintKey(&g) == HINT_KEY_DOWN);
+	hintRun(HINT_FRAMES - 2 * HINT_ALT_FRAMES - 1, NONE, 1900);   // the last frame
+	CHECK(logicHint(&g) == HINT_BOMB);
+	hintRun(1, NONE, 1900);
+	CHECK(logicHint(&g) == HINT_NONE && logicHintKey(&g) == HINT_KEY_NONE);
+	// and it stays off while the spacing runs (the tank is still there)
+	hintRun(HINT_COOL / 2, NONE, 1900);
+	CHECK(logicHint(&g) == HINT_NONE);
+}
+
+static void testHintCappedAndSpaced(void) {
+	hintGame();
+	int nShows = 0, wLast = -10000;
+	for(int f = 0; f < HINT_COOL * (HINT_SHOWS + 3); ++f) {
+		uint8_t was = logicHint(&g);
+		hintFrame(NONE, 1900);
+		if(!was && logicHint(&g) == HINT_BOMB) {
+			++nShows;
+			if(nShows > 1) CHECK(f - wLast >= HINT_COOL);
+			wLast = f;
+		}
+	}
+	CHECK(nShows == HINT_SHOWS);
+}
+
+static void dropBomb(void) {
+	// in the stance already, settled: one press, one bomb (no hold needed: the second button got us here)
+	g.chop.y = 100; g.chop.vy = 0;
+	step((tInput){.fire = 1}, 1);
+	step(NONE, 3);
+}
+
+static void testHintOffAfterThreeBombs(void) {
+	hintGame();
+	hintRun(1, (tInput){.fire2 = 1}, 1900);
+	hintRun(TURN_STEP_FRAMES + LEAN_FRAMES + 8, NONE, 1900);
+	CHECK(g.chop.face == FACE_FRONT);
+	CHECK(g.bombUses == 0);
+	for(int i = 0; i < HINT_USES; ++i) {
+		CHECK(g.bombUses == i);
+		hintFrame((tInput){.fire = 1}, 1900);
+		hintRun(4, NONE, 1900);
+	}
+	CHECK(g.bombUses == HINT_USES);
+	CHECK(logicHint(&g) == HINT_NONE);          // the stance prompt is off too
+	// back to the cannon, a tank ahead for a long time: never again
+	hintRun(1, (tInput){.dy = -1, .fire = 1}, 1900);
+	hintRun(2 * HINT_COOL * HINT_SHOWS, NONE, 1900);
+	CHECK(logicHint(&g) == HINT_NONE && g.hintShowsB == 0);
+	// two bombs are not enough
+	hintGame();
+	hintRun(1, (tInput){.fire2 = 1}, 1900);
+	hintRun(TURN_STEP_FRAMES + LEAN_FRAMES + 8, NONE, 1900);
+	for(int i = 0; i < HINT_USES - 1; ++i) { hintFrame((tInput){.fire = 1}, 1900); hintRun(4, NONE, 1900); }
+	CHECK(g.bombUses == HINT_USES - 1);
+	hintRun(1, (tInput){.dy = -1, .fire = 1}, 1900);
+	hintRun(HINT_FRAMES, NONE, 1900);
+	hintRun(HINT_COOL, NONE, 1900);
+	CHECK(g.hintShowsB >= 1);
+}
+
+static void testHintCountsKeptThroughAContinueResetByANewGame(void) {
+	hintGame();
+	hintRun(1, NONE, 1900);
+	CHECK(g.hintShowsB == 1 && logicHint(&g) == HINT_BOMB);
+	g.bombUses = 2;
+	// the chopper is lost and comes back: same game, same counts
+	g.lives = 2;
+	g.chop.alive = 0;
+	logicChopperRespawn(&g);
+	step(NONE, INTRO_FRAMES + 1);
+	CHECK(g.state == GS_PLAY);
+	CHECK(g.hintShowsB == 1 && g.bombUses == 2);
+	CHECK(logicHint(&g) == HINT_NONE);
+	// the next mission keeps them too
+	logicStartMission(&g, 1);
+	CHECK(g.hintShowsB == 1 && g.bombUses == 2);
+	// a new game from the title clears them
+	g.hintCoolB = 300;
+	logicStartGame(&g);
+	CHECK(g.hintShowsB == 0 && g.hintShowsS == 0 && g.bombUses == 0 && g.hintCoolB == 0 && g.hintCoolS == 0 && g.hint == HINT_NONE);
+	// the debug entry from the title does too
+	g.hintShowsB = 3; g.bombUses = 3;
+	g.state = GS_TITLE;
+	logicStartAt(&g, 0, 0);
+	CHECK(g.hintShowsB == 0 && g.bombUses == 0);
+}
+
 int main(void) {
 	testRotorRateFollowsSpeedAndClimb();
 	testRotorIdlesSlowAndSoftOnTheGround();
@@ -3885,6 +4131,16 @@ int main(void) {
 	testW2JetCanBeShotDown();
 	testW2JetsAndBoatsShareTheAttackToken();
 	testW2JetIsDrawnFromTheSet();
+	testHintWaitsForTheCardToClear();
+	testHintShowsForATankAhead();
+	testHintForABarracksAndNotAnOpenOne();
+	testHintNotForABoat();
+	testHintOnlyInTheCannonStanceInFlight();
+	testHintStanceNeedsNoTarget();
+	testHintLastsAndAlternates();
+	testHintCappedAndSpaced();
+	testHintOffAfterThreeBombs();
+	testHintCountsKeptThroughAContinueResetByANewGame();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);
 		return 1;

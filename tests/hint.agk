@@ -1,0 +1,27 @@
+# The first-use bomb prompt (Paul's playtest, 2026-11-17: he could not find how to bomb with the
+# keyboard; unit tests: testHint*). Flying left in the cannon stance towards a closed barracks, the
+# game says how to get to the bombs: HOLD DOWN, THEN FIRE: BOMB, and a second later the other
+# way, BTN 2, THEN FIRE: BOMB. In the bomb stance it says what fire and up+fire do.
+wait-serial "AGK t0" 1000
+press fire 2
+wait 125
+press up 30
+hold left
+wait-serial "AGK hint=bomb" 600
+wait 30
+screenshot hint
+# the line is typed by now: the left stem of its H, in the message pen (cream, 0xFEC)
+expect-color hint 57 99 0xFEC
+wait 45
+screenshot hint2
+# the other wording: the left stem of the B of BTN 2
+expect-color hint2 73 99 0xFEC
+release
+press fire2 1
+wait 30
+expect-serial "AGK hint=stance"
+screenshot stance
+# FIRE: BOMB   UP AND FIRE: GUNS, the F
+expect-color stance 41 99 0xFEC
+expect-no-serial "AGK ERR"
+expect-no-dropped-frames

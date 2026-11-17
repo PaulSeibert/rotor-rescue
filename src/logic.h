@@ -298,6 +298,11 @@ typedef struct {
 	uint8_t demoRun, demoLeft;   // where it is in its input stream
 	uint8_t demoDifficulty;      // the player's, put back after it
 	uint8_t scoresNext;  // after the hall of fame: GS_INTRO (the demo) or GS_TITLE
+	// the first-use bomb prompt (hintUpdate): what shows now (HINT_*), its frames left, the spacing, and
+	// the shows and bombs dropped so far (over the game: a continue keeps them, a new game resets them)
+	uint8_t hint, hintT, hintHold;
+	uint16_t hintCoolB, hintCoolS;
+	uint8_t hintShowsB, hintShowsS, bombUses;
 	// the hall of fame, and a new entry
 	tHiTable hi;
 	tHiEdit edit;        // the initials being typed (edit.ubPos: the letter being chosen)
@@ -399,6 +404,28 @@ typedef struct {
 #define SWAY_PHASE 24        // front-facing hover: front, lean, front, lean, each this long
 #define BOMB_ARM_FRAMES 20   // stick down this long with no fire: the next fire press is the bomb stance
 #define BOMB_STANCE_FRAMES 75 // the stick's bomb stance turns back to the cannon this long after the last bomb
+// The first-use bomb prompt (SPEC 3: Paul could not find how to bomb with the keyboard). A timed line
+// while a bombable target (a tank, a closed barracks) is on screen ahead of the cannon-stance chopper,
+// and one while it is in the bomb stance. Like F-35's: HINT_FRAMES long, at most HINT_SHOWS a kind a game,
+// HINT_COOL frames from one's start to the next's, off for good after HINT_USES bombs dropped. The
+// counts are kept through a continue and the next mission, reset by a new game.
+#define HINT_NONE 0
+#define HINT_BOMB 1          // a target ahead, the cannon: how to get to the bombs
+#define HINT_STANCE 2        // in the bomb stance: fire bombs, up + fire is the cannon
+// logicHintKey: what the line says (0: nothing). The first two alternate every HINT_ALT_FRAMES
+#define HINT_KEY_NONE 0
+#define HINT_KEY_DOWN 1      // HOLD DOWN, THEN FIRE: BOMB   (the stick and the keys)
+#define HINT_KEY_BUTTON 2    // BTN 2, THEN FIRE: BOMB       (the second button)
+#define HINT_KEY_STANCE 3
+#define HINT_USES 3          // bombs dropped in a game after which the prompts stop
+#define HINT_SHOWS 4         // timed prompts of each kind in a game
+#define HINT_FRAMES 150      // how long one lasts
+#define HINT_COOL 500        // frames from one prompt's start to the next of its kind
+#define HINT_HOLD 60         // frames from the start of play (a card, a continue) before a prompt may begin: the card's letters are typed away by then
+#define HINT_ALT_FRAMES 50   // the two ways to the bombs swap this often
+_Static_assert(HINT_FRAMES <= 3 * HINT_ALT_FRAMES, "logicHintKey: down, button, down");
+#define HINT_RANGE 160       // px ahead of the chopper a target counts (and it must be on screen)
+#define HINT_BEHIND 24       // ... and this far behind it (still under it)
 #define TURN_HOLD_FRAMES 5   // stick against the facing this long starts a turn
 #define FIRE_REPEAT 10
 #define CANNON_SPEED 96      // 6 px/frame
@@ -692,6 +719,13 @@ extern const tHiConfig g_sHiConfig;   // the file: "RRH1" (as before the kit), "
 void logicStartDemo(tGame *g);
 uint8_t logicDemoInput(tGame *g, tInput *pOut);             // 0: the stream is over
 uint8_t logicIsMenu(const tGame *g);                        // the title or the hall of fame
+
+/** The bomb prompt now: HINT_NONE, HINT_BOMB or HINT_STANCE. */
+uint8_t logicHint(const tGame *g);
+/** The line to show, HINT_KEY_*: HINT_BOMB alternates its two wordings every HINT_ALT_FRAMES. */
+uint8_t logicHintKey(const tGame *g);
+/** Its text (at most 40 letters; "" for HINT_KEY_NONE). */
+const char *logicHintText(uint8_t ubKey);
 
 // The preview card before each mission (GS_INTRO, fire skips it): its one-line
 // brief - what's out there this time - and a strip map of the battlefield,
