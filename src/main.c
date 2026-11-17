@@ -2282,6 +2282,7 @@ static UWORD msgKeyNow(void) {
 	UWORD uwKeyLow = g->state == GS_SCORES ? (UWORD)(s_ubDiskStatus << 1) : 0;
 	return (UWORD)(g->state << 8 | g->world << 6 | g->mission << 4 | uwKeyLow |
 		(g->state == GS_TITLE ? (g->frame >> 5) & 1 : 0) |
+		(g->state == GS_INTRO && logicJetsPossible(g) ? 1 : 0) |   // (the card's brief follows the skill: "AND JETS")
 		(g->state == GS_LOST && g->stateTimer < LOST_FRAMES - 40 ? 2 : 0));
 }
 

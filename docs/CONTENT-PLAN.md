@@ -117,7 +117,7 @@ bitmap serves a world's missions, the copper swaps palettes.
 | risk | water shimmer and the re-cut floor are copper work (S-M); small pads are the new feel (needs the Paul playtest) |
 
 **Jets in world 2 (SPEC v1.16, built; Paul's playtest, 2026-11-14: mission 4 at skill 3 had no airplanes).** The world 1 jets, with the same warning, tell and
-fairness rules, fly in world 2 from the second trip of mission 4 at skill 3 (3 a trip, one at a time), scaled by mission and skill (SPEC 6, "Jets in world 2": skill 1-2 in
+fairness rules, fly in world 2 from the first trip of mission 4 at skill 3 (3 a trip, one at a time, the first one 10 s into the flight; decided 2026-11-17), scaled by mission and skill (SPEC 6, "Jets in world 2": skill 1-2 in
 mission 4 and skill 1 in mission 5 have none; mission 6 has the most). They stay out of the base's approach (left of x 3800) and take turns with the boats (R3). The radar site
 of mission 5 will later limit *where* they may appear (its coverage zone, section 4.4) and the per-trip budget stays the cap [S]. The jet is world 1's own art, a copy in the
 world 2 set: +1,152 bytes of chip (a500 chip free 98 -> 97 KB in play), the squeeze test `tests/chipwinuae.agk` keeps WinUAE's smaller chip honest.

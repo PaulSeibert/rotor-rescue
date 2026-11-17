@@ -388,6 +388,7 @@ typedef struct {
 #define JET_WARN_BEHIND 150  // 3 s: its warning, frames before it may start an attack run (time to turn and face it)
 #define JET_TAKEOFF_GRACE 100  // 2 s after take-off before any jet may start an attack run
 #define JET_PAIR_GAP 150     // 3 s between one jet's attack run starting and the next jet's
+#define W2_JET_FIRST 500     // world 2: a mission's first jet comes after 10 s of flying (world 1: 100 frames), so the first trip has its quiet start and then something to dodge
 #define GROUND_NEVER 0xFFFF
 #define VY_UP_MAX 28
 #define VY_DOWN_MAX 32
@@ -454,6 +455,7 @@ const tDiffTable *logicDiffTables(uint8_t *pCount);
 // The enemy schedule for the current difficulty, mission and trip
 uint8_t logicTankLimit(const tGame *g);
 uint8_t logicJetsOn(const tGame *g);
+uint8_t logicJetsPossible(const tGame *g);   // world 2: jets can appear in this mission at this skill, on some trip (the card's brief says so)
 uint8_t logicMinesOn(const tGame *g);
 // Tanks: every shell comes after a tell - the tank stops, raises its barrel
 // and its flash blinks for this many frames (16 on normal, 12 on the hardest)

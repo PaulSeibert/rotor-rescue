@@ -413,7 +413,7 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	}
 	g->outCount = 0;
 	for(uint8_t i = 0; i < TANK_MAX; ++i) g->pTanks[i].active = 0;
-	for(uint8_t i = 0; i < JET_MAX; ++i) { g->pJets[i].active = 0; g->pJets[i].cool = (uint16_t)(100 + i * 120); }
+	for(uint8_t i = 0; i < JET_MAX; ++i) { g->pJets[i].active = 0; g->pJets[i].cool = (uint16_t)((g->world ? W2_JET_FIRST : 100) + i * 120); }
 	g->landFrames = 0; g->airGrace = 0; g->jetWait = 0; g->jetsTrip = 0;
 	for(uint8_t i = 0; i < MINE_MAX; ++i) g->pMines[i].active = 0;
 	for(uint8_t i = 0; i < SHOT_MAX; ++i) g->pShots[i].active = 0;
@@ -472,11 +472,12 @@ static const uint8_t s_pJetsMax[DIFFICULTY_MAX + 1] = {1, 1, 1, 1, 2, 2};
 static const uint8_t s_pJetsMaxM3[DIFFICULTY_MAX + 1] = {2, 1, 1, 2, 2, 2};
 // Jets that may appear in one trip, base pad to base pad (Paul's playtest, 2026-11-12: the far barracks)
 static const uint8_t s_pJetsTrip[DIFFICULTY_MAX + 1] = {5, 2, 3, 5, 6, 6};
-// World 2's jets (SPEC 6, "Jets in world 2"; Paul's playtest, 2026-11-14: mission 4 at skill 3 had no airplanes), by the
+// World 2's jets (SPEC 6, "Jets in world 2"; Paul's playtest, 2026-11-14: mission 4 at skill 3 had no airplanes; decided
+// 2026-11-17: mission 4 at skill 3-5 from the first trip, the first jet late in it, W2_JET_FIRST), by the
 // mission within the world (4 / 5 / 6) and the skill. The trip they begin on (a trip is one delivery home: 255 = none
 // at this skill, so skill 1-2 in mission 4 and skill 1 in mission 5 stay gentle) and the jets that may appear in a trip
 static const uint8_t s_pW2JetsFrom[3][DIFFICULTY_MAX + 1] = {
-	{1, 255, 255, 1, 1, 0},
+	{0, 255, 255, 0, 0, 0},
 	{0, 255, 2, 0, 0, 0},
 	{0, 3, 1, 0, 0, 0},
 };
@@ -537,6 +538,10 @@ uint8_t logicJetsOn(const tGame *g) {
 		return ubFrom != 255 && g->trip >= ubFrom;
 	}
 	return g->trip + g->mission >= s_pJetsFrom[g->difficulty];
+}
+
+uint8_t logicJetsPossible(const tGame *g) {
+	return g->world && s_pW2JetsFrom[g->mission][g->difficulty] != 255;
 }
 
 uint8_t logicMinesOn(const tGame *g) {
@@ -2439,9 +2444,13 @@ uint32_t logicSkyColor24(uint8_t ubMission, uint8_t ubLine) {
 static const char *const s_pW2Brief[MISSION_COUNT] = {
 	"PATROL BOATS AND GUNBOATS", "GUNBOATS GUARD THE SEA LANES", "GUNBOATS HOLD THE STRAIT",
 };
+// ... and where jets can appear at the skill in force (decided 2026-11-17: the card must be honest; 24-33 characters, one line)
+static const char *const s_pW2BriefJets[MISSION_COUNT] = {
+	"PATROL BOATS, GUNBOATS AND JETS", "GUNBOATS AND JETS GUARD THE LANES", "GUNBOATS AND JETS HOLD THE STRAIT",
+};
 
 COLD const char *logicBrief(const tGame *g) {
-	if(g->world) return s_pW2Brief[g->mission];
+	if(g->world) return logicJetsPossible(g) ? s_pW2BriefJets[g->mission] : s_pW2Brief[g->mission];
 	// the threats this mission starts with (trip 0, this difficulty)
 	if(logicMinesOn(g)) return "TANKS, JETS AND AIR MINES";
 	if(logicJetsOn(g)) return "TANKS AND JETS ON PATROL";

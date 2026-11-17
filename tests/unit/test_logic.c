@@ -1238,6 +1238,7 @@ static void testGrad24(void) {
 static void testWorld2Start(void) {
 	logicInit(&g);
 	logicStartAt(&g, 1, 0);
+	logicSetDifficulty(&g, 2);   // (nothing shoots here: skill 3 has jets from the first trip, 2026-11-17)
 	CHECK(g.world == 1 && g.mission == 0 && g.state == GS_INTRO && g.lives == LIVES_START);
 	CHECK(g.chop.x == W2_START_X && logicWorldW(&g) == W2_W);
 	step(NONE, INTRO_FRAMES + 1);
@@ -2727,6 +2728,7 @@ static void testW2RescueFromAnIsland(void) {
 		newWorld2(0);
 		CHECK(g.pBarracks[isl].x == g_pIslands[isl].barracksX);
 		hoverAt(g_pIslands[isl].padX, GROUND_Y - 30);
+		g.jetsTrip = 255;   // (no jets in this rescue test: the trip's jets are out; skill 3 has them from the first trip)
 		tInput down = {.dy = 1};
 		step(down, 40);
 		CHECK(g.chop.landed);
@@ -3176,7 +3178,7 @@ static void testW2DrawsIslands(void) {
 // jets begin on (255: none at that skill) and the jets that may appear in a trip, by mission 4 / 5 / 6 and skill 0-5
 // (skill 0, GODMODE, plays like 3)
 static const uint8_t s_pW2JetFrom[3][DIFFICULTY_MAX + 1] = {
-	{1, 255, 255, 1, 1, 0}, {0, 255, 2, 0, 0, 0}, {0, 3, 1, 0, 0, 0},
+	{0, 255, 255, 0, 0, 0}, {0, 255, 2, 0, 0, 0}, {0, 3, 1, 0, 0, 0},
 };
 static const uint8_t s_pW2JetBudget[3][DIFFICULTY_MAX + 1] = {
 	{3, 0, 0, 3, 4, 5}, {4, 0, 2, 4, 5, 6}, {5, 1, 3, 5, 6, 6},
@@ -3203,8 +3205,20 @@ static void testW2JetsOnlyFromTheAllowedSkillAndMission(void) {
 		}
 		// scaled by skill: never fewer on a higher skill, never fewer in a later mission
 		for(uint8_t d = 2; d <= DIFFICULTY_MAX; ++d) CHECK(s_pW2JetBudget[m][d] >= s_pW2JetBudget[m][d - 1]);
+		// ... and never beginning later on a higher skill (255 = none, the latest of all)
+		for(uint8_t d = 2; d <= DIFFICULTY_MAX; ++d) CHECK(s_pW2JetFrom[m][d] <= s_pW2JetFrom[m][d - 1]);
 	}
 	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) for(uint8_t m = 1; m < 3; ++m) CHECK(s_pW2JetBudget[m][d] >= s_pW2JetBudget[m - 1][d]);
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) for(uint8_t m = 1; m < 3; ++m) CHECK(s_pW2JetFrom[m][d] <= s_pW2JetFrom[m - 1][d]);
+	// Paul's playtest (decided 2026-11-17): mission 4 at skill 3, the default, has jets from the first trip; skill 1-2 none
+	newWorld2(0);
+	logicSetDifficulty(&g, 3);
+	g.trip = 0;
+	CHECK(logicJetsOn(&g) && logicJetsTripMax(&g) == 3);
+	logicSetDifficulty(&g, 2);
+	CHECK(!logicJetsOn(&g));
+	logicSetDifficulty(&g, 1);
+	CHECK(!logicJetsOn(&g));
 	// world 1 as before
 	newGame();
 	logicSetDifficulty(&g, 3);
@@ -3326,6 +3340,85 @@ static void testW2LowSkillsStayGentle(void) {
 			CHECK(!g.pJets[0].active && !g.pJets[1].active);
 		}
 	}
+}
+
+// Paul's playtest, decided 2026-11-17: mission 4 at skill 3 has jets from its first trip, but the first jet of a world 2
+// mission arrives late in it (10 s of flying at least, then 2 s of warning): the pads and the water come first.
+// Every skill's budget is still used up in that first trip.
+static void testW2FirstTripJetComesLate(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+			if(s_pW2JetFrom[m][d] != 0) continue;
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			noBoats();
+			g.ghost = 1;
+			g.trip = 0;
+			flyAt(1500, 120);
+			int iFirst = -1, iSpawns = 0;
+			for(int f = 0; f < 9000; ++f) {
+				g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+				g.spawnTimer = 60000;
+				step(NONE, 1);
+				if(g.events & EV_JET) { if(iFirst < 0) iFirst = f; ++iSpawns; }
+			}
+			if(iFirst < 500) printf("mission %d skill %d: the first jet at frame %d\n", m + 4, d, iFirst);
+			CHECK(iFirst >= 500 && iFirst < 900);
+			CHECK(iSpawns == s_pW2JetBudget[m][d]);
+		}
+	}
+	// the second trip is not held back again: a jet well inside the 10 s
+	newWorld2(0);
+	logicSetDifficulty(&g, 3);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 0;
+	flyAt(1500, 120);
+	for(int f = 0; f < 3000; ++f) {
+		g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+	}
+	g.jetsTrip = 0;
+	g.trip = 1;
+	int iAgain = -1;
+	for(int f = 0; f < 600 && iAgain < 0; ++f) {
+		g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		if(g.events & EV_JET) iAgain = f;
+	}
+	CHECK(iAgain >= 0 && iAgain < 400);
+}
+
+// The mission card's brief says "AND JETS" exactly when jets can appear at the skill in force (Paul, decided 2026-11-17),
+// in a line that fits the card (40 columns; the longest before was 28), and is unchanged where there are none
+static void testW2BriefSaysJetsExactlyWhenTheyCanAppear(void) {
+	static const char *const pNoJets[3] = {"PATROL BOATS AND GUNBOATS", "GUNBOATS GUARD THE SEA LANES", "GUNBOATS HOLD THE STRAIT"};
+	char pSeen[3][DIFFICULTY_MAX + 1][48];
+	for(uint8_t m = 0; m < 3; ++m) {
+		for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			const char *sz = logicBrief(&g);
+			CHECK(strlen(sz) > 0 && strlen(sz) <= 36);
+			uint8_t isJets = s_pW2JetFrom[m][d] != 255;
+			if(!!strstr(sz, "JETS") != isJets) printf("mission %d skill %d: brief \"%s\", jets %d\n", m + 4, d, sz, isJets);
+			CHECK(!!strstr(sz, "JETS") == isJets);
+			if(!isJets) CHECK(!strcmp(sz, pNoJets[m]));
+			CHECK(strstr(sz, "BOAT") != 0);              // (it still says what the sea holds)
+			strcpy(pSeen[m][d], sz);
+		}
+		CHECK(!strcmp(pSeen[m][0], pSeen[m][3]));        // GODMODE reads like normal
+	}
+	// the briefs differ by mission, and mission 4 at normal skill (default) names jets and boats
+	CHECK(strcmp(pSeen[0][3], pSeen[1][3]) && strcmp(pSeen[1][3], pSeen[2][3]));
+	CHECK(strstr(pSeen[0][3], "PATROL BOATS") && strstr(pSeen[0][3], "JETS"));
+	// world 1 as before
+	newGame();
+	logicSetDifficulty(&g, 3);
+	logicStartMission(&g, 1);
+	CHECK(!strcmp(logicBrief(&g), "TANKS AND JETS ON PATROL"));
 }
 
 // Every missile comes after the whole flash (logicJetTell frames) on the water too, flying at the chopper
@@ -3650,6 +3743,8 @@ int main(void) {
 	testW2JetsAppearOffScreenWithAWarningWithinTheBudget();
 	testW2JetsNeverNearTheBaseOrInTheIntro();
 	testW2LowSkillsStayGentle();
+	testW2FirstTripJetComesLate();
+	testW2BriefSaysJetsExactlyWhenTheyCanAppear();
 	testW2JetTellsThenFires();
 	testW2JetGroundGrace();
 	testW2JetTakeoffGrace();

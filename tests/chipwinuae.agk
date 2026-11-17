@@ -4,7 +4,7 @@
 # World 2 is the biggest chip user (the art block with its set and the jet's copy, the terrain ring made at its load):
 # with the squeeze every allocation must still be made (no "AGK ERR out of chip RAM"), the jet BOB drawn from the
 # set must show (a jet BOB that was not made would have wiped the frame), and the floor of the game, 64 KB (SPEC 2),
-# must hold. Skill 5, ghost: the jets come from the first trip.
+# must hold. Skill 5, ghost: the jets come from the first trip (the first one 10 s into it, W2_JET_FIRST).
 wait-serial "AGK t0" 3000
 key 0x63
 key 0x28
@@ -33,7 +33,7 @@ press fire 2
 wait 60
 press up 90
 press left 120
-wait-serial "jet warn" 400
+wait-serial "jet warn" 1000
 wait-serial "jet tell" 600
 wait 2
 screenshot jettell
