@@ -1238,6 +1238,7 @@ static void testGrad24(void) {
 static void testWorld2Start(void) {
 	logicInit(&g);
 	logicStartAt(&g, 1, 0);
+	logicSetDifficulty(&g, 2);   // (nothing shoots here: skill 3 has jets from the first trip, 2026-11-17)
 	CHECK(g.world == 1 && g.mission == 0 && g.state == GS_INTRO && g.lives == LIVES_START);
 	CHECK(g.chop.x == W2_START_X && logicWorldW(&g) == W2_W);
 	step(NONE, INTRO_FRAMES + 1);
@@ -2857,6 +2858,7 @@ static void testW2RescueFromAnIsland(void) {
 		newWorld2(0);
 		CHECK(g.pBarracks[isl].x == g_pIslands[isl].barracksX);
 		hoverAt(g_pIslands[isl].padX, GROUND_Y - 30);
+		g.jetsTrip = 255;   // (no jets in this rescue test: the trip's jets are out; skill 3 has them from the first trip)
 		tInput down = {.dy = 1};
 		step(down, 40);
 		CHECK(g.chop.landed);
@@ -2938,6 +2940,7 @@ static tBoat *gunboatNear(int16_t x, int16_t y, int16_t dx) {
 	b->tell = 0;
 	b->dir = 1;
 	g.atkWait = 0;
+	g.jetsTrip = 255;   // (no jets in this boat test: the jets' budget is spent)
 	g.pBoats[2].active = 0;
 	return b;
 }
@@ -3053,6 +3056,7 @@ static tBoat *patrolNear(int16_t x, int16_t y, int16_t dx) {
 	p->tell = 0;
 	p->dir = 1;
 	g.atkWait = 0;
+	g.jetsTrip = 255;   // (this trip's jets are all out: the boat alone, jets are world 2's from skill 3, v1.16)
 	return p;
 }
 
@@ -3299,6 +3303,444 @@ static void testW2DrawsIslands(void) {
 	for(uint8_t i = 0; i < BOB_TYPES; ++i) CHECK(g_pBobW[i] && g_pBobH[i] && g_pBobFrames[i]);
 }
 
+// ---- jets in world 2 (Paul's playtest, 2026-11-14: mission 4 at skill 3 had "no airplanes"; v1.16) ----
+// The spec's table (docs/SPEC.md section 6, "Jets in world 2"), written out here on its own: the trip a mission's
+// jets begin on (255: none at that skill) and the jets that may appear in a trip, by mission 4 / 5 / 6 and skill 0-5
+// (skill 0, GODMODE, plays like 3)
+static const uint8_t s_pW2JetFrom[3][DIFFICULTY_MAX + 1] = {
+	{0, 255, 255, 0, 0, 0}, {0, 255, 2, 0, 0, 0}, {0, 3, 1, 0, 0, 0},
+};
+static const uint8_t s_pW2JetBudget[3][DIFFICULTY_MAX + 1] = {
+	{3, 0, 0, 3, 4, 5}, {4, 0, 2, 4, 5, 6}, {5, 1, 3, 5, 6, 6},
+};
+
+static void noBoats(void) {
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) g.pBoats[i].active = 0;
+}
+
+// Jets are on exactly where the table says: nothing on skill 1-2 in mission 4 (gentle), more of them by skill and
+// mission, GODMODE like normal, and world 1's rule untouched
+static void testW2JetsOnlyFromTheAllowedSkillAndMission(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			for(uint8_t trip = 0; trip < 8; ++trip) {
+				g.trip = trip;
+				uint8_t isOn = s_pW2JetFrom[m][d] != 255 && trip >= s_pW2JetFrom[m][d];
+				if(logicJetsOn(&g) != isOn) printf("world 2 mission %d skill %d trip %d: jets %d, want %d\n", m + 4, d, trip, logicJetsOn(&g), isOn);
+				CHECK(logicJetsOn(&g) == isOn);
+			}
+			CHECK(logicJetsTripMax(&g) == s_pW2JetBudget[m][d]);
+		}
+		// scaled by skill: never fewer on a higher skill, never fewer in a later mission
+		for(uint8_t d = 2; d <= DIFFICULTY_MAX; ++d) CHECK(s_pW2JetBudget[m][d] >= s_pW2JetBudget[m][d - 1]);
+		// ... and never beginning later on a higher skill (255 = none, the latest of all)
+		for(uint8_t d = 2; d <= DIFFICULTY_MAX; ++d) CHECK(s_pW2JetFrom[m][d] <= s_pW2JetFrom[m][d - 1]);
+	}
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) for(uint8_t m = 1; m < 3; ++m) CHECK(s_pW2JetBudget[m][d] >= s_pW2JetBudget[m - 1][d]);
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) for(uint8_t m = 1; m < 3; ++m) CHECK(s_pW2JetFrom[m][d] <= s_pW2JetFrom[m - 1][d]);
+	// Paul's playtest (decided 2026-11-17): mission 4 at skill 3, the default, has jets from the first trip; skill 1-2 none
+	newWorld2(0);
+	logicSetDifficulty(&g, 3);
+	g.trip = 0;
+	CHECK(logicJetsOn(&g) && logicJetsTripMax(&g) == 3);
+	logicSetDifficulty(&g, 2);
+	CHECK(!logicJetsOn(&g));
+	logicSetDifficulty(&g, 1);
+	CHECK(!logicJetsOn(&g));
+	// world 1 as before
+	newGame();
+	logicSetDifficulty(&g, 3);
+	g.trip = 1;
+	CHECK(logicJetsOn(&g) && logicJetsTripMax(&g) == 5);
+	g.trip = 0;
+	CHECK(!logicJetsOn(&g));
+}
+
+// A jet appears off screen with its warning (the alert, the radar flash, 2 s before any attack run), and the trip's
+// budget is all there is: the game's own counts, mission by mission and skill by skill
+static void testW2JetsAppearOffScreenWithAWarningWithinTheBudget(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			noBoats();
+			g.ghost = 1;
+			g.trip = s_pW2JetFrom[m][d] == 255 ? 9 : s_pW2JetFrom[m][d];
+			flyAt(1500, 120);
+			int iSpawns = 0, iBorn[JET_MAX] = {-1, -1};
+			for(int f = 0; f < 9000; ++f) {
+				g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+				g.spawnTimer = 60000;
+				uint8_t pWas[JET_MAX] = {g.pJets[0].active, g.pJets[1].active};
+				uint8_t pTell[JET_MAX] = {g.pJets[0].tell, g.pJets[1].tell};
+				step(NONE, 1);
+				for(int i = 0; i < JET_MAX; ++i) {
+					const tJet *j = &g.pJets[i];
+					if(j->active && !pWas[i]) {
+						iBorn[i] = f;
+						CHECK(j->x <= g.cam - JET_LEAD || j->x >= g.cam + SCREEN_W + JET_LEAD);   // well off screen
+						CHECK(j->warn >= JET_WARN_FRAMES - 1);
+						CHECK((g.events & EV_JET) && (g.events2 & EV2_JETWARN));            // heard, and the alert
+					}
+					if(j->active && j->tell && !pTell[i]) CHECK(iBorn[i] >= 0 && f - iBorn[i] >= JET_WARN_FRAMES);
+				}
+				iSpawns += (g.events & EV_JET) != 0;
+			}
+			if(iSpawns != s_pW2JetBudget[m][d]) printf("mission %d skill %d: %d jets, want %d\n", m + 4, d, iSpawns, s_pW2JetBudget[m][d]);
+			CHECK(iSpawns == s_pW2JetBudget[m][d]);
+			// the trip before the first one with jets: none
+			if(s_pW2JetFrom[m][d] != 255 && s_pW2JetFrom[m][d] > 0) {
+				newWorld2(m);
+				logicSetDifficulty(&g, d);
+				noBoats();
+				g.ghost = 1;
+				g.trip = (uint8_t)(s_pW2JetFrom[m][d] - 1);
+				flyAt(1500, 120);
+				int iEarly = 0;
+				for(int f = 0; f < 3000; ++f) {
+					g.chop.x = 1500; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+					g.spawnTimer = 60000;
+					step(NONE, 1);
+					iEarly += (g.events & EV_JET) != 0;
+				}
+				CHECK(iEarly == 0);
+			}
+		}
+	}
+	// back on the base pad: a new trip, a new budget
+	newWorld2(0);
+	logicSetDifficulty(&g, 3);
+	g.jetsTrip = 3;
+	g.chop.x = g_pIslands[W2_BASE_ISLAND].padX; g.chop.y = GROUND_Y; g.chop.landed = 1;
+	step(NONE, 2);
+	CHECK(g.jetsTrip == 0);
+}
+
+// None while the chopper is in the base's approach (right of W2_JET_SAFE_X), none in the intro or while it sits at the base
+static void testW2JetsNeverNearTheBaseOrInTheIntro(void) {
+	logicInit(&g);
+	logicStartAt(&g, 1, 2);
+	logicSetDifficulty(&g, 5);
+	g.trip = 6;
+	for(int f = 0; f < INTRO_FRAMES + 600; ++f) {
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		CHECK(!g.pJets[0].active && !g.pJets[1].active && !(g.events & EV_JET));
+	}
+	newWorld2(2);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 6;
+	flyAt(W2_JET_SAFE_X + 40, 120);
+	for(int f = 0; f < 3000; ++f) {
+		g.chop.x = W2_JET_SAFE_X + 40; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		CHECK(!(g.events & EV_JET));
+	}
+	// (the same chopper a little further from the base: they come)
+	flyAt(W2_JET_SAFE_X - 40, 120);
+	int iSpawns = 0;
+	for(int f = 0; f < 3000; ++f) {
+		g.chop.x = W2_JET_SAFE_X - 40; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		iSpawns += (g.events & EV_JET) != 0;
+	}
+	CHECK(iSpawns >= 1);
+}
+
+// Skill 1-2 in mission 4, skill 1 in mission 5: nothing, however long you fly and however many trips
+static void testW2LowSkillsStayGentle(void) {
+	for(uint8_t k = 0; k < 3; ++k) {
+		uint8_t m = k == 2 ? 1 : 0, d = k == 2 ? 1 : (uint8_t)(k + 1);
+		newWorld2(m);
+		logicSetDifficulty(&g, d);
+		noBoats();
+		g.ghost = 1;
+		g.trip = 9;
+		flyAt(1500, 120);
+		for(int f = 0; f < 9000; ++f) {
+			g.chop.x = 1500; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+			g.spawnTimer = 60000;
+			step(NONE, 1);
+			CHECK(!g.pJets[0].active && !g.pJets[1].active);
+		}
+	}
+}
+
+// Paul's playtest, decided 2026-11-17: mission 4 at skill 3 has jets from its first trip, but the first jet of a world 2
+// mission arrives late in it (10 s of flying at least, then 2 s of warning): the pads and the water come first.
+// Every skill's budget is still used up in that first trip.
+static void testW2FirstTripJetComesLate(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+			if(s_pW2JetFrom[m][d] != 0) continue;
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			noBoats();
+			g.ghost = 1;
+			g.trip = 0;
+			flyAt(1500, 120);
+			int iFirst = -1, iSpawns = 0;
+			for(int f = 0; f < 9000; ++f) {
+				g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+				g.spawnTimer = 60000;
+				step(NONE, 1);
+				if(g.events & EV_JET) { if(iFirst < 0) iFirst = f; ++iSpawns; }
+			}
+			if(iFirst < 500) printf("mission %d skill %d: the first jet at frame %d\n", m + 4, d, iFirst);
+			CHECK(iFirst >= 500 && iFirst < 900);
+			CHECK(iSpawns == s_pW2JetBudget[m][d]);
+		}
+	}
+	// the second trip is not held back again: a jet well inside the 10 s
+	newWorld2(0);
+	logicSetDifficulty(&g, 3);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 0;
+	flyAt(1500, 120);
+	for(int f = 0; f < 3000; ++f) {
+		g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+	}
+	g.jetsTrip = 0;
+	g.trip = 1;
+	int iAgain = -1;
+	for(int f = 0; f < 600 && iAgain < 0; ++f) {
+		g.chop.x = 1500; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		if(g.events & EV_JET) iAgain = f;
+	}
+	CHECK(iAgain >= 0 && iAgain < 400);
+}
+
+// The mission card's brief says "AND JETS" exactly when jets can appear at the skill in force (Paul, decided 2026-11-17),
+// in a line that fits the card (40 columns; the longest before was 28), and is unchanged where there are none
+static void testW2BriefSaysJetsExactlyWhenTheyCanAppear(void) {
+	static const char *const pNoJets[3] = {"PATROL BOATS AND GUNBOATS", "GUNBOATS GUARD THE SEA LANES", "GUNBOATS HOLD THE STRAIT"};
+	char pSeen[3][DIFFICULTY_MAX + 1][48];
+	for(uint8_t m = 0; m < 3; ++m) {
+		for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			const char *sz = logicBrief(&g);
+			CHECK(strlen(sz) > 0 && strlen(sz) <= 36);
+			uint8_t isJets = s_pW2JetFrom[m][d] != 255;
+			if(!!strstr(sz, "JETS") != isJets) printf("mission %d skill %d: brief \"%s\", jets %d\n", m + 4, d, sz, isJets);
+			CHECK(!!strstr(sz, "JETS") == isJets);
+			if(!isJets) CHECK(!strcmp(sz, pNoJets[m]));
+			CHECK(strstr(sz, "BOAT") != 0);              // (it still says what the sea holds)
+			strcpy(pSeen[m][d], sz);
+		}
+		CHECK(!strcmp(pSeen[m][0], pSeen[m][3]));        // GODMODE reads like normal
+	}
+	// the briefs differ by mission, and mission 4 at normal skill (default) names jets and boats
+	CHECK(strcmp(pSeen[0][3], pSeen[1][3]) && strcmp(pSeen[1][3], pSeen[2][3]));
+	CHECK(strstr(pSeen[0][3], "PATROL BOATS") && strstr(pSeen[0][3], "JETS"));
+	// world 1 as before
+	newGame();
+	logicSetDifficulty(&g, 3);
+	logicStartMission(&g, 1);
+	CHECK(!strcmp(logicBrief(&g), "TANKS AND JETS ON PATROL"));
+}
+
+// Every missile comes after the whole flash (logicJetTell frames) on the water too, flying at the chopper
+static void testW2JetTellsThenFires(void) {
+	for(uint8_t d = 3; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(1);
+		logicSetDifficulty(&g, d);
+		noBoats();
+		uint8_t ubTell = logicJetTell(&g);
+		int iMissiles = 0;
+		for(int pass = 0; pass < 6; ++pass) {
+			flyAt(1500, 120);
+			g.trip = 5;
+			g.pJets[0] = (tJet){.x = (int16_t)(g.cam + 20), .y = 112, .dir = 1, .active = 1, .hp = 1, .seen = 100};
+			uint8_t ubRun = 0;
+			for(int f = 0; f < 200; ++f) {
+				g.chop.x = 1530; g.chop.y = 120; g.chop.vx = g.chop.vy = 0; g.chop.landed = 0;
+				g.cam = 1340;
+				g.pJets[1].active = 0; g.pJets[1].cool = 255;
+				uint8_t ubBefore = ubRun;
+				step(NONE, 1);
+				if(!g.pJets[0].active) break;
+				ubRun = g.pJets[0].tell ? (uint8_t)(ubRun + 1) : 0;
+				for(int s = 0; s < ESHOT_MAX; ++s) {
+					tShot *p = &g.pEShots[s];
+					if(p->active && p->kind == ESHOT_MISSILE && p->life == JET_MISSILE_LIFE) {
+						++iMissiles;
+						CHECK(ubBefore >= ubTell);          // the whole flash came first
+						CHECK(absi(p->vx) == 2 * 20);       // 2.5 px/frame
+						p->active = 0;
+						g.pJets[0].active = 0;
+					}
+				}
+				g.chop.alive = 1;
+			}
+		}
+		CHECK(iMissiles >= 1);
+	}
+}
+
+// A chopper on an island's pad: the ground grace of the shared table (never on skill 1-2, 6 s on 3, ...); no bomb before it
+static void testW2JetGroundGrace(void) {
+	static const uint16_t pDwell[DIFFICULTY_MAX + 1] = {300, GROUND_NEVER, GROUND_NEVER, 300, 200, 150};
+	for(uint8_t d = 2; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(d == 2 ? 1 : 0);
+		logicSetDifficulty(&g, d);
+		noBoats();
+		g.ghost = 1;
+		g.trip = 6;
+		int16_t wX = g_pIslands[1].padX;
+		flyAt(wX, GROUND_Y);
+		g.chop.landed = 1;
+		CHECK(logicGroundDwell(&g) == pDwell[d]);
+		int iFirst = -1, iBombs = 0;
+		for(int f = 0; f < 1000; ++f) {
+			g.chop.x = wX; g.chop.y = GROUND_Y; g.chop.landed = 1; g.chop.vx = g.chop.vy = 0;
+			g.spawnTimer = 60000;
+			g.pJets[1].active = 0; g.pJets[1].cool = 255;
+			if(!g.pJets[0].tell) aimJet(0, 1);
+			uint16_t uwBefore = g.jetAttacks;
+			step(NONE, 1);
+			iBombs += bombsUp() > 0;
+			if(g.jetAttacks != uwBefore && iFirst < 0) {
+				iFirst = f;
+				if(pDwell[d] != GROUND_NEVER) CHECK(g.landFrames >= pDwell[d]);
+			}
+		}
+		if(pDwell[d] == GROUND_NEVER) CHECK(iFirst < 0 && iBombs == 0);
+		else CHECK(iFirst >= 0 && iFirst < pDwell[d] + 40);
+	}
+}
+
+// The take-off grace holds over the sea too: no attack run for JET_TAKEOFF_GRACE frames after lifting off a pad
+static void testW2JetTakeoffGrace(void) {
+	newWorld2(0);
+	logicSetDifficulty(&g, 4);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 6;
+	int16_t wX = g_pIslands[1].padX;
+	flyAt(wX, GROUND_Y);
+	g.chop.landed = 1;
+	for(int f = 0; f < 400; ++f) {
+		g.chop.x = wX; g.chop.y = GROUND_Y; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+	}
+	g.chop.landed = 0;
+	int iAt = -1;
+	for(int f = 0; f < 300 && iAt < 0; ++f) {
+		g.chop.x = wX; g.chop.y = 120; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		g.pJets[1].active = 0; g.pJets[1].cool = 255;
+		if(!g.pJets[0].tell) aimJet(0, 1);
+		uint16_t uwBefore = g.jetAttacks;
+		step(NONE, 1);
+		if(g.jetAttacks != uwBefore) iAt = f;
+	}
+	CHECK(iAt >= JET_TAKEOFF_GRACE - 2 && iAt <= JET_TAKEOFF_GRACE + 4);
+}
+
+// The cannon shoots a jet down over the water, and it pays 100
+static void testW2JetCanBeShotDown(void) {
+	newWorld2(0);
+	logicSetDifficulty(&g, 3);
+	noBoats();
+	g.trip = 1;
+	flyAt(1500, 120);
+	g.pJets[0] = (tJet){.x = 1440, .y = 114, .dir = 1, .active = 1, .hp = 1, .cool = 200};
+	uint32_t uwScore = g.score;
+	step((tInput){.fire = 1}, 3);
+	CHECK(!g.pJets[0].active);
+	CHECK(g.chop.alive);
+	CHECK(g.score == uwScore + 100);
+}
+
+// One attack at a time across jets and boats (CONTENT-PLAN R3, SPEC 6): a boat's tell holds a jet's off, a jet's run holds a
+// boat's off, for BOAT_ATTACK_GAP frames
+static void testW2JetsAndBoatsShareTheAttackToken(void) {
+	// a boat's tell started: no jet run for the gap
+	newWorld2(1);
+	logicSetDifficulty(&g, 4);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 6;
+	flyAt(1500, 120);
+	g.atkWait = BOAT_ATTACK_GAP;
+	g.atkLast = 1;
+	for(int f = 0; f < BOAT_ATTACK_GAP - 4; ++f) {
+		g.chop.x = 1500; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		g.pJets[1].active = 0; g.pJets[1].cool = 255;
+		if(!g.pJets[0].tell) aimJet(0, 1);
+		step(NONE, 1);
+		CHECK(g.jetAttacks == 0);
+	}
+	int iRun = 0;
+	for(int f = 0; f < 30 && !iRun; ++f) {
+		g.chop.x = 1500; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		g.pJets[1].active = 0; g.pJets[1].cool = 255;
+		if(!g.pJets[0].tell) aimJet(0, 1);
+		step(NONE, 1);
+		iRun = g.jetAttacks;
+	}
+	CHECK(iRun == 1);
+	// a jet's run started: no boat tell for the gap
+	newWorld2(1);
+	logicSetDifficulty(&g, 4);
+	tBoat *b = gunboatNear(2400, GROUND_Y - 30, -130);
+	g.ghost = 1;
+	g.trip = 6;
+	b->cool = 30;
+	int iStart = -1;
+	for(int f = 0; f < 400; ++f) {
+		g.chop.x = 2400; g.chop.y = GROUND_Y - 30; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		g.pJets[1].active = 0; g.pJets[1].cool = 255;
+		if(iStart < 0 && !g.pJets[0].tell) aimJet(0, 1);
+		uint16_t uwBefore = g.jetAttacks;
+		if(iStart >= 0 && f == iStart + 1) b->cool = 0;
+		step(NONE, 1);
+		if(g.jetAttacks != uwBefore && iStart < 0) iStart = f;
+		if(iStart >= 0 && f > iStart && f < iStart + BOAT_ATTACK_GAP - 2) CHECK(!b->tell);
+	}
+	CHECK(iStart >= 0);
+}
+
+// A jet in world 2 is drawn from world 2's own BOB (the set's copy of the jet: world 1's BOBs are not in the arena), blinking in its tell
+static void testW2JetIsDrawnFromTheSet(void) {
+	newWorld2(0);
+	logicSetDifficulty(&g, 3);
+	g.trip = 1;
+	flyAt(1500, 120);
+	g.cam = 1340;
+	tDraw d[DRAW_MAX];
+	int iFlash = 0, iPlain = 0;
+	for(uint8_t tell = 1; tell <= 16; ++tell) {
+		g.pJets[0] = (tJet){.x = 1400, .y = 112, .dir = -1, .active = 1, .hp = 1, .tell = tell};
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) {
+			CHECK(d[i].bob != BOB_JET);
+			if(d[i].bob != BOB_W2_JET) continue;
+			if(d[i].frame == JET_FLASH_L) ++iFlash;
+			else if(d[i].frame == JET_L) ++iPlain;
+		}
+	}
+	CHECK(iFlash >= 6 && iPlain >= 6);
+	for(uint8_t i = 0; i < BOB_TYPES; ++i) CHECK(g_pBobW[i] && g_pBobH[i] && g_pBobFrames[i]);
+	CHECK(g_pBobW[BOB_W2_JET] == g_pBobW[BOB_JET] && g_pBobH[BOB_W2_JET] == g_pBobH[BOB_JET] && g_pBobFrames[BOB_W2_JET] == g_pBobFrames[BOB_JET]);
+}
+
 int main(void) {
 	testRotorRateFollowsSpeedAndClimb();
 	testRotorIdlesSlowAndSoftOnTheGround();
@@ -3431,6 +3873,18 @@ int main(void) {
 	testW2MissionsFollowWorld1();
 	testW2CardBriefAndMap();
 	testW2DrawsIslands();
+	testW2JetsOnlyFromTheAllowedSkillAndMission();
+	testW2JetsAppearOffScreenWithAWarningWithinTheBudget();
+	testW2JetsNeverNearTheBaseOrInTheIntro();
+	testW2LowSkillsStayGentle();
+	testW2FirstTripJetComesLate();
+	testW2BriefSaysJetsExactlyWhenTheyCanAppear();
+	testW2JetTellsThenFires();
+	testW2JetGroundGrace();
+	testW2JetTakeoffGrace();
+	testW2JetCanBeShotDown();
+	testW2JetsAndBoatsShareTheAttackToken();
+	testW2JetIsDrawnFromTheSet();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);
 		return 1;

@@ -1,0 +1,53 @@
+# World 2's jets (v1.16, Paul's playtest 2026-11-14: "mission 4 at skill 3: not enough things to dodge, no airplanes";
+# SPEC 6, "Jets in world 2"). Ctrl+L, W, 4 starts mission 4, Reef Run, at the base pad; the skill is pinned to 3 after
+# the world has loaded (before it the keys never leave world 1).
+# - decided 2026-11-17: skill 3's jets in mission 4 begin on the FIRST trip (trip 0), the first of them late in it
+#   (W2_JET_FIRST: 10 s of flying, then the 2 s warning): a jet comes in off screen with its warning (the radar blip
+#   flashes, the alert), then, once its 2 s are over and it is lined up, its flash (the tell), and only then a
+#   missile; the jet is the world 2 set's own copy of world 1's jet BOB.
+# - ghost (Ctrl+L, G): a jet that comes up behind a hovering chopper rams it, by design: the run must see a jet that
+#   comes from ahead, which is 3 in 4.
+# The unit tests (tests/unit/test_logic.c, testW2Jet*) hold the rules: the table by mission and skill, the
+# budget, the late first jet, the safe zone, the ground grace, the take-off grace, the shared attack token with the boats.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x04
+wait-serial "AGK world 2 loaded" 400
+key 0x63
+key 0x28
+wait 5
+key 0x03
+wait 30
+key 0x63
+key 0x28
+wait 5
+key 0x24
+wait 30
+press fire 2
+wait 60
+press up 90
+press left 120
+wait 100
+screenshot quiet
+wait-serial "jet warn" 900
+screenshot warned
+wait-serial "jet tell" 600
+wait 2
+screenshot tell
+# the flash: the glowing nose (yellow, 0xFC3; a plain jet is stone grey 0x998 there), as in tests/jets.agk
+expect-color tell 32 64 0xFC3
+wait-serial "jet fire" 120
+wait 10
+screenshot fire
+expect-serial "pskill=3 [a-z0-9= ]*pmission=0 ptrip=0"
+expect-serial "jet warn[\s\S]*jet tell[\s\S]*jet fire"
+expect-no-serial "ptrip=[1-9]"
+expect-no-serial "\A(?:(?!jet tell)[\s\S])*AGK jet fire"
+expect-no-serial "AGK ERR|missing"
+expect-no-dropped-frames
+expect-max-load 90
+expect-min-chip-free 96

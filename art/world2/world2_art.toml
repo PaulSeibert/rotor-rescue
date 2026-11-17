@@ -78,6 +78,10 @@ kind = "bob"
 source = "world2/splash.txt"
 kind = "bob"
 
+[w2_jet]                  # 4 frame(s) 32 x 12: world 1's jet (art/jet.txt, the same PF1 pens), a copy in world 2's set (v1.16)
+source = "jet.txt"
+kind = "bob"
+
 [w2_bow_spray]                  # 2 frame(s) 12 x 8
 source = "world2/bow_spray.txt"
 kind = "bob"

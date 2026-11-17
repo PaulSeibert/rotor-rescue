@@ -45,7 +45,8 @@ PARTS = ["w2_clouds", "w2_far", "w2_sea", "w2_tiles"]
 SET = [("w2_barracks", None, "W2_BARRACKS", True), ("w2_patrol_boat", [0, 2, 4, 5], "PATROL", True),
        ("w2_gunboat", [0, 1, 2, 4, 5, 6], "GUNBOAT", True), ("w2_pad_cap", [0, 1], "PAD_CAP", False),
        ("w2_pad_slab", [0, 1, 2], "PAD_SLAB", False), ("w2_pad_centre", [0], "PAD_CENTRE", False),
-       ("w2_pad_lamp", None, "PAD_LAMP", True), ("w2_splash", None, "SPLASH", True)]
+       ("w2_pad_lamp", None, "PAD_LAMP", True), ("w2_splash", None, "SPLASH", True),
+       ("w2_jet", None, "W2_JET", True)]   # (v1.16: world 1's jet art again, the 4 frames: left, right, flash left, flash right)
 PAD_ROWS = 46
 PAD_WIDTHS = (48, 64, 80, 96)   # the pad's widths on the 16 px grid: one composed BOB each (chip, 3 planes, no mask)
 SEA_LINES = 28
