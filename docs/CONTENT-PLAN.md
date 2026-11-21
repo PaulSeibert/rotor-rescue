@@ -454,6 +454,11 @@ World 2 with its jets (v1.16): a500 97 KB free in play (98 before the jet's 1,15
 modelled (`tests/chipwinuae.agk`, Ctrl+L Q). Radar, windsock and destroyer for missions 5 and 6 still need the levers of STYLE-world2 section 6 (pad widths by skill -3,040
 at skill 3, one destroyer facing -5,280, a mission's own set) [M].
 
+**Update, 2026-11-21 (SPEC v1.20, the slice 2 branch `w2-slice2`).** A bigger lever than those three was sitting in the program: the boot splash's DPS logo (37,456 bytes) and its two copper lists, 47 KB of chip, were held for the whole game.
+Freed at world 2's load they give world 2 **147,384 bytes free in play on the a500 (was 99,544: +47,840)**, world 1 unchanged at 105 KB [M: `AGK w2 chipbytes`, `tests/w2chip.agk`]. The sets still to come (radar 5,616, windsock 480, destroyer 5,280 and turret 1,824 for one facing, whitecaps 1,080, plus the ship deck and the freighter
+once drawn, about 3-5 KB each [E]) add up to about 22-26 KB, so the floor stays at 96 KB for the a500 and 64 KB under the squeeze with 20 KB or more to spare; none of the three plan levers is needed. If it is not enough once the deck and the freighter are drawn, the options with numbers are the pad widths by
+skill (-3,040 at skill 3, -4,144 at 4-5, not at skill 1) and the title logo and its lists freed in play (26 KB, a reload at the title). The floor is never lowered without Paul.
+
 ---
 
 ## 8. The art plan
@@ -505,6 +510,10 @@ The rules are TBD: small commits, behind a disabled flag, merged within one or t
 | **5 Disks, polish, release** (about 2 wk) | T22, the second disk image, the save, credits, AROS, perf, Prove It list | all gates green; a release candidate for Paul |
 
 About 15 weeks in all [E, plus or minus 40%]. Art and code run in parallel; art is the long pole (worlds 3 and 4).
+
+**Phase 2, slice 2 (missions 5 and 6 finished), order of work (SPEC v1.20, section 11 "World 2, slice 2"; branch `w2-slice2`).** Each slice is merged-quality on its own (unit tests red first, a scenario, goldens re-recorded in one call after every diff is read, the four-profile gate):
+A radar sites and the jet zone rule (zones red on the HUD radar and the card's strip map); B wind gusts and the windsock; C the ship-deck winch rescue (mission 5: needs a ship deck and a rope drawn first); D the timed freighter (mission 6: needs the freighter drawn; at most two timed sites a mission,
+90 s on normal, 120 / 105 / 90 / 75 / 60 by skill); E the strait destroyer set piece with its anti-stall (barrage at 40 s, turrets open by 90 s) and the zone bonus. Mission 4 and world 1 do not change. The memory budget is in section 7.4 (the boot splash's 47 KB freed at world 2's load pays for all five).
 
 **Why world 2 is the vertical slice.** It exercises every new thing in its easiest form: the terrain strip at its lowest, the
 sea (cheapest floor), pads (Paul's #1 and #4), boats (#3), the first winch and wind, a world card, a swap. World 3's
