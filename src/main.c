@@ -2805,6 +2805,14 @@ static void world3Gradients(void);
 __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 	systemSetDmaMask(DMAF_RASTER | DMAF_SPRITE, 0);
 	UBYTE *pArena = s_pDiskArt + ARENA_OFFS;
+#ifndef W3_KEEP_SPLASH   // (a measuring switch: the chip budget of the worlds with the boot splash still held)
+	if(ubWorld) {
+		// The boot splash's 47 KB (the DPS logo and its two copper lists) have been held since the boot: the splash plays once,
+		// and the display is off and a floppy load runs under the OS here anyway, so the frees cost the player nothing
+		// (SPEC 11, "World 2, slice 2": the chip for the radar, wind, winch, freighter and destroyer sets)
+		splashDestroy();
+	}
+#endif
 	if(s_isRingAlloc && ubWorld != 1) {
 		memFree(s_pStripMem, 3 * STRIP_PLANE_BYTES);   // (world 2's ring goes when the game leaves world 2)
 		s_isRingAlloc = 0;
@@ -2857,6 +2865,11 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 	agkState("world", ubWorld + 1);
 	agkState("mission", ubWorld * MISSION_COUNT + s_sGame.mission + 1);
 	agkEnd();
+	if(ubWorld) {   // the chip budget of the world's play, to the byte (the perf report's "AGK mem" is in KB)
+		agkState(ubWorld == W3_WORLD ? "w3 chipbytes" : "w2 chipbytes", (LONG)AvailMem(MEMF_CHIP));
+		agkState(ubWorld == W3_WORLD ? "w3 chipfree" : "w2 chipfree", (LONG)(AvailMem(MEMF_CHIP) >> 10));
+		agkEnd();
+	}
 	agkPrint(ubWorld == W3_WORLD ? "AGK world 3 loaded\n" : ubWorld ? "AGK world 2 loaded\n" : "AGK world 1 loaded\n");
 	agkPerfSkip();
 }
