@@ -18,6 +18,7 @@ const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_SHADOW] = 32, [BOB_SMOKE] = 16,
 	[BOB_W2_BARRACKS] = 51, [BOB_PATROL] = 43, [BOB_GUNBOAT] = 61, [BOB_PAD48] = 48,
 	[BOB_PAD64] = 64, [BOB_PAD80] = 80, [BOB_PAD96] = 96, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 32,
+	[BOB_RADAR] = 33,
 };
 const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_HANGAR] = 40, [BOB_FENCE] = 32, [BOB_BARRACKS] = 28, [BOB_TANK] = 14,
@@ -26,6 +27,7 @@ const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_SHADOW] = 4, [BOB_SMOKE] = 8,
 	[BOB_W2_BARRACKS] = 31, [BOB_PATROL] = 17, [BOB_GUNBOAT] = 30, [BOB_PAD48] = PAD_ROWS,
 	[BOB_PAD64] = PAD_ROWS, [BOB_PAD80] = PAD_ROWS, [BOB_PAD96] = PAD_ROWS, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 12,
+	[BOB_RADAR] = 39,
 };
 // (world 2's frames are the ones the floppy set carries: art/tools/make_world_disk.py picks
 // them from the art: one wake frame a facing and the patrol boat's tell a facing, the gunboat's fire frame is its second tell's,
@@ -37,6 +39,7 @@ const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_SHADOW] = SHADOW_SIZES * 2, [BOB_SMOKE] = 3,
 	[BOB_W2_BARRACKS] = 4, [BOB_PATROL] = 4, [BOB_GUNBOAT] = 6, [BOB_PAD48] = 1,
 	[BOB_PAD64] = 1, [BOB_PAD80] = 1, [BOB_PAD96] = 1, [BOB_PAD_LAMP] = 2, [BOB_SPLASH] = 5, [BOB_W2_JET] = 4,
+	[BOB_RADAR] = 4,
 };
 
 // World 2's islands (logic.h): the tile map's "island" lines (art/world2/tilemap.txt), px
@@ -349,6 +352,7 @@ COLD void logicChopperRespawn(tGame *g) {
 // from afar): a stretch of sea each, the armed ones from the skill that meets them. A boat
 // keeps its slot whether it is there or not (a lower skill leaves the slot empty).
 COLD static void padsSet(tGame *g);
+COLD static void radarsPlace(tGame *g);
 typedef struct { int16_t x0, x1; uint8_t kind, minSkill; } tBoatPlace;
 static const tBoatPlace s_pBoatPlace[MISSION_COUNT][BOAT_MAX] = {
 	{{560, 980, BOAT_PATROL, 0}, {1690, 1890, BOAT_GUN, 1}, {2450, 2900, BOAT_GUN, 2}, {3620, 3960, BOAT_PATROL, 0}},
@@ -420,6 +424,7 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	for(uint8_t i = 0; i < ESHOT_MAX; ++i) g->pEShots[i].active = 0;
 	for(uint8_t i = 0; i < BOOM_MAX; ++i) g->pBooms[i].active = 0;
 	boatsPlace(g);
+	radarsPlace(g);
 	padsSet(g);
 	logicChopperRespawn(g);
 	logicCameraSnap(g);
@@ -622,6 +627,63 @@ uint8_t logicJetsTripMax(const tGame *g) {
 
 uint8_t logicJetsMax(const tGame *g) {
 	return g->mission >= MISSION_COUNT - 1 ? s_pJetsMaxM3[g->difficulty] : s_pJetsMax[g->difficulty];
+}
+
+// A radar site's jet zone (SPEC 11, "World 2, slice 2"): 1200 px around it, cut at the left edge of the map and at the
+// base island's approach (W2_JET_SAFE_X, where no jet starts anyway): what the HUD and the card show red is exactly
+// where a jet can start
+static int16_t zoneLo(int16_t x) { return (int16_t)(x < RADAR_ZONE_HALF ? 0 : x - RADAR_ZONE_HALF); }
+static int16_t zoneHi(int16_t x) { return (int16_t)(x + RADAR_ZONE_HALF > W2_JET_SAFE_X ? W2_JET_SAFE_X : x + RADAR_ZONE_HALF); }
+
+uint8_t logicJetZone(const tGame *g, int16_t x) {
+	if(!g->world || !g->radarCount) return 1;   // (world 1 and mission 4 have no sites: a jet may start anywhere)
+	for(uint8_t i = 0; i < g->radarCount; ++i) {
+		const tRadar *r = &g->pRadars[i];
+		if(r->alive && x >= zoneLo(r->x) && x <= zoneHi(r->x)) return 1;
+	}
+	return 0;
+}
+
+uint8_t logicRadarZones(const tGame *g, tZone *pOut, uint8_t ubAll) {
+	uint8_t n = 0;
+	for(uint8_t i = 0; i < g->radarCount; ++i) {
+		const tRadar *r = &g->pRadars[i];
+		if(!r->alive && !ubAll) continue;
+		pOut[n].lo = zoneLo(r->x);
+		pOut[n].hi = zoneHi(r->x);
+		++n;
+	}
+	return n;
+}
+
+// World 2's radar sites, placed by the map: missions 5 and 6 only, on the islands' flat ground (art/world2/tilemap.txt:
+// the second island's east end, the fourth's, and for mission 6 the first's), the same at every skill. Zones: 1008-2208,
+// 2816-3800 and (mission 6) 0-1040: the sea between the second and fourth island, 2208-2816, is the strait, free of jets.
+static const int16_t s_pRadarPlace[MISSION_COUNT][RADAR_MAX] = {{0, 0, 0}, {1608, 3416, 0}, {440, 1608, 3416}};
+
+COLD uint8_t logicRadarSites(uint8_t ubMission, int16_t *pX) {
+	uint8_t n = 0;
+	for(uint8_t i = 0; ubMission < MISSION_COUNT && i < RADAR_MAX; ++i) {
+		if(s_pRadarPlace[ubMission][i]) pX[n++] = s_pRadarPlace[ubMission][i];
+	}
+	return n;
+}
+
+COLD void logicRadarZoneOf(int16_t x, tZone *pZ) {
+	pZ->lo = zoneLo(x);
+	pZ->hi = zoneHi(x);
+}
+
+COLD static void radarsPlace(tGame *g) {
+	int16_t pX[RADAR_MAX];
+	g->radarCount = 0;
+	g->evRadar = 0;
+	for(uint8_t i = 0, n = g->world ? logicRadarSites(g->mission, pX) : 0; i < n; ++i) {
+		tRadar *r = &g->pRadars[g->radarCount++];
+		r->x = pX[i];
+		r->alive = 1;
+		r->hp = RADAR_HP;
+	}
 }
 
 // --------------------------------------------------------------- hostages ---
@@ -1111,6 +1173,18 @@ COLD static void boatHit(tGame *g, tBoat *b, uint8_t ubDmg) {
 	addScore(g, b->kind == BOAT_GUN ? 100 : 50);
 }
 
+// A radar site takes ubDmg (a cannon hit 1, a bomb kills); at 0 it is gone with its zone (pays RADAR_SCORE)
+COLD static void radarHit(tGame *g, uint8_t i, uint8_t ubDmg) {
+	tRadar *r = &g->pRadars[i];
+	if(!r->alive) return;
+	r->hp = ubDmg >= r->hp ? 0 : (uint8_t)(r->hp - ubDmg);
+	if(r->hp) return;
+	r->alive = 0;
+	boomAt(g, r->x, FEET_Y - RADAR_H_PX / 2);
+	addScore(g, RADAR_SCORE);
+	g->evRadar = (uint8_t)(i + 1);
+}
+
 static uint8_t shotHitsTargets(tGame *g, tShot *s) {
 	// The player's cannon: jets, mines, tanks, barracks, people. 1 = used up.
 	int16_t sx = (int16_t)(s->x - 3), sy = (int16_t)(s->y - 1);
@@ -1130,6 +1204,13 @@ static uint8_t shotHitsTargets(tGame *g, tShot *s) {
 			m->active = 0;
 			boomAt(g, m->x, m->y);
 			addScore(g, 75);
+			return 1;
+		}
+	}
+	for(uint8_t i = 0; i < g->radarCount; ++i) {
+		const tRadar *r = &g->pRadars[i];
+		if(r->alive && boxHit(sx, sy, 6, 3, (int16_t)(r->x - RADAR_W_PX / 2), FEET_Y - RADAR_H_PX, RADAR_W_PX, RADAR_H_PX)) {
+			radarHit(g, i, 1);
 			return 1;
 		}
 	}
@@ -1188,6 +1269,9 @@ static void bombExplode(tGame *g, int16_t x) {
 	}
 	for(uint8_t i = 0; g->world && i < BOAT_MAX; ++i) {
 		if(g->pBoats[i].active && absw((int16_t)(g->pBoats[i].x - x)) < 30) boatHit(g, &g->pBoats[i], 3);
+	}
+	for(uint8_t i = 0; i < g->radarCount; ++i) {
+		if(g->pRadars[i].alive && absw((int16_t)(g->pRadars[i].x - x)) < 30) radarHit(g, i, RADAR_HP);
 	}
 	hostagesBlast(g, x, 14);
 }
@@ -1380,6 +1464,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 		tJet *j = &g->pJets[i];
 		if(!j->active) {
 			if(!logicJetsOn(g) || !c->alive || c->x > (g->world ? W2_JET_SAFE_X : BORDER_X + 120) || i >= ubMax) continue;
+			if(g->radarCount && !logicJetZone(g, c->x)) continue;   // (world 2 missions 5-6: only inside a live radar site's zone; the delay counts there too)
 			if(g->jetsTrip >= logicJetsTripMax(g)) continue;   // this trip's jets are all out
 			if(j->cool) { --j->cool; continue; }
 			// mostly from ahead (where the chopper is heading: you see it coming),
@@ -1822,6 +1907,7 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 	g->events = 0;
 	g->events2 = 0;
 	g->evBarracks = 0;
+	g->evRadar = 0;
 	if(g->stateTimer) --g->stateTimer;
 	if(g->state != GS_TITLE) g->attract = 0;
 	tInput sDemoIn;
@@ -2172,6 +2258,10 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		else n = drawAdd(pOut, n, (int16_t)(pB->x - 24 - cam), FEET_Y - 28, BOB_BARRACKS, f);
 	}
 	if(g->world) n = padsDraw(g, pOut, n);
+	for(uint8_t i = 0; i < g->radarCount; ++i) {   // (world 2 missions 5-6: a standing site, its dish turning)
+		const tRadar *r = &g->pRadars[i];
+		if(r->alive) n = drawAddS(pOut, n, (int16_t)(r->x - 16 - cam), FEET_Y - 38, BOB_RADAR, (uint8_t)((g->frame >> 3) & 3));
+	}
 	// the chopper's shadow, on the track under it (and under the people)
 	if(logicChopperVisible(g) && !(g->world && logicOnWater(g->chop.x))) {
 		static const uint8_t pSize[13] = {0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3};   // by altitude / 16
@@ -2523,23 +2613,28 @@ static uint8_t routeX(int16_t x) {
 
 // World 2's map: 4608 px at an 18th, the sea dark, the islands on it, the barracks, pads
 // and hangar, the base island ours (the boats are in the brief: the map is made once, at the load)
-static uint8_t routeX2(int16_t x) {
+uint8_t logicRouteX2(int16_t x) {
 	return (uint8_t)(((uint32_t)(uint16_t)x * 3641u) >> 16);
 }
 
 COLD static uint8_t routeMap2(const tGame *g, tRouteMark *pOut) {
 	uint8_t n = 0;
 	const tIsland *pB = &g_pIslands[W2_BASE_ISLAND];
-	pOut[n++] = (tRouteMark){ROUTE_HOME, routeX2(pB->x0), (uint8_t)(routeX2(pB->x1) - routeX2(pB->x0))};
+	pOut[n++] = (tRouteMark){ROUTE_HOME, logicRouteX2(pB->x0), (uint8_t)(logicRouteX2(pB->x1) - logicRouteX2(pB->x0))};
 	for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
-		pOut[n++] = (tRouteMark){ROUTE_ISLAND, routeX2(g_pIslands[i].x0), (uint8_t)(routeX2(g_pIslands[i].x1) - routeX2(g_pIslands[i].x0))};
+		pOut[n++] = (tRouteMark){ROUTE_ISLAND, logicRouteX2(g_pIslands[i].x0), (uint8_t)(logicRouteX2(g_pIslands[i].x1) - logicRouteX2(g_pIslands[i].x0))};
 	}
-	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) pOut[n++] = (tRouteMark){ROUTE_BARRACKS, routeX2(g->pBarracks[b].x), 7};
+	tZone sZone[RADAR_MAX];   // the radar sites' zones: a red line over the islands (all of them: the card is shown before a shot)
+	for(uint8_t i = 0, nz = logicRadarZones(g, sZone, 1); i < nz; ++i) {
+		pOut[n++] = (tRouteMark){ROUTE_ZONE, logicRouteX2(sZone[i].lo), (uint8_t)(logicRouteX2(sZone[i].hi) - logicRouteX2(sZone[i].lo))};
+	}
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) pOut[n++] = (tRouteMark){ROUTE_BARRACKS, logicRouteX2(g->pBarracks[b].x), 7};
+	for(uint8_t i = 0; i < g->radarCount; ++i) pOut[n++] = (tRouteMark){ROUTE_RADAR, logicRouteX2(g->pRadars[i].x), 3};
 	for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
-		pOut[n++] = (tRouteMark){ROUTE_PAD, routeX2((int16_t)(g_pIslands[i].padX - logicPadPx(g, i) / 2)), (uint8_t)(logicPadPx(g, i) / 18 + 1)};
+		pOut[n++] = (tRouteMark){ROUTE_PAD, logicRouteX2((int16_t)(g_pIslands[i].padX - logicPadPx(g, i) / 2)), (uint8_t)(logicPadPx(g, i) / 18 + 1)};
 	}
-	pOut[n++] = (tRouteMark){ROUTE_HANGAR, routeX2(W2_HANGAR_X), 64 / 18};
-	pOut[n++] = (tRouteMark){ROUTE_HERE, routeX2(g->chop.x), 1};
+	pOut[n++] = (tRouteMark){ROUTE_HANGAR, logicRouteX2(W2_HANGAR_X), 64 / 18};
+	pOut[n++] = (tRouteMark){ROUTE_HERE, logicRouteX2(g->chop.x), 1};
 	return n;
 }
 

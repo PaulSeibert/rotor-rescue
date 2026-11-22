@@ -3741,6 +3741,358 @@ static void testW2JetIsDrawnFromTheSet(void) {
 	CHECK(g_pBobW[BOB_W2_JET] == g_pBobW[BOB_JET] && g_pBobH[BOB_W2_JET] == g_pBobH[BOB_JET] && g_pBobFrames[BOB_W2_JET] == g_pBobFrames[BOB_JET]);
 }
 
+// ---- radar sites and the jet zone rule (world 2 slice 2, slice A; SPEC 11 "World 2, slice 2") ----
+// The sites, as the spec writes them: mission 4 none; mission 5 x 1608 (second island) and 3416 (fourth); mission 6 those and 440 (first)
+static const int16_t s_pRadarX[3][3] = {{0, 0, 0}, {1608, 3416, 0}, {440, 1608, 3416}};
+static const uint8_t s_pRadarN[3] = {0, 2, 3};
+
+static void hitRadar(uint8_t i, uint8_t ubShots) {
+	for(uint8_t k = 0; k < ubShots; ++k) {
+		g.pShots[0] = (tShot){.x = g.pRadars[i].x, .y = FEET_Y - 20, .active = 1, .kind = SHOT_CANNON, .life = 36};
+		step(NONE, 1);
+	}
+}
+
+// Missions 5 and 6 have their sites on land (an island, not the base island), the same at every skill; mission 4, world 1
+// and a fresh game have none
+static void testW2RadarSitesArePlaced(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			CHECK(g.radarCount == s_pRadarN[m]);
+			for(uint8_t i = 0; i < g.radarCount; ++i) {
+				const tRadar *r = &g.pRadars[i];
+				CHECK(r->alive && r->hp == RADAR_HP);
+				uint8_t isFound = 0;
+				for(uint8_t k = 0; k < s_pRadarN[m]; ++k) isFound |= r->x == s_pRadarX[m][k];
+				CHECK(isFound);
+				CHECK(!logicOnWater((int16_t)(r->x - RADAR_W_PX / 2)) && !logicOnWater((int16_t)(r->x + RADAR_W_PX / 2 - 1)));
+				uint8_t iIsland = 0xFF;
+				for(uint8_t k = 0; k < W2_ISLANDS; ++k) if(r->x >= g_pIslands[k].x0 && r->x < g_pIslands[k].x1) iIsland = k;
+				CHECK(iIsland < W2_BASE_ISLAND);
+				CHECK(logicPadAt(&g, (int16_t)(r->x - RADAR_W_PX / 2)) == 0xFF && logicPadAt(&g, (int16_t)(r->x + RADAR_W_PX / 2)) == 0xFF);   // not on a pad
+			}
+		}
+	}
+	newGame();
+	CHECK(g.radarCount == 0);
+	logicStartAt(&g, 1, 1);
+	CHECK(g.radarCount == 2);
+	logicStartMission(&g, 0);
+	CHECK(g.radarCount == 0);   // (mission 4 again: the sites do not carry over)
+	newGame();
+	logicStartAt(&g, 0, 2);
+	CHECK(g.radarCount == 0);
+}
+
+// The zone is 1200 px around a live site, cut at the base's approach (W2_JET_SAFE_X); edges exact; mission 4 and world 1 are everywhere
+static void testW2RadarZonesAndTheRule(void) {
+	newWorld2(1);
+	tZone z[RADAR_MAX];
+	CHECK(logicRadarZones(&g, z, 0) == 2);
+	CHECK(z[0].lo == 1608 - RADAR_ZONE_HALF && z[0].hi == 1608 + RADAR_ZONE_HALF);
+	CHECK(z[1].lo == 3416 - RADAR_ZONE_HALF && z[1].hi == W2_JET_SAFE_X);
+	CHECK(!logicJetZone(&g, z[0].lo - 1) && logicJetZone(&g, z[0].lo) && logicJetZone(&g, z[0].hi) && !logicJetZone(&g, z[0].hi + 1));
+	CHECK(!logicJetZone(&g, z[1].lo - 1) && logicJetZone(&g, z[1].lo) && logicJetZone(&g, W2_JET_SAFE_X) && !logicJetZone(&g, W2_JET_SAFE_X + 1));
+	CHECK(!logicJetZone(&g, 500) && !logicJetZone(&g, 2500) && !logicJetZone(&g, W2_START_X));
+	CHECK(logicJetZone(&g, 1608) && logicJetZone(&g, 3416));
+	// a site down: its zone is gone, the other's stays; ubAll still lists both (the card)
+	g.pRadars[0].alive = 0;
+	CHECK(logicRadarZones(&g, z, 0) == 1 && z[0].lo == 3416 - RADAR_ZONE_HALF);
+	CHECK(logicRadarZones(&g, z, 1) == 2);
+	CHECK(!logicJetZone(&g, 1608) && logicJetZone(&g, 3416));
+	g.pRadars[1].alive = 0;
+	CHECK(logicRadarZones(&g, z, 0) == 0);
+	for(int16_t x = 0; x < W2_W; x += 8) CHECK(!logicJetZone(&g, x));   // every site down: no jet start anywhere
+	// mission 6: three zones; the first cut at the left edge of the map
+	newWorld2(2);
+	CHECK(logicRadarZones(&g, z, 0) == 3);
+	uint8_t isLeft = 0;
+	for(uint8_t i = 0; i < 3; ++i) isLeft |= z[i].lo == 0 && z[i].hi == 440 + RADAR_ZONE_HALF;
+	CHECK(isLeft);
+	CHECK(logicJetZone(&g, 0) && logicJetZone(&g, 1040) && !logicJetZone(&g, 2500));
+	// mission 4 and world 1: no sites, so a jet may start anywhere (today's rule)
+	newWorld2(0);
+	CHECK(logicRadarZones(&g, z, 1) == 0);
+	for(int16_t x = 0; x < W2_W; x += 8) CHECK(logicJetZone(&g, x));
+	newGame();
+	for(int16_t x = 0; x < WORLD_W; x += 8) CHECK(logicJetZone(&g, x));
+}
+
+// In the game: a jet starts only while the chopper is inside a live zone. Outside every zone nothing comes for as long as it
+// stays (the budget is not spent), inside one the jets come as before
+static void testW2JetsStartOnlyInsideALiveZone(void) {
+	static const int16_t s_pOut[] = {500, 800, 2400, 2500, 2700};
+	static const int16_t s_pIn[] = {1100, 1608, 2100, 2900, 3416, 3700};
+	for(uint8_t m = 1; m < 3; ++m) {
+		for(uint8_t k = 0; k < 5; ++k) {
+			if(m == 2 && s_pOut[k] < 1000) continue;   // (mission 6: the first island's zone is 0-1040)
+			newWorld2(m);
+			logicSetDifficulty(&g, 5);
+			noBoats();
+			g.ghost = 1;
+			g.trip = 6;
+			flyAt(s_pOut[k], 120);
+			uint8_t iJets = 0;
+			for(int f = 0; f < 2500; ++f) {
+				g.chop.x = s_pOut[k]; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+				g.spawnTimer = 60000;
+				step(NONE, 1);
+				iJets += (g.events & EV_JET) != 0;
+			}
+			if(iJets) printf("mission %d: %d jets at x %d outside every zone\n", m + 4, iJets, s_pOut[k]);
+			CHECK(iJets == 0);
+			CHECK(g.jetsTrip == 0);   // the budget is untouched
+		}
+		for(uint8_t k = 0; k < 6; ++k) {
+			newWorld2(m);
+			logicSetDifficulty(&g, 5);
+			noBoats();
+			g.ghost = 1;
+			g.trip = 6;
+			flyAt(s_pIn[k], 120);
+			uint8_t iJets = 0;
+			for(int f = 0; f < 2500; ++f) {
+				g.chop.x = s_pIn[k]; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+				g.spawnTimer = 60000;
+				step(NONE, 1);
+				iJets += (g.events & EV_JET) != 0;
+			}
+			if(!iJets) printf("mission %d: no jet at x %d inside a zone\n", m + 4, s_pIn[k]);
+			CHECK(iJets >= 1);
+		}
+	}
+}
+
+// The first-jet delay counts only while the chopper is inside a zone (as it already did for the base's approach): 500 frames
+// of a zone, not of the map
+static void testW2JetDelayCountsInsideZonesOnly(void) {
+	newWorld2(1);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 6;
+	flyAt(2500, 120);   // the gap between the zones: 800 frames, no countdown
+	for(int f = 0; f < 800; ++f) {
+		g.chop.x = 2500; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+	}
+	CHECK(g.pJets[0].cool >= W2_JET_FIRST - 1);
+	int iFirst = -1;
+	for(int f = 0; f < 1200 && iFirst < 0; ++f) {
+		g.chop.x = 1608; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		if(g.events & EV_JET) iFirst = f;
+	}
+	CHECK(iFirst >= W2_JET_FIRST - 5 && iFirst <= W2_JET_FIRST + 5);
+}
+
+// A radar site takes 4 cannon hits and pays 150, a bomb within 30 px kills it; its zone goes with it and the jets of its
+// stretch end for the mission
+static void testW2RadarHitsBombsAndTheZoneGoes(void) {
+	newWorld2(1);
+	logicSetDifficulty(&g, 3);
+	noBoats();
+	g.ghost = 1;
+	flyAt(1000, 100);
+	uint32_t ulScore = g.score;
+	hitRadar(0, 3);
+	CHECK(g.pRadars[0].alive && g.pRadars[1].alive);
+	CHECK(g.pRadars[0].hp == RADAR_HP - 3 && g.score == ulScore);
+	// a shot beside it, or above it, does nothing
+	g.pShots[0] = (tShot){.x = (int16_t)(g.pRadars[0].x + RADAR_W_PX / 2 + 6), .y = FEET_Y - 20, .active = 1, .kind = SHOT_CANNON, .life = 36};
+	step(NONE, 1);
+	g.pShots[0] = (tShot){.x = g.pRadars[0].x, .y = FEET_Y - RADAR_H_PX - 8, .active = 1, .kind = SHOT_CANNON, .life = 36};
+	step(NONE, 1);
+	CHECK(g.pRadars[0].alive && g.pRadars[0].hp == RADAR_HP - 3);
+	hitRadar(0, 1);
+	CHECK(!g.pRadars[0].alive && g.pRadars[0].hp == 0);
+	CHECK(g.score == ulScore + RADAR_SCORE);
+	uint8_t iBooms = 0;
+	for(uint8_t i = 0; i < BOOM_MAX; ++i) iBooms += g.pBooms[i].active;
+	CHECK(iBooms >= 1);
+	// a bomb: 40 px off does nothing, 20 px off kills at once
+	int16_t wX1 = g.pRadars[1].x;
+	g.pShots[0] = (tShot){.x = (int16_t)(wX1 + 40), .y = FEET_Y - 8, .vy = 48, .active = 1, .kind = SHOT_BOMB, .life = 60};
+	step(NONE, 2);
+	CHECK(g.pRadars[1].alive && g.pRadars[1].hp == RADAR_HP);
+	g.pShots[0] = (tShot){.x = (int16_t)(wX1 + 20), .y = FEET_Y - 8, .vy = 48, .active = 1, .kind = SHOT_BOMB, .life = 60};
+	step(NONE, 2);
+	CHECK(!g.pRadars[1].alive);
+	CHECK(g.score == ulScore + 2 * RADAR_SCORE);
+	// with both down no jet starts anywhere in the mission
+	g.trip = 6;
+	logicSetDifficulty(&g, 5);
+	for(int16_t x = 1000; x <= 3600; x += 800) {
+		g.pJets[0].active = g.pJets[1].active = 0;
+		flyAt(x, 120);
+		for(int f = 0; f < 1500; ++f) {
+			g.chop.x = x; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+			g.spawnTimer = 60000;
+			step(NONE, 1);
+			CHECK(!(g.events & EV_JET));
+		}
+	}
+}
+
+// Shooting one site ends the jets of its stretch only: the other site's zone still brings them
+static void testW2OneSiteDownLeavesTheOthersZone(void) {
+	newWorld2(1);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 6;
+	uint8_t iWest = g.pRadars[0].x == 1608 ? 0 : 1;
+	g.pRadars[iWest].alive = 0;
+	flyAt(1608, 120);
+	uint8_t iJets = 0;
+	for(int f = 0; f < 2000; ++f) {
+		g.chop.x = 1608; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		iJets += (g.events & EV_JET) != 0;
+	}
+	CHECK(iJets == 0);
+	newWorld2(1);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 6;
+	g.pRadars[iWest].alive = 0;
+	flyAt(3416, 120);
+	iJets = 0;
+	for(int f = 0; f < 2000; ++f) {
+		g.chop.x = 3416; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		iJets += (g.events & EV_JET) != 0;
+	}
+	CHECK(iJets >= 1);
+}
+
+// A radar never shoots: nothing is fired beside one at the hardest skill (no boats, no jets), the chopper not in ghost mode
+static void testW2RadarNeverShoots(void) {
+	newWorld2(2);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.jetsTrip = 255;
+	flyAt(g.pRadars[0].x, GROUND_Y - 30);
+	CHECK(g.radarCount == 3);
+	for(int f = 0; f < 600; ++f) {
+		g.chop.x = (int16_t)(g.pRadars[0].x + 60); g.chop.y = GROUND_Y - 30; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		for(uint8_t i = 0; i < ESHOT_MAX; ++i) CHECK(!g.pEShots[i].active);
+	}
+	CHECK(g.chop.alive);
+}
+
+// Mission 4 and world 1 keep their jets wherever the chopper flies (no sites there)
+static void testW2Mission4KeepsItsJetsEverywhere(void) {
+	newWorld2(0);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 0;
+	flyAt(2500, 120);
+	uint8_t iJets = 0;
+	for(int f = 0; f < 1500; ++f) {
+		g.chop.x = 2500; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		iJets += (g.events & EV_JET) != 0;
+	}
+	CHECK(iJets >= 1);
+	newGame();
+	logicSetDifficulty(&g, 5);
+	g.trip = 1;
+	flyAt(1200, 120);
+	iJets = 0;
+	for(int f = 0; f < 800; ++f) {
+		g.chop.x = 1200; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		iJets += (g.events & EV_JET) != 0;
+	}
+	CHECK(iJets >= 1);
+}
+
+// The site is drawn from the set (the dish turning through all 4 frames) while it stands and is in view, never in mission 4;
+// the card's strip map carries each zone as a red line and each site as a tick
+static void testW2RadarIsDrawnAndMapped(void) {
+	tDraw d[DRAW_MAX];
+	newWorld2(1);
+	flyAt(1608, 120);
+	uint8_t pSeen[4] = {0, 0, 0, 0};
+	int iAt = 0;
+	for(int f = 0; f < 80; ++f) {
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob != BOB_RADAR) continue;
+			CHECK(d[i].frame < 4 && d[i].y == FEET_Y - 38);
+			pSeen[d[i].frame] = 1;
+			iAt = d[i].x + 16 + g.cam;
+		}
+		g.chop.x = 1608; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		step(NONE, 1);
+	}
+	CHECK(pSeen[0] && pSeen[1] && pSeen[2] && pSeen[3]);
+	CHECK(iAt == 1608);
+	uint8_t iA = g.pRadars[0].x == 1608 ? 0 : 1;
+	g.pRadars[iA].alive = 0;
+	uint8_t n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_RADAR);
+	newWorld2(0);
+	flyAt(1608, 120);
+	n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_RADAR);
+	CHECK(g_pBobW[BOB_RADAR] == 33 && g_pBobH[BOB_RADAR] == 39 && g_pBobFrames[BOB_RADAR] == 4);
+	// the strip map
+	for(uint8_t m = 0; m < 3; ++m) {
+		newWorld2(m);
+		tRouteMark mk[ROUTE_MARKS + 8];
+		uint8_t nm = logicRouteMap(&g, mk);
+		CHECK(nm <= ROUTE_MARKS);
+		uint8_t iZones = 0, iTicks = 0;
+		for(uint8_t i = 0; i < nm; ++i) {
+			iZones += mk[i].kind == ROUTE_ZONE;
+			iTicks += mk[i].kind == ROUTE_RADAR;
+			if(mk[i].kind == ROUTE_ZONE) CHECK(mk[i].w >= 1 && mk[i].x + mk[i].w <= 256);
+		}
+		CHECK(iZones == s_pRadarN[m] && iTicks == s_pRadarN[m]);
+	}
+	newGame();
+	tRouteMark mk[ROUTE_MARKS + 8];
+	uint8_t nm = logicRouteMap(&g, mk);
+	for(uint8_t i = 0; i < nm; ++i) CHECK(mk[i].kind != ROUTE_ZONE && mk[i].kind != ROUTE_RADAR);
+}
+
+// The card's map is made for every mission of the world at its load, from the sites table and the zone of a site (main.c routeOverlays),
+// not from a game in that mission: both must be what the game itself places and uses
+static void testW2RadarSitesApiMatchesTheGame(void) {
+	int16_t pX[RADAR_MAX];
+	for(uint8_t m = 0; m < 3; ++m) {
+		newWorld2(m);
+		CHECK(logicRadarSites(m, pX) == g.radarCount);
+		tZone z[RADAR_MAX];
+		uint8_t nz = logicRadarZones(&g, z, 1);
+		CHECK(nz == g.radarCount);
+		for(uint8_t i = 0; i < g.radarCount; ++i) {
+			CHECK(pX[i] == g.pRadars[i].x);
+			tZone zo;
+			logicRadarZoneOf(pX[i], &zo);
+			CHECK(zo.lo == z[i].lo && zo.hi == z[i].hi);
+			CHECK(zo.hi - zo.lo <= 2 * RADAR_ZONE_HALF && zo.lo >= 0 && zo.hi <= W2_JET_SAFE_X);
+		}
+	}
+	CHECK(logicRadarSites(3, pX) == 0 && logicRadarSites(200, pX) == 0);
+	// the map's x for a world x (x / 18, the card's strip map)
+	CHECK(logicRouteX2(0) == 0 && logicRouteX2(1800) == 100 && logicRouteX2(W2_JET_SAFE_X) == 211);
+}
+
 int main(void) {
 	testRotorRateFollowsSpeedAndClimb();
 	testRotorIdlesSlowAndSoftOnTheGround();
@@ -3885,6 +4237,16 @@ int main(void) {
 	testW2JetCanBeShotDown();
 	testW2JetsAndBoatsShareTheAttackToken();
 	testW2JetIsDrawnFromTheSet();
+	testW2RadarSitesArePlaced();
+	testW2RadarZonesAndTheRule();
+	testW2JetsStartOnlyInsideALiveZone();
+	testW2JetDelayCountsInsideZonesOnly();
+	testW2RadarHitsBombsAndTheZoneGoes();
+	testW2OneSiteDownLeavesTheOthersZone();
+	testW2RadarNeverShoots();
+	testW2Mission4KeepsItsJetsEverywhere();
+	testW2RadarIsDrawnAndMapped();
+	testW2RadarSitesApiMatchesTheGame();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);
 		return 1;

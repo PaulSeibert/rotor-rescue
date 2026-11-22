@@ -95,11 +95,11 @@ enum {
 	BOB_HOSTAGE, BOB_SHOT, BOB_BOMB, BOB_SHELL, BOB_BOOM, BOB_SHADOW, BOB_SMOKE, BOB_HANGAR,
 	BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_JET, BOB_MINE, BOB_FLAG,
 	BOB_W2_BARRACKS, BOB_PATROL, BOB_GUNBOAT, BOB_PAD48, BOB_PAD64, BOB_PAD80, BOB_PAD96,
-	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET,
+	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET, BOB_RADAR,
 	BOB_TYPES
 };
 #define BOB_W1_FIRST BOB_FENCE       // world 1's own BOBs: BOB_FENCE .. BOB_FLAG
-#define BOB_W2_FIRST BOB_W2_BARRACKS // world 2's: BOB_W2_BARRACKS .. BOB_W2_JET (the jet is world 1's, a copy in the set)
+#define BOB_W2_FIRST BOB_W2_BARRACKS // world 2's: BOB_W2_BARRACKS .. BOB_RADAR (the jet is world 1's, a copy in the set)
 // The chopper's shadow on the track: frame = size * 2 + dither phase (x & 1),
 // size 0 (on the ground) .. SHADOW_SIZES - 1 (high up)
 #define SHADOW_Y (GROUND_Y + 1)
@@ -119,6 +119,8 @@ enum { JET_L, JET_R, JET_FLASH_L, JET_FLASH_R };   // the tell: nose and engine 
 // patrol boat's (missions 5 and 6) is its bow gun up and its lamp lit, held until the shot
 enum { PATROL_L, PATROL_R, PATROL_TELL_L, PATROL_TELL_R };
 enum { GUNBOAT_L, GUNBOAT_TELL_L, GUNBOAT_FIRE_L, GUNBOAT_R, GUNBOAT_TELL_R, GUNBOAT_FIRE_R };
+// The radar site's dish turns: wide, half, thin, half (the red lamp blinks on the even frames)
+enum { RADAR_F0, RADAR_F1, RADAR_F2, RADAR_F3 };
 enum { PAD_LAMP_RED, PAD_LAMP_YELLOW };                  // off the pad, over it (no green in PF1)
 // A pad is one BOB a width (BOB_PAD48 + (px - 48) / 16: PAD_ROWS tall, an end cap with its pylon, the
 // units with their chevrons, the H, the other cap: main.c puts it together at the card, padCompose); its
@@ -227,6 +229,20 @@ typedef struct {
 	uint8_t fx, fy;
 } tMine;
 
+// World 2's radar sites (missions 5 and 6; SPEC 11, "World 2, slice 2"): static, on an island, never shooting. While one
+// is alive the 1200 px stretch around it (its zone) is where jets may start; destroying it ends jets there.
+#define RADAR_MAX 3
+#define RADAR_HP 4               // a cannon hit is 1, a bomb kills
+#define RADAR_ZONE_HALF 600      // the zone is x - 600 .. x + 600 (1200 px), cut at W2_JET_SAFE_X
+#define RADAR_SCORE 150
+#define RADAR_W_PX 34            // its hit box: 34 x 38, standing on FEET_Y
+#define RADAR_H_PX 38
+typedef struct {
+	int16_t x;               // centre
+	uint8_t alive, hp;
+} tRadar;
+typedef struct { int16_t lo, hi; } tZone;
+
 enum { SHOT_CANNON, SHOT_BOMB };
 enum { ESHOT_SHELL, ESHOT_MISSILE, ESHOT_BOMB };
 
@@ -315,6 +331,9 @@ typedef struct {
 	tMine pMines[MINE_MAX];
 	uint8_t padPx[W2_ISLANDS];   // each island's pad width by the skill (logicPadPx)
 	tBoat pBoats[BOAT_MAX];
+	tRadar pRadars[RADAR_MAX];   // world 2 missions 5 and 6: the radar sites (radarCount placed, alive or not)
+	uint8_t radarCount;
+	uint8_t evRadar;     // a radar site went down this frame (index + 1)
 	uint8_t atkWait;     // frames until another boat may start a tell (one attack at a time, 3 s apart)
 	uint8_t atkLast;     // the boat that started the latest one (it may go on by its own gap)
 	uint8_t wet;         // the skids are in the water (a splash made; rises again when they lift)
@@ -501,6 +520,15 @@ uint16_t logicGroundDwell(const tGame *g);
 // How many jets may be out at once: 1 on skill 1-2, and on 3 until mission 3; 2 above
 uint8_t logicJetsMax(const tGame *g);
 uint8_t logicJetsTripMax(const tGame *g);   // most jets that may appear in one trip (base to base)
+// The radar sites' jet zones (SPEC 11, "World 2, slice 2"): may a jet START with the chopper at x? 1 in world 1 and in a
+// mission with no radar sites (mission 4); otherwise only inside the zone of a live site
+uint8_t logicJetZone(const tGame *g, int16_t x);
+// The zones of the live sites (ubAll: of every site, for the card), cut to 0 .. W2_JET_SAFE_X: how many, in pOut (RADAR_MAX)
+uint8_t logicRadarZones(const tGame *g, tZone *pOut, uint8_t ubAll);
+// A mission's sites (0-2 within world 2: the x of each, up to RADAR_MAX; how many) and the zone of a site at x: for the card's
+// map, which is made for every mission of the world at its load
+uint8_t logicRadarSites(uint8_t ubMission, int16_t *pX);
+void logicRadarZoneOf(int16_t x, tZone *pZ);
 
 // Drawing: what's on screen, back to front, in screen coordinates (top-left)
 typedef struct {
@@ -701,9 +729,10 @@ const char *logicBrief(const tGame *g);
 #define ROUTE_W (WORLD_W / ROUTE_SCALE)   // 256 px
 // (World 2's map is world x / 18: ROUTE_ISLAND the land)
 enum { ROUTE_ENEMY, ROUTE_HOME, ROUTE_FENCE, ROUTE_BARRACKS, ROUTE_PAD, ROUTE_HANGAR, ROUTE_HERE,
-	ROUTE_ISLAND };
+	ROUTE_ISLAND, ROUTE_ZONE, ROUTE_RADAR };   // (world 2 missions 5-6: a jet zone's red line, a radar site's tick)
 typedef struct { uint8_t kind, x, w; } tRouteMark;   // x, w in map px
-#define ROUTE_MARKS (6 + 4 * BARRACKS_COUNT)
+#define ROUTE_MARKS (6 + 4 * BARRACKS_COUNT + 2 * RADAR_MAX)
 uint8_t logicRouteMap(const tGame *g, tRouteMark *pOut);   // back to front
+uint8_t logicRouteX2(int16_t x);   // world 2's map x for a world x (x / 18): the card's jet zones and radar sites
 
 #endif // _LOGIC_H_

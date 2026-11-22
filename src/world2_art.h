@@ -92,6 +92,14 @@
 #define WORLD2_PAD80_OFFS 66792
 #define WORLD2_PAD96_OFFS 68176
 #define WORLD2_PAD_COMPOSED_BYTES 4976
+// slice 2's BOBs: disk/world2x.bin, in a chip block of their own (worldLoad allocates it at world 2's load)
+#define ART_RADAR_W 33
+#define ART_RADAR_H 39
+#define ART_RADAR_FRAMES 4
+#define ART_RADAR_BITMAP_W 48
+#define WORLD2X_RADAR_OFFS 0
+#define WORLD2X_RADARMASK_OFFS 2808
+#define WORLD2X_BYTES 5616
 
 // Per mission (4, 5, 6): PF2 pens 1-7 (index 0 unused), dark to light; the sky gradient
 // top to H (lines 24-179), the sea's H to C (180-207), C under the strip; AGA: 24 bits
