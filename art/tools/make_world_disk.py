@@ -50,7 +50,7 @@ SET = [("w2_barracks", None, "W2_BARRACKS", True), ("w2_patrol_boat", [0, 2, 4, 
 # World 2's slice 2 BOBs (missions 5 and 6: SPEC 11, "World 2, slice 2"): a file of their own, loaded into a chip block of its
 # own that worldLoad allocates when world 2 loads (after the boot splash's 47 KB are freed) and frees when the game leaves
 # world 2, so the boot-time block, the title and world 1 stay as they were.
-SETX = [("w2_radar", None, "RADAR", True)]   # slice A: the radar site, 4 frames, the dish turning: wide, half, thin, half
+SETX = [("w2_radar", None, "RADAR", True), ("w2_windsock", None, "SOCK", True)]   # slice A: the radar site, 4 frames, the dish turning: wide, half, thin, half
 PAD_ROWS = 46
 PAD_WIDTHS = (48, 64, 80, 96)   # the pad's widths on the 16 px grid: one composed BOB each (chip, 3 planes, no mask)
 SEA_LINES = 28

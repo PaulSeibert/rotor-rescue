@@ -18,7 +18,7 @@ const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_SHADOW] = 32, [BOB_SMOKE] = 16,
 	[BOB_W2_BARRACKS] = 51, [BOB_PATROL] = 43, [BOB_GUNBOAT] = 61, [BOB_PAD48] = 48,
 	[BOB_PAD64] = 64, [BOB_PAD80] = 80, [BOB_PAD96] = 96, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 32,
-	[BOB_RADAR] = 33,
+	[BOB_RADAR] = 33, [BOB_SOCK] = 10,
 };
 const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_HANGAR] = 40, [BOB_FENCE] = 32, [BOB_BARRACKS] = 28, [BOB_TANK] = 14,
@@ -27,7 +27,7 @@ const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_SHADOW] = 4, [BOB_SMOKE] = 8,
 	[BOB_W2_BARRACKS] = 31, [BOB_PATROL] = 17, [BOB_GUNBOAT] = 30, [BOB_PAD48] = PAD_ROWS,
 	[BOB_PAD64] = PAD_ROWS, [BOB_PAD80] = PAD_ROWS, [BOB_PAD96] = PAD_ROWS, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 12,
-	[BOB_RADAR] = 39,
+	[BOB_RADAR] = 39, [BOB_SOCK] = 20,
 };
 // (world 2's frames are the ones the floppy set carries: art/tools/make_world_disk.py picks
 // them from the art: one wake frame a facing and the patrol boat's tell a facing, the gunboat's fire frame is its second tell's,
@@ -39,7 +39,7 @@ const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_SHADOW] = SHADOW_SIZES * 2, [BOB_SMOKE] = 3,
 	[BOB_W2_BARRACKS] = 4, [BOB_PATROL] = 4, [BOB_GUNBOAT] = 6, [BOB_PAD48] = 1,
 	[BOB_PAD64] = 1, [BOB_PAD80] = 1, [BOB_PAD96] = 1, [BOB_PAD_LAMP] = 2, [BOB_SPLASH] = 5, [BOB_W2_JET] = 4,
-	[BOB_RADAR] = 4,
+	[BOB_RADAR] = 4, [BOB_SOCK] = 2,
 };
 
 // World 2's islands (logic.h): the tile map's "island" lines (art/world2/tilemap.txt), px
@@ -353,6 +353,7 @@ COLD void logicChopperRespawn(tGame *g) {
 // keeps its slot whether it is there or not (a lower skill leaves the slot empty).
 COLD static void padsSet(tGame *g);
 COLD static void radarsPlace(tGame *g);
+static uint16_t gustGap(tGame *g);
 typedef struct { int16_t x0, x1; uint8_t kind, minSkill; } tBoatPlace;
 static const tBoatPlace s_pBoatPlace[MISSION_COUNT][BOAT_MAX] = {
 	{{560, 980, BOAT_PATROL, 0}, {1690, 1890, BOAT_GUN, 1}, {2450, 2900, BOAT_GUN, 2}, {3620, 3960, BOAT_PATROL, 0}},
@@ -425,6 +426,9 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	for(uint8_t i = 0; i < BOOM_MAX; ++i) g->pBooms[i].active = 0;
 	boatsPlace(g);
 	radarsPlace(g);
+	g->gustTell = g->gustOn = g->gustFx = 0;   // (the wind: its first tell no sooner than GUST_FIRST frames into the mission)
+	if(!g->gustSeed) g->gustSeed = 0xB5E1;
+	g->gustTimer = (uint16_t)(GUST_FIRST + gustGap(g) - GUST_GAP_MIN);
 	padsSet(g);
 	logicChopperRespawn(g);
 	logicCameraSnap(g);
@@ -627,6 +631,56 @@ uint8_t logicJetsTripMax(const tGame *g) {
 
 uint8_t logicJetsMax(const tGame *g) {
 	return g->mission >= MISSION_COUNT - 1 ? s_pJetsMaxM3[g->difficulty] : s_pJetsMax[g->difficulty];
+}
+
+uint8_t logicGustsOn(const tGame *g) {
+	return g->world && g->mission >= 1 && g->difficulty != 1;
+}
+
+// World 2's wind (SPEC 11, slice B). The gust's own random: a 16-bit xorshift, so the game's LFSR (the jets, the aim) is not disturbed
+static uint16_t gustGap(tGame *g) {
+	uint16_t s = g->gustSeed;
+	s ^= (uint16_t)(s << 7);
+	s ^= (uint16_t)(s >> 9);
+	s ^= (uint16_t)(s << 8);
+	g->gustSeed = s;
+	return (uint16_t)(GUST_GAP_MIN + (s & 511) % (GUST_GAP_MAX - GUST_GAP_MIN + 1));
+}
+
+// Skill 4-5: the wind acts anywhere; skill 2-3: not within GUST_BARRACKS_CLEAR px of a barracks
+static uint8_t gustClear(const tGame *g) {
+	if(g->difficulty >= 4) return 1;
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
+		if(absw((int16_t)(g->chop.x - g->pBarracks[b].x)) < GUST_BARRACKS_CLEAR) return 0;
+	}
+	return 1;
+}
+
+__attribute__((noinline)) static void windUpdate(tGame *g) {
+	if(!logicGustsOn(g)) { g->gustTell = g->gustOn = 0; return; }
+	tChopper *c = &g->chop;
+	if(g->gustTell || g->gustOn) {
+		if(c->landed || !c->alive) {   // (a landed chopper is never pushed: what is left is dropped, then a calm)
+			g->gustTell = g->gustOn = 0;
+			g->gustTimer = gustGap(g);
+			return;
+		}
+		if(g->gustTell) {
+			if(!--g->gustTell) { g->gustOn = GUST_FRAMES; g->events3 |= EV3_GUST; }
+			return;
+		}
+		if(gustClear(g)) {
+			subStep(&c->x, GUST_PUSH, &g->gustFx);
+			if(c->x > logicWorldW(g) - 24) c->x = (int16_t)(logicWorldW(g) - 24);
+		}
+		if(!--g->gustOn) g->gustTimer = gustGap(g);
+		return;
+	}
+	if(g->gustTimer) { --g->gustTimer; return; }
+	if(!c->landed && c->alive && !g->airGrace && gustClear(g)) {
+		g->gustTell = GUST_TELL_FRAMES;
+		g->events3 |= EV3_GUSTTELL;
+	}
 }
 
 // A radar site's jet zone (SPEC 11, "World 2, slice 2"): 1200 px around it, cut at the left edge of the map and at the
@@ -1843,7 +1897,7 @@ static void worldUpdate(tGame *g) {
 	eshotsUpdate(g);
 	tanksUpdate(g);
 	jetsUpdate(g);
-	if(g->world) boatsUpdate(g);
+	if(g->world) { boatsUpdate(g); windUpdate(g); }
 	minesUpdate(g);
 	boomsUpdate(g);
 }
@@ -1908,6 +1962,7 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 	g->events2 = 0;
 	g->evBarracks = 0;
 	g->evRadar = 0;
+	g->events3 = 0;
 	if(g->stateTimer) --g->stateTimer;
 	if(g->state != GS_TITLE) g->attract = 0;
 	tInput sDemoIn;
@@ -2258,6 +2313,10 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		else n = drawAdd(pOut, n, (int16_t)(pB->x - 24 - cam), FEET_Y - 28, BOB_BARRACKS, f);
 	}
 	if(g->world) n = padsDraw(g, pOut, n);
+	if(g->world && g->mission && g->state != GS_INTRO) {   // (missions 5-6: a windsock beside each pad, limp, whipping in a tell, full in a gust; not on the card: its first picture is the heaviest of the game)
+		uint8_t ubSock = g->gustOn ? SOCK_FULL : g->gustTell ? (uint8_t)((g->frame >> 2) & 1) : SOCK_LIMP;
+		for(uint8_t i = 0; i < W2_ISLANDS; ++i) n = drawAddS(pOut, n, (int16_t)(g_pIslands[i].padX + SOCK_DX - 5 - cam), FEET_Y - 19, BOB_SOCK, ubSock);
+	}
 	for(uint8_t i = 0; i < g->radarCount; ++i) {   // (world 2 missions 5-6: a standing site, its dish turning)
 		const tRadar *r = &g->pRadars[i];
 		if(r->alive) n = drawAddS(pOut, n, (int16_t)(r->x - 16 - cam), FEET_Y - 38, BOB_RADAR, (uint8_t)((g->frame >> 3) & 3));

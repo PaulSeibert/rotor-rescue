@@ -1393,7 +1393,7 @@ static UBYTE s_pMsgAnyFix[2];
 static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
-#define TPL_MAX 62   // the shared BOBs' 28 frames + world 2's 33 (world 1's own: 23); one more than the last template made
+#define TPL_MAX 64   // the shared BOBs' 28 frames + world 2's 33 (world 1's own: 23); one more than the last template made
 static tAgkBlitArea s_pErase[2][DRAW_MAX];
 static UBYTE s_pErased[2];
 static UBYTE s_ubLastDrawn;          // objects in the last picture (the HUD types less after a busy one)
@@ -1577,6 +1577,7 @@ __attribute__((noinline, optimize("Os"))) static void bobsBind(UBYTE ubWorld) {
 		BOB_W2(BOB_SPLASH, SPLASH);
 		BOB_W2(BOB_W2_JET, W2_JET);
 		BOB_W2X(BOB_RADAR, RADAR);   // (slice 2's, in its own block)
+		BOB_W2X(BOB_SOCK, SOCK);
 		b0 = BOB_W2_FIRST;
 		b1 = BOB_TYPES;
 	}
@@ -2094,9 +2095,9 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 #define ROW(y) (pTop + (y) * HUD_ROW_BYTES)
 	UBYTE isW2 = g->world;   // (its 4608 px at a 24th, not a 16th)
 	// the buildings (rows 5-6): only when a barracks has opened since
-	UBYTE ubOpen = 0;
-	for(UBYTE b = 0; b < BARRACKS_COUNT; ++b) ubOpen |= (UBYTE)((g->pBarracks[b].hp == 0) << b);
-	ubOpen |= (UBYTE)(isW2 << 4);
+	_Static_assert(BARRACKS_COUNT == 4, "radarUpdate: the open barracks, unrolled (a picture's cycles count)");
+	UBYTE ubOpen = (UBYTE)((g->pBarracks[0].hp == 0) | ((g->pBarracks[1].hp == 0) << 1) | ((g->pBarracks[2].hp == 0) << 2) |
+		((g->pBarracks[3].hp == 0) << 3) | (isW2 << 4));
 	if(ubOpen != s_pRadarBuildings[ubBfr]) {
 		s_pRadarBuildings[ubBfr] = ubOpen;
 		s_pRadarZones[ubBfr] = 0xFF;   // (rows 5-6 are cleared: the radar sites' dots are drawn again with the zones)
@@ -3357,6 +3358,10 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	if(g->events & EV_CRASH) agkPrint("AGK chopper lost\n");
 	if(g->events & EV_SHRUG) agkPrint("AGK hit ignored (invincible)\n");
 	if(g->events & EV_TANKTELL) agkPrint("AGK tank tell\n");
+	if(g->events3) {   // (one test a picture in world 1)
+		if(g->events3 & EV3_GUSTTELL) agkPrint("AGK gust tell\n");
+		if(g->events3 & EV3_GUST) agkPrint("AGK gust start\n");
+	}
 	if(g->events2 & EV2_BOATTELL) agkPrint("AGK boat tell\n");
 	if(g->events2 & EV2_BOATFIRE) agkPrint("AGK boat fire\n");
 	if(g->events2 & EV2_SPLASH) agkPrint("AGK splash\n");

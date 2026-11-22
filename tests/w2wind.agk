@@ -1,0 +1,50 @@
+# World 2's wind gusts and the windsock (SPEC 11, "World 2, slice 2", slice B). Ctrl+L, W, 5 starts mission 5 at the base pad; skill 4 is
+# pinned after the world has loaded (gusts are on from skill 2; 4-5 also near barracks), ghost on (nothing hurts the chopper).
+# The chopper hovers in the strait between the second and fourth island (no jet there, radar zones: tests/w2radar.agk), beside the
+# second island's windsock (x 2280): the first gust's tell is not before 18 s of play, the sock whips (limp and full), the push
+# comes 50 frames after the tell and moves the chopper sideways, toward +x, by about 37 px, and the sock stays full while it blows.
+# No sound is made (no sample is drawn for the plan's howl): the sock is the warning. The unit tests (testW2Gust*) hold the rules.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x05
+wait-serial "AGK world 2 loaded" 400
+key 0x63
+key 0x28
+wait 5
+key 0x04
+wait 30
+key 0x63
+key 0x28
+wait 5
+key 0x24
+wait 30
+press fire 2
+wait 60
+press up 60
+press left 560
+wait-serial "mission=1 x=24" 200
+screenshot calm
+wait-serial "AGK gust tell" 1500
+screenshot tell1
+wait 2
+screenshot tell2
+wait 4
+screenshot tell3
+wait-serial "AGK gust start" 100
+wait 3
+screenshot push
+wait 150
+screenshot after
+wait 70
+# the sock is red (0xD42) in the full frame, which it holds while the gust blows (its whipping: testW2SockIsDrawnAndWhips)
+expect-color push 74 225 0xD42 near 3
+# the push: toward +x by about 37 px (2420 -> 2457)
+expect-serial "mission=1 x=245[5-9] "
+expect-serial "AGK gust tell[\s\S]*AGK gust start"
+expect-no-serial "AGK ERR|missing"
+expect-no-dropped-frames
+expect-min-chip-free 96

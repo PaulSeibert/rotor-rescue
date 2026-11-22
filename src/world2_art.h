@@ -97,9 +97,15 @@
 #define ART_RADAR_H 39
 #define ART_RADAR_FRAMES 4
 #define ART_RADAR_BITMAP_W 48
+#define ART_SOCK_W 10
+#define ART_SOCK_H 20
+#define ART_SOCK_FRAMES 2
+#define ART_SOCK_BITMAP_W 16
 #define WORLD2X_RADAR_OFFS 0
 #define WORLD2X_RADARMASK_OFFS 2808
-#define WORLD2X_BYTES 5616
+#define WORLD2X_SOCK_OFFS 5616
+#define WORLD2X_SOCKMASK_OFFS 5856
+#define WORLD2X_BYTES 6096
 
 // Per mission (4, 5, 6): PF2 pens 1-7 (index 0 unused), dark to light; the sky gradient
 // top to H (lines 24-179), the sea's H to C (180-207), C under the strip; AGA: 24 bits

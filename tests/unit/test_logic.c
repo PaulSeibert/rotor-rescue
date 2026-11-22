@@ -4093,6 +4093,187 @@ static void testW2RadarSitesApiMatchesTheGame(void) {
 	CHECK(logicRouteX2(0) == 0 && logicRouteX2(1800) == 100 && logicRouteX2(W2_JET_SAFE_X) == 211);
 }
 
+// ---- wind gusts and the windsocks (world 2 slice B; SPEC 11 "World 2, slice 2") ----
+// Hover at x in mission m (0-2 = missions 4-6) on a skill, nothing near, ghost on; `frames` of it; calls fn(frame) after every step
+static void gustWorld(uint8_t m, uint8_t skill, int16_t x) {
+	newWorld2(m);
+	logicSetDifficulty(&g, skill);
+	noBoats();
+	g.jetsTrip = 255;   // (no jet or boat in the way)
+	g.ghost = 1;
+	flyAt(x, 120);
+}
+
+static int gustPos(uint8_t m, uint8_t skill, int16_t x, int frames, int *pFirstTell, int *pTells, int *pStarts, int *pMaxPush) {
+	gustWorld(m, skill, x);
+	int16_t wX0 = g.chop.x;
+	*pFirstTell = -1; *pTells = 0; *pStarts = 0; *pMaxPush = 0;
+	int iTellAt = -1, iStartAt = -1, iEndAt = -1, iLastEnd = -1;
+	for(int f = 0; f < frames; ++f) {
+		g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.spawnTimer = 60000;
+		step(NONE, 1);
+		CHECK(!(g.gustTell && g.gustOn));   // one at a time
+		if(g.events3 & EV3_GUSTTELL) {
+			if(*pFirstTell < 0) *pFirstTell = f;
+			if(iLastEnd >= 0) CHECK(f - iLastEnd >= GUST_GAP_MIN - 2 && f - iLastEnd <= GUST_GAP_MAX + 2);
+			iTellAt = f; ++*pTells;
+		}
+		if(g.events3 & EV3_GUST) { CHECK(f - iTellAt == GUST_TELL_FRAMES); iStartAt = f; ++*pStarts; wX0 = g.chop.x; }
+		if(iStartAt >= 0 && iEndAt < iStartAt && !g.gustOn && !g.gustTell) { iEndAt = f; iLastEnd = f; if(g.chop.x - wX0 > *pMaxPush) *pMaxPush = g.chop.x - wX0; }
+	}
+	return g.chop.x - 2500;
+}
+
+static void testW2GustsByMissionAndSkill(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			uint8_t isOn = m >= 1 && d != 1;
+			CHECK(logicGustsOn(&g) == isOn);
+		}
+	}
+	newGame();
+	CHECK(!logicGustsOn(&g));
+}
+
+// The first tell not before 18 s (and within the gap's spread of it), the push 50 frames after, 150 frames long, then 12-20 s of calm
+static void testW2GustTimingAndTell(void) {
+	int iFirst, iTells, iStarts, iMax;
+	gustPos(1, 4, 2500, 7000, &iFirst, &iTells, &iStarts, &iMax);
+	CHECK(iFirst >= GUST_FIRST - 3 && iFirst <= GUST_FIRST + (GUST_GAP_MAX - GUST_GAP_MIN) + 3);
+	CHECK(iTells >= 4 && iStarts >= iTells - 1);
+	// the push of one gust is bounded: 150 frames at 0.25 px, 37 or 38 px, toward +x
+	CHECK(iMax >= 36 && iMax <= 38);
+}
+
+static void testW2GustPushIsSidewaysAndBoundedAndTellDoesNotMove(void) {
+	gustWorld(1, 4, 2500);
+	int16_t wX = g.chop.x;
+	int iTell = 0, iPush = 0;
+	for(int f = 0; f < 3000; ++f) {
+		g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.spawnTimer = 60000;
+		int16_t wBefore = g.chop.x;
+		step(NONE, 1);
+		if(g.gustTell) { ++iTell; CHECK(g.chop.x == wBefore); }
+		if(g.gustOn && !(g.events3 & EV3_GUST)) { ++iPush; CHECK(g.chop.x - wBefore >= 0 && g.chop.x - wBefore <= 1); }
+		CHECK(g.chop.y == 120);   // sideways only
+		if(f > 2800 && !g.gustOn) break;
+	}
+	CHECK(iTell >= GUST_TELL_FRAMES - 2 && iPush >= GUST_FRAMES - 3);
+	CHECK(g.chop.x > wX);
+}
+
+static void testW2GustNeverLandedOrJustAfterTakeoff(void) {
+	// landed on the base pad: nothing for 4000 frames
+	newWorld2(1);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.gustTimer = 0;
+	int iEv = 0;
+	int16_t wX = g.chop.x;
+	for(int f = 0; f < 4000; ++f) { g.spawnTimer = 60000; step(NONE, 1); iEv += g.events3 != 0; }
+	CHECK(iEv == 0 && g.chop.x == wX && g.chop.landed);
+	// just after take-off: the tell waits until the grace is over
+	gustWorld(1, 5, 2500);
+	g.gustTimer = 0;
+	g.airGrace = JET_TAKEOFF_GRACE;
+	int iAt = -1;
+	for(int f = 0; f < 400 && iAt < 0; ++f) {
+		g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.spawnTimer = 60000;
+		step(NONE, 1);
+		if(g.events3 & EV3_GUSTTELL) { iAt = f; CHECK(g.airGrace == 0); }
+	}
+	CHECK(iAt >= JET_TAKEOFF_GRACE - 3);
+	// landing cancels the tell and the push
+	for(int phase = 0; phase < 2; ++phase) {
+		gustWorld(1, 5, 2500);
+		g.gustTimer = 0;
+		for(int f = 0; f < 400 && (phase ? !g.gustOn : !g.gustTell); ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = 120; step(NONE, 1); }
+		CHECK(phase ? g.gustOn : g.gustTell);
+		g.chop.landed = 1; g.chop.y = GROUND_Y;
+		int16_t wL = g.chop.x;
+		step(NONE, 3);
+		CHECK(!g.gustTell && !g.gustOn && g.chop.x == wL);
+	}
+}
+
+static void testW2GustSkillsAndBarracks(void) {
+	int iFirst, iTells, iStarts, iMax;
+	// skill 1: never
+	gustPos(1, 1, 2500, 4000, &iFirst, &iTells, &iStarts, &iMax);
+	CHECK(iTells == 0);
+	// skill 2-3: not within 100 px of a barracks (x 1232), whatever the wait; 4-5 there too
+	for(uint8_t d = 2; d <= 5; ++d) {
+		int iT = 0;
+		gustWorld(1, d, 1232 + 60);
+		for(int f = 0; f < 3000; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.spawnTimer = 60000; step(NONE, 1); iT += (g.events3 & EV3_GUSTTELL) != 0; }
+		if(d <= 3) CHECK(iT == 0); else CHECK(iT >= 1);
+	}
+	// a push in progress is held while it is near a barracks (skill 3)
+	gustWorld(1, 3, 2500);
+	for(int f = 0; f < 3000 && !g.gustOn; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = 120; step(NONE, 1); }
+	CHECK(g.gustOn);
+	g.chop.x = 1232 + 60; g.chop.fx = 0;
+	int16_t wX = g.chop.x;
+	step(NONE, 60);
+	CHECK(g.chop.x == wX);
+}
+
+static void testW2Mission4AndWorld1HaveNoWind(void) {
+	int iFirst, iTells, iStarts, iMax;
+	gustPos(0, 5, 2500, 3000, &iFirst, &iTells, &iStarts, &iMax);
+	CHECK(iTells == 0 && g.chop.x == 2500);
+	newGame();
+	logicSetDifficulty(&g, 5);
+	g.ghost = 1;
+	flyAt(1500, 120);
+	for(int f = 0; f < 2000; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.spawnTimer = 60000; step(NONE, 1); CHECK(!g.events3); }
+	CHECK(g.chop.x == 1500);
+}
+
+// The windsock stands beside each island's pad in missions 5-6 only, limp, whipping in the tell, full in the push
+static void testW2SockIsDrawnAndWhips(void) {
+	tDraw d[DRAW_MAX];
+	CHECK(g_pBobW[BOB_SOCK] == 10 && g_pBobH[BOB_SOCK] == 20 && g_pBobFrames[BOB_SOCK] == 2);
+	gustWorld(1, 4, 1392);
+	g.cam = (int16_t)(1392 - 160);
+	uint8_t pSeen[2] = {0, 0};
+	for(int f = 0; f < 40; ++f) {
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob != BOB_SOCK) continue;
+			CHECK(d[i].y == FEET_Y - 19 && d[i].x + g.cam == 1392 + SOCK_DX - 5 && d[i].frame == SOCK_LIMP);
+			pSeen[d[i].frame] = 1;
+		}
+		step(NONE, 1);
+		g.chop.vx = g.chop.vy = 0;
+		g.cam = (int16_t)(1392 - 160);
+	}
+	CHECK(pSeen[SOCK_LIMP] && !pSeen[SOCK_FULL]);
+	g.gustTell = GUST_TELL_FRAMES; g.gustOn = 0;
+	uint8_t pTell[2] = {0, 0};
+	for(int f = 0; f < 16; ++f) {
+		g.gustTell = GUST_TELL_FRAMES;
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_SOCK) pTell[d[i].frame] = 1;
+		step(NONE, 1);
+		g.cam = (int16_t)(1392 - 160);
+	}
+	CHECK(pTell[SOCK_LIMP] && pTell[SOCK_FULL]);
+	g.gustTell = 0; g.gustOn = GUST_FRAMES;
+	for(int f = 0; f < 8; ++f) {
+		g.gustOn = GUST_FRAMES;
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_SOCK) CHECK(d[i].frame == SOCK_FULL);
+	}
+	newWorld2(0);
+	flyAt(1392, 120);
+	g.cam = (int16_t)(1392 - 160);
+	uint8_t n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_SOCK);
+}
+
 int main(void) {
 	testRotorRateFollowsSpeedAndClimb();
 	testRotorIdlesSlowAndSoftOnTheGround();
@@ -4247,6 +4428,13 @@ int main(void) {
 	testW2Mission4KeepsItsJetsEverywhere();
 	testW2RadarIsDrawnAndMapped();
 	testW2RadarSitesApiMatchesTheGame();
+	testW2GustsByMissionAndSkill();
+	testW2GustTimingAndTell();
+	testW2GustPushIsSidewaysAndBoundedAndTellDoesNotMove();
+	testW2GustNeverLandedOrJustAfterTakeoff();
+	testW2GustSkillsAndBarracks();
+	testW2Mission4AndWorld1HaveNoWind();
+	testW2SockIsDrawnAndWhips();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);
 		return 1;

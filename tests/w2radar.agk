@@ -46,9 +46,9 @@ screenshot warned
 press left 60
 wait 40
 screenshot site
-# the site stands on the island: its base is stone (0x998) with a cream edge (0xFEC)
-expect-color site 96 235 0x998
-expect-color site 100 237 0xFEC
+# the site stands on the island: its base is stone (0x998) with a cream edge (0xFEC) (a gust has pushed the chopper a few px: slice B)
+expect-color site 80 235 0x998
+expect-color site 82 237 0xFEC
 hold fire
 press down 70
 wait-serial "radar down=" 200

@@ -95,7 +95,7 @@ enum {
 	BOB_HOSTAGE, BOB_SHOT, BOB_BOMB, BOB_SHELL, BOB_BOOM, BOB_SHADOW, BOB_SMOKE, BOB_HANGAR,
 	BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_JET, BOB_MINE, BOB_FLAG,
 	BOB_W2_BARRACKS, BOB_PATROL, BOB_GUNBOAT, BOB_PAD48, BOB_PAD64, BOB_PAD80, BOB_PAD96,
-	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET, BOB_RADAR,
+	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET, BOB_RADAR, BOB_SOCK,
 	BOB_TYPES
 };
 #define BOB_W1_FIRST BOB_FENCE       // world 1's own BOBs: BOB_FENCE .. BOB_FLAG
@@ -121,6 +121,7 @@ enum { PATROL_L, PATROL_R, PATROL_TELL_L, PATROL_TELL_R };
 enum { GUNBOAT_L, GUNBOAT_TELL_L, GUNBOAT_FIRE_L, GUNBOAT_R, GUNBOAT_TELL_R, GUNBOAT_FIRE_R };
 // The radar site's dish turns: wide, half, thin, half (the red lamp blinks on the even frames)
 enum { RADAR_F0, RADAR_F1, RADAR_F2, RADAR_F3 };
+enum { SOCK_LIMP, SOCK_FULL };   // the windsock: it fills (and whips) for a gust
 enum { PAD_LAMP_RED, PAD_LAMP_YELLOW };                  // off the pad, over it (no green in PF1)
 // A pad is one BOB a width (BOB_PAD48 + (px - 48) / 16: PAD_ROWS tall, an end cap with its pylon, the
 // units with their chevrons, the H, the other cap: main.c puts it together at the card, padCompose); its
@@ -243,6 +244,18 @@ typedef struct {
 } tRadar;
 typedef struct { int16_t lo, hi; } tZone;
 
+// World 2's wind gusts (missions 5 and 6; SPEC 11, "World 2, slice 2", slice B): a gust pushes the chopper toward +x, 0.25 px a frame
+// for 3 s, after a 50 frame tell (the windsocks whip); one at a time; never while landed, just after take-off or in a mission's
+// first 18 s; none on skill 1; skill 2-3 not near a barracks. Its own sub-pixel accumulator and random seed.
+#define GUST_PUSH 4              // 1/16 px a frame
+#define GUST_FRAMES 150          // 3 s of push
+#define GUST_TELL_FRAMES 50      // the windsocks whip this long first
+#define GUST_FIRST 900           // frames of a mission before its first tell may begin (18 s), plus up to the gap's spread
+#define GUST_GAP_MIN 600         // frames from one gust's end to the next one's tell: 12-20 s
+#define GUST_GAP_MAX 1000
+#define GUST_BARRACKS_CLEAR 100  // skill 2-3: no gust within this many px of a barracks
+#define SOCK_DX 60               // a windsock stands this far right of each island's pad centre
+
 enum { SHOT_CANNON, SHOT_BOMB };
 enum { ESHOT_SHELL, ESHOT_MISSILE, ESHOT_BOMB };
 
@@ -334,6 +347,11 @@ typedef struct {
 	tRadar pRadars[RADAR_MAX];   // world 2 missions 5 and 6: the radar sites (radarCount placed, alive or not)
 	uint8_t radarCount;
 	uint8_t evRadar;     // a radar site went down this frame (index + 1)
+	uint16_t gustTimer;  // frames to the next gust's tell (counts always; at 0 it waits until the chopper is where a gust may begin)
+	uint8_t gustTell, gustOn;   // frames left of the tell, of the push (never both)
+	uint8_t gustFx;      // the push's sub-pixel accumulator (1/16)
+	uint16_t gustSeed;   // its own random sequence: the game's LFSR is not disturbed
+	uint8_t events3;     // EV3_*
 	uint8_t atkWait;     // frames until another boat may start a tell (one attack at a time, 3 s apart)
 	uint8_t atkLast;     // the boat that started the latest one (it may go on by its own gap)
 	uint8_t wet;         // the skids are in the water (a splash made; rises again when they lift)
@@ -371,6 +389,9 @@ typedef struct {
 #define EV_TAKEOFF   0x2000
 #define EV_SHRUG     0x4000   // invincible: a hit that would have destroyed the chopper
 #define EV_TANKTELL  0x8000   // a tank started its wind-up (a shell follows)
+
+#define EV3_GUSTTELL 0x01     // a gust's tell began
+#define EV3_GUST     0x02     // its push began
 
 #define EV2_JETTELL  0x01     // a jet started its flash (a missile or bomb follows)
 #define EV2_JETFIRE  0x02     // a jet launched one
@@ -523,6 +544,8 @@ uint8_t logicJetsTripMax(const tGame *g);   // most jets that may appear in one 
 // The radar sites' jet zones (SPEC 11, "World 2, slice 2"): may a jet START with the chopper at x? 1 in world 1 and in a
 // mission with no radar sites (mission 4); otherwise only inside the zone of a live site
 uint8_t logicJetZone(const tGame *g, int16_t x);
+// Gusts may happen in this mission at this skill (missions 5 and 6, not skill 1)
+uint8_t logicGustsOn(const tGame *g);
 // The zones of the live sites (ubAll: of every site, for the card), cut to 0 .. W2_JET_SAFE_X: how many, in pOut (RADAR_MAX)
 uint8_t logicRadarZones(const tGame *g, tZone *pOut, uint8_t ubAll);
 // A mission's sites (0-2 within world 2: the x of each, up to RADAR_MAX; how many) and the zone of a site at x: for the card's
