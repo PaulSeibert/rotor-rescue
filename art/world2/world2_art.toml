@@ -113,3 +113,11 @@ kind = "bob"
 [w2_man_climb]             # 2 frame(s) 16 x 12: a person climbing, arms up (MAN_CLIMB0 / MAN_CLIMB1), the hostage art's drawing and pens
 source = "world2/man_climb.txt"
 kind = "bob"
+
+[w2_freighter]             # 4 frame(s) 128 x 36: the bulk freighter, sinking stages 0-3; one facing, bow left, pivot (63.5, 33)
+source = "world2/freighter.txt"
+kind = "bob"
+
+[w2_spray]                 # 3 frame(s) 24 x 12: foam / steam along the waterline for stages 1-3
+source = "world2/sink_spray.txt"
+kind = "bob"
