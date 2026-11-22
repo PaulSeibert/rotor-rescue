@@ -620,3 +620,5 @@ enemy helicopter, destroyer, gunship, fire), with:
 ---
 
 *End of the plan.*
+
+**Built 2026-11-21 (SPEC v1.22, slice C, mission 5):** one ship deck (16 people, in place of the third island's barracks), box 24 x 20 above the flat deck edge, 50 frames a person on every skill, paused not reset, landed-class for R1-R3 and the gusts; the art is `art/world2/deck_ship.txt`, `winch_rope.txt`, `winch_hook.txt`, `man_climb.txt`.
