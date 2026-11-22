@@ -4274,6 +4274,229 @@ static void testW2SockIsDrawnAndWhips(void) {
 	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_SOCK);
 }
 
+// ---- the ship deck and the winch (world 2 slice C, mission 5; SPEC 11 "World 2, slice 2") ----
+static void deckHold(int16_t wDx, int16_t wDy) {
+	g.chop.x = (int16_t)(DECK_BOX_X0 + 12 + wDx); g.chop.y = (int16_t)(DECK_Y - 10 + wDy); g.chop.vx = g.chop.vy = 0;
+	g.chop.fx = g.chop.fy = 0; g.chop.landed = 0; g.spawnTimer = 60000;
+}
+
+static void deckWorld(uint8_t skill) {
+	newWorld2(1);
+	logicSetDifficulty(&g, skill);
+	noBoats();
+	g.jetsTrip = 255;
+	g.ghost = 1;
+	flyAt(DECK_BOX_X0 + 12, DECK_Y - 10);
+	g.gustTimer = 60000;
+}
+
+static void testW2DeckIsPlacedInMission5Only(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		newWorld2(m);
+		CHECK(g.deckOn == (m == 1));
+		CHECK(g.deckLeft == (m == 1 ? DECK_PEOPLE : 0));
+	}
+	newWorld2(1);
+	CHECK(logicOnWater(DECK_X + 2) && logicOnWater(DECK_X + 121));   // moored at sea, between the second and third island
+	CHECK(DECK_X > g_pIslands[1].x1 && DECK_X + 124 < g_pIslands[2].x0);
+	CHECK(DECK_BOX_X1 - DECK_BOX_X0 + 1 == 24 && DECK_Y - DECK_BOX_Y0 == 20);
+	CHECK(g.pBarracks[DECK_BARRACKS].hp == 0 && g.pBarracks[DECK_BARRACKS].released == HOSTAGES_PER_BARRACKS);   // (the slot never releases anyone)
+	for(uint8_t i = 0; i < DECK_PEOPLE; ++i) CHECK(g.pHostages[DECK_BARRACKS * HOSTAGES_PER_BARRACKS + i].state == HS_INSIDE);
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) {   // no boat sails through the ship
+		if(g.pBoats[i].active) CHECK(g.pBoats[i].x1 < DECK_X - 30 || g.pBoats[i].x0 > DECK_X + 124 + 30);
+	}
+	newGame();
+	CHECK(!g.deckOn);
+}
+
+// Over the hull the skids stop at the deck edge and do not land; beside it the water is 236 as before
+static void testW2DeckIsAFloorNotALanding(void) {
+	deckWorld(3);
+	for(int f = 0; f < 120; ++f) { g.chop.vx = 0; g.chop.x = (int16_t)(DECK_X + 10); step((tInput){.dy = 1}, 1); }
+	CHECK(g.chop.y == DECK_Y && !g.chop.landed);
+	deckWorld(3);
+	for(int f = 0; f < 120; ++f) { g.chop.vx = 0; g.chop.x = (int16_t)(DECK_X - 12); step((tInput){.dy = 1}, 1); }
+	CHECK(g.chop.y == GROUND_Y && !g.chop.landed);
+}
+
+// 8 people take 8 s on every skill: the rope is set after DECK_ROPE_SET frames, then one person every DECK_PERSON_FRAMES
+static void testW2WinchBoardsOnePersonASecond(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		deckWorld(d);
+		int iFirst = -1, iBoards = 0, iStart = 0;
+		for(int f = 0; f < DECK_ROPE_SET + 8 * DECK_PERSON_FRAMES + 20; ++f) {
+			deckHold(0, 0);
+			step(NONE, 1);
+			if(g.events3 & EV3_WINCHSTART) { ++iStart; CHECK(f == 0); }
+			if(g.events3 & EV3_WINCHBOARD) {
+				++iBoards;
+				CHECK(g.events & EV_BOARD);
+				if(iFirst < 0) iFirst = f;
+				CHECK(g.aboard == iBoards && g.deckLeft == DECK_PEOPLE - iBoards);
+				CHECK(g.pHostages[DECK_BARRACKS * HOSTAGES_PER_BARRACKS + iBoards - 1].state == HS_ABOARD);
+				CHECK(f >= DECK_ROPE_SET + iBoards * DECK_PERSON_FRAMES - 3 && f <= DECK_ROPE_SET + iBoards * DECK_PERSON_FRAMES + 1);
+			}
+		}
+		CHECK(iStart == 1 && iBoards == 8);
+	}
+}
+
+// Drifting out of the box pauses the climb (kept, not reset); the rope is set again on the way back; sweeping through does not winch
+static void testW2WinchPausesAndSweepingDoesNotWinch(void) {
+	deckWorld(3);
+	for(int f = 0; f < DECK_ROPE_SET + 20; ++f) { deckHold(0, 0); step(NONE, 1); }
+	CHECK(g.winch > 0 && g.deckTimer == 21 && g.aboard == 0);
+	for(int f = 0; f < 40; ++f) { deckHold(40, 0); step(NONE, 1); }
+	CHECK(g.winch == 0 && g.deckTimer == 21 && g.aboard == 0);
+	int iBoard = -1;
+	for(int f = 0; f < 200 && iBoard < 0; ++f) { deckHold(0, 0); step(NONE, 1); if(g.events3 & EV3_WINCHBOARD) iBoard = f; }
+	CHECK(iBoard >= DECK_ROPE_SET + (DECK_PERSON_FRAMES - 21) - 3 && iBoard <= DECK_ROPE_SET + (DECK_PERSON_FRAMES - 21) + 3);
+	// above or beside the box: nothing
+	deckWorld(3);
+	for(int f = 0; f < 200; ++f) { deckHold(0, -30); step(NONE, 1); }
+	CHECK(g.winch == 0 && g.deckTimer == 0);
+	// sweeping through at 3 px a frame
+	deckWorld(3);
+	g.chop.x = (int16_t)(DECK_BOX_X0 - 20);
+	for(int f = 0; f < 40; ++f) {
+		g.chop.vx = 48; g.chop.vy = 0; g.chop.y = DECK_Y - 10;
+		step(NONE, 1);
+		CHECK(g.winch == 0);
+	}
+}
+
+// A full cabin or an empty deck ends it; 16 people take 16 s and fill the cabin
+static void testW2WinchStopsWhenFullOrEmpty(void) {
+	deckWorld(3);
+	g.aboard = CABIN_MAX;
+	for(int f = 0; f < 200; ++f) { deckHold(0, 0); step(NONE, 1); }
+	CHECK(g.winch == 0 && g.deckLeft == DECK_PEOPLE);
+	deckWorld(3);
+	for(int f = 0; f < DECK_ROPE_SET + DECK_PEOPLE * DECK_PERSON_FRAMES + 60; ++f) { deckHold(0, 0); step(NONE, 1); }
+	CHECK(g.deckLeft == 0 && g.aboard == DECK_PEOPLE && g.winch == 0);
+	deckWorld(3);
+	g.deckLeft = 0;
+	for(int f = 0; f < 100; ++f) { deckHold(0, 0); step(NONE, 1); CHECK(!g.winch); }
+}
+
+// The winch is landed-class: no boat aims at a hovering chopper on skill 1-2, and on 3-5 only after the dwell, as when landed (R1)
+static void testW2WinchHasTheGroundGrace(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(1);
+		logicSetDifficulty(&g, d);
+		g.ghost = 0;
+		tBoat *b = gunboatNear(DECK_BOX_X0 + 12, DECK_Y - 10, -140);
+		uint16_t uwDwell = logicGroundDwell(&g), uwFirstTell = 0;
+		for(uint16_t i = 0; i < 700 && !uwFirstTell; ++i) {
+			deckHold(0, 0);
+			b->active = i >= 4; b->kind = BOAT_GUN; b->hp = 3; b->x = (int16_t)(g.chop.x - 140);   // (the chopper is already winching when the boat looks)
+			b->cool = 0;
+			g.atkWait = 0;
+			g.chop.invuln = 255;
+			step(NONE, 1);
+			if(b->tell) uwFirstTell = g.landFrames;
+		}
+		CHECK(g.winch || g.landFrames);
+		if(uwDwell == GROUND_NEVER) CHECK(!uwFirstTell);
+		else CHECK(uwFirstTell >= uwDwell);
+	}
+	// a jet (skill 2: it never attacks a landed chopper) does not attack a winching one either
+	newWorld2(1);
+	logicSetDifficulty(&g, 2);
+	noBoats();
+	g.trip = 2;
+	flyAt(DECK_BOX_X0 + 12, DECK_Y - 10);
+	g.gustTimer = 60000;
+	for(int f = 0; f < 600; ++f) {
+		deckHold(0, 0);
+		if(f >= 4 && !g.pJets[0].tell) aimJet(0, 1);
+		g.cam = (int16_t)(g.chop.x - 160);
+		g.pJets[1].active = 0; g.pJets[1].cool = 255;
+		step(NONE, 1);
+	}
+	CHECK(g.jetAttacks == 0);
+	// leaving the box is a take-off: the 2 s grace
+	deckWorld(5);
+	for(int f = 0; f < 80; ++f) { deckHold(0, 0); step(NONE, 1); }
+	CHECK(g.winch);
+	for(int f = 0; f < 3; ++f) { deckHold(40, 0); step(NONE, 1); }
+	CHECK(!g.winch && g.airGrace > JET_TAKEOFF_GRACE - 10);
+}
+
+// No gust starts or blows while the chopper winches; one in progress is dropped
+static void testW2WinchHasNoGusts(void) {
+	deckWorld(5);
+	g.gustTimer = 0;
+	for(int f = 0; f < 600; ++f) { deckHold(0, 0); step(NONE, 1); CHECK(!(g.events3 & (EV3_GUSTTELL | EV3_GUST))); }
+	CHECK(g.chop.x == DECK_BOX_X0 + 12);
+	// a tell in progress is dropped the moment the winch starts
+	deckWorld(5);
+	g.gustTimer = 0;
+	for(int f = 0; f < 20 && !g.gustTell; ++f) { deckHold(40, 0); step(NONE, 1); }
+	CHECK(g.gustTell);
+	for(int f = 0; f < 3; ++f) { deckHold(0, 0); step(NONE, 1); }
+	CHECK(!g.gustTell && !g.gustOn);
+}
+
+// The ship, the lamps, the people on deck, the hook, the rope and the climber are drawn from the set; nothing in the other missions
+static void testW2DeckIsDrawn(void) {
+	tDraw d[DRAW_MAX];
+	CHECK(g_pBobW[BOB_DECK] == 124 && g_pBobH[BOB_DECK] == 30 && g_pBobFrames[BOB_DECK] == 2);
+	CHECK(g_pBobW[BOB_ROPE] == 8 && g_pBobH[BOB_ROPE] == 40 && g_pBobFrames[BOB_ROPE] == 3);
+	CHECK(g_pBobW[BOB_HOOK] == 8 && g_pBobH[BOB_HOOK] == 12 && g_pBobFrames[BOB_HOOK] == 1);
+	CHECK(g_pBobW[BOB_CLIMB] == 16 && g_pBobH[BOB_CLIMB] == 12 && g_pBobFrames[BOB_CLIMB] == 2);
+	deckWorld(3);
+	deckHold(100, -60);   // (away from the box)
+	g.cam = (int16_t)(DECK_X - 100);
+	uint8_t pFrames[2] = {0, 0};
+	int iMen = 0, iLamps = 0, iRope = 0, iHook = 0, iClimb = 0;
+	for(int f = 0; f < 40; ++f) {
+		step(NONE, 1);
+		deckHold(100, -60); g.cam = (int16_t)(DECK_X - 100);
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob == BOB_DECK) { CHECK(d[i].x == DECK_X - g.cam && d[i].y == DECK_TOP); pFrames[d[i].frame] = 1; }
+			iMen += d[i].bob == BOB_HOSTAGE; iLamps += d[i].bob == BOB_PAD_LAMP;
+			iRope += d[i].bob == BOB_ROPE; iHook += d[i].bob == BOB_HOOK; iClimb += d[i].bob == BOB_CLIMB;
+		}
+	}
+	CHECK(pFrames[0] && pFrames[1]);
+	CHECK(iMen >= 3 * 40 && iLamps > 0 && !iRope && !iHook && !iClimb);
+	// winching: the hook first, then the rope, a climber
+	deckWorld(3);
+	g.cam = (int16_t)(DECK_X - 100);
+	for(int f = 0; f < 70; ++f) {
+		deckHold(0, 0); g.cam = (int16_t)(DECK_X - 100);
+		step(NONE, 1);
+		uint8_t n = logicDraw(&g, d);
+		uint8_t isHook = 0, isRope = 0, isClimb = 0;
+		for(uint8_t i = 0; i < n; ++i) { isHook |= d[i].bob == BOB_HOOK; isRope |= d[i].bob == BOB_ROPE; isClimb |= d[i].bob == BOB_CLIMB; }
+		if(g.winch && g.winch < DECK_ROPE_SET) CHECK(isHook && !isRope && !isClimb);
+		if(g.winch >= DECK_ROPE_SET + 2) CHECK(isRope && isClimb && !isHook);
+	}
+	newWorld2(0);
+	g.cam = (int16_t)(DECK_X - 100);
+	uint8_t n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_DECK && d[i].bob != BOB_ROPE && d[i].bob != BOB_CLIMB);
+}
+
+// The card's map: mission 5 has three huts and a ship, the others four huts and none
+static void testW2DeckIsOnTheMap(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		newWorld2(0);
+		tRouteMark mk[ROUTE_MARKS + 8];
+		uint8_t n = logicRouteMapFor(&g, m, mk), iHuts = 0, iDecks = 0;
+		CHECK(n <= ROUTE_MARKS);
+		for(uint8_t i = 0; i < n; ++i) { iHuts += mk[i].kind == ROUTE_BARRACKS; iDecks += mk[i].kind == ROUTE_DECK; }
+		CHECK(iHuts == (m == 1 ? 3 : 4) && iDecks == (m == 1 ? 1 : 0));
+		for(uint8_t i = 0; i < n; ++i) if(mk[i].kind == ROUTE_DECK) CHECK(mk[i].x == logicRouteX2(DECK_X) && mk[i].x + mk[i].w <= 256);
+	}
+	newWorld2(1);
+	tRouteMark a[ROUTE_MARKS + 8], b[ROUTE_MARKS + 8];
+	uint8_t na = logicRouteMap(&g, a), nb = logicRouteMapFor(&g, 1, b);
+	CHECK(na == nb);
+}
+
 int main(void) {
 	testRotorRateFollowsSpeedAndClimb();
 	testRotorIdlesSlowAndSoftOnTheGround();
@@ -4435,6 +4658,15 @@ int main(void) {
 	testW2GustSkillsAndBarracks();
 	testW2Mission4AndWorld1HaveNoWind();
 	testW2SockIsDrawnAndWhips();
+	testW2DeckIsPlacedInMission5Only();
+	testW2DeckIsAFloorNotALanding();
+	testW2WinchBoardsOnePersonASecond();
+	testW2WinchPausesAndSweepingDoesNotWinch();
+	testW2WinchStopsWhenFullOrEmpty();
+	testW2WinchHasTheGroundGrace();
+	testW2WinchHasNoGusts();
+	testW2DeckIsDrawn();
+	testW2DeckIsOnTheMap();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);
 		return 1;

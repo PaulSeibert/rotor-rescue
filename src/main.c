@@ -1393,7 +1393,7 @@ static UBYTE s_pMsgAnyFix[2];
 static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
-#define TPL_MAX 64   // the shared BOBs' 28 frames + world 2's 33 (world 1's own: 23); one more than the last template made
+#define TPL_MAX 72   // the shared BOBs' 28 frames + world 2's 33 (world 1's own: 23); one more than the last template made
 static tAgkBlitArea s_pErase[2][DRAW_MAX];
 static UBYTE s_pErased[2];
 static UBYTE s_ubLastDrawn;          // objects in the last picture (the HUD types less after a busy one)
@@ -1578,6 +1578,10 @@ __attribute__((noinline, optimize("Os"))) static void bobsBind(UBYTE ubWorld) {
 		BOB_W2(BOB_W2_JET, W2_JET);
 		BOB_W2X(BOB_RADAR, RADAR);   // (slice 2's, in its own block)
 		BOB_W2X(BOB_SOCK, SOCK);
+		BOB_W2X(BOB_DECK, DECK);
+		BOB_W2X(BOB_ROPE, ROPE);
+		BOB_W2X(BOB_HOOK, HOOK);
+		BOB_W2X(BOB_CLIMB, CLIMB);
 		b0 = BOB_W2_FIRST;
 		b1 = BOB_TYPES;
 	}
@@ -2098,7 +2102,8 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 	_Static_assert(BARRACKS_COUNT == 4, "radarUpdate: the open barracks, unrolled (a picture's cycles count)");
 	UBYTE ubOpen = (UBYTE)((g->pBarracks[0].hp == 0) | ((g->pBarracks[1].hp == 0) << 1) | ((g->pBarracks[2].hp == 0) << 2) |
 		((g->pBarracks[3].hp == 0) << 3) | (isW2 << 4));
-	if(ubOpen != s_pRadarBuildings[ubBfr]) {
+	// (a new mission's barracks are closed again: that redraw waits six pictures of its card, as the sites' below: the picture that starts a mission is the heaviest of the game)
+	if(ubOpen != s_pRadarBuildings[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {
 		s_pRadarBuildings[ubBfr] = ubOpen;
 		s_pRadarZones[ubBfr] = 0xFF;   // (rows 5-6 are cleared: the radar sites' dots are drawn again with the zones)
 		for(UBYTE y = 5; y < 7; ++y) {
@@ -2537,39 +2542,16 @@ __attribute__((noinline, optimize("Os"))) static void routeBox(UBYTE *pTop, UWOR
 	for(UBYTE y = y0; y <= y1; ++y) routeSpan(pTop, x0, w, y, ubPen, isHatch ? ((y & 1) ? 0x55 : 0xAA) : 0xFF);
 }
 
-// World 2's jet zones (a red line, row 1) and radar sites (a tick, row 2, three wide) are the map's marks that change with the
-// mission. Drawing them row by row costs a quarter of an A500 frame in the 6-plane display, so at the world's load (a frame nothing
-// is measured) rows 1-2 are made for each of the world's three missions (192 bytes each), and a mission's card copies its own rows
-// 1-2 to the screen in place of the image's (routeShow): no extra copy, nothing drawn at the card
-#define ROUTE_OVER_LONGS (2 * FB_BPP * ROUTE_ROW_BYTES / 4)
-static ULONG s_pRouteOver[MISSION_COUNT][ROUTE_OVER_LONGS];
-
-__attribute__((noinline, optimize("Os"))) static void routeOverlays(void) {
-	for(UBYTE m = 0; m < MISSION_COUNT; ++m) {
-		ULONG *pL = s_pRouteOver[m];
-		for(UBYTE y = 0; y < 2; ++y) {   // (the dark panel: pen 1, plane 0)
-			for(UBYTE k = 0; k < ROUTE_ROW_BYTES / 4; ++k) *pL++ = 0xFFFFFFFFUL;
-			for(UBYTE k = 0; k < 2 * ROUTE_ROW_BYTES / 4; ++k) *pL++ = 0;
-		}
-		UBYTE *pBase = (UBYTE *)s_pRouteOver[m] - FB_BPP * ROUTE_ROW_BYTES;   // (rows 1 and 2 are the overlay's two rows)
-		int16_t pX[RADAR_MAX];
-		for(UBYTE i = 0, n = logicRadarSites(m, pX); i < n; ++i) {
-			tZone sZone;
-			logicRadarZoneOf(pX[i], &sZone);
-			UBYTE ubX0 = logicRouteX2(sZone.lo);
-			routeBox(pBase, ubX0, (UWORD)(logicRouteX2(sZone.hi) - ubX0), 1, 1, 5, 0);   // the zone: a red line
-			routeBox(pBase, (UWORD)(logicRouteX2(pX[i]) - 1), 3, 2, 2, 4, 0);             // the site: a tick
-		}
-		UBYTE ubHere = logicRouteX2(W2_START_X);   // (the arrow's second and third rows stand in rows 1-2: put back)
-		routeBox(pBase, (UWORD)(ubHere - 1), 3, 1, 1, 6, 0);
-		routeBox(pBase, ubHere, 1, 2, 2, 6, 0);
-	}
-}
+// World 2's map differs from mission to mission (the jet zones: a red line in row 1, the radar sites: a tick in row 2, mission 5's ship
+// deck in place of a hut). Drawing a map row by row costs a quarter of an A500 frame in the 6-plane display, so at the world's load (a
+// frame nothing is measured) the map is made for each of the world's three missions (960 bytes each), and a mission's card shows its
+// own (routeShow): nothing drawn at the card
+#define ROUTE_IMG_LONGS (ROUTE_H * FB_BPP * ROUTE_ROW_BYTES / 4)
+static ULONG s_pRouteOver[MISSION_COUNT][ROUTE_IMG_LONGS];
 
 // At startup (after logicInit), and at a world's load (worldLoad: making it takes a couple of
-// frames, which a card's picture can't spare): the map into s_pRouteImg
-__attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
-	UBYTE *pTop = s_pRouteImg;
+// frames, which a card's picture can't spare): a map, from its marks, into an image
+__attribute__((noinline, optimize("Os"))) static void routeDraw(UBYTE *pTop, const tRouteMark *pMarks, UBYTE n) {
 	// a dark panel (pen 1: plane 0 set, the others clear), longs a row of a plane (no divides:
 	// the map is made at a world 2 card too)
 	ULONG *pL = (ULONG *)pTop;
@@ -2577,9 +2559,6 @@ __attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
 		for(UBYTE k = 0; k < ROUTE_ROW_BYTES / 4; ++k) *pL++ = 0xFFFFFFFFUL;
 		for(UBYTE k = 0; k < 2 * ROUTE_ROW_BYTES / 4; ++k) *pL++ = 0;
 	}
-
-	tRouteMark pMarks[ROUTE_MARKS];
-	UBYTE n = logicRouteMap(&s_sGame, pMarks);
 	for(UBYTE i = 0; i < n; ++i) {
 		const tRouteMark *m = &pMarks[i];
 		UWORD x = m->x;
@@ -2608,8 +2587,16 @@ __attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
 			case ROUTE_ISLAND:                                  // world 2: land, olive, on the sea
 				routeBox(pTop, x, m->w, 8, 9, 2, 0);
 				break;
-			case ROUTE_ZONE:                                    // world 2, missions 5-6: a jet zone, a red line over the islands, and
-			case ROUTE_RADAR:                                   // a radar site's tick: from the overlays below (the same marks)
+			case ROUTE_ZONE:                                    // world 2, missions 5-6: a jet zone, a red line over the islands
+				routeBox(pTop, x, m->w, 1, 1, 5, 0);
+				break;
+			case ROUTE_RADAR:                                   // ... and a radar site's tick
+				routeBox(pTop, x - 1, 3, 2, 2, 4, 0);
+				break;
+			case ROUTE_DECK:                                    // mission 5's ship deck: a blue hull on the sea, a cream house aft
+				routeBox(pTop, x, m->w, 8, 9, 7, 0);
+				routeBox(pTop, x + m->w - 3, 2, 6, 7, 4, 0);
+				routeBox(pTop, x + 2, 1, 7, 7, 3, 0);
 				break;
 			case ROUTE_HERE:                                    // you are here: a yellow arrow
 				routeBox(pTop, x - 2, 5, 0, 0, 6, 0);
@@ -2618,18 +2605,23 @@ __attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
 				break;
 		}
 	}
-	if(s_sGame.world) routeOverlays();
+}
+
+__attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
+	tRouteMark pMarks[ROUTE_MARKS];
+	if(s_sGame.world) {
+		for(UBYTE m = 0; m < MISSION_COUNT; ++m) routeDraw((UBYTE *)s_pRouteOver[m], pMarks, logicRouteMapFor(&s_sGame, m, pMarks));
+	}
+	else routeDraw(s_pRouteImg, pMarks, logicRouteMap(&s_sGame, pMarks));
 }
 
 // The card's first picture in a buffer (the blitter done): the map copied in
 __attribute__((noinline)) static void routeShow(UBYTE ubBfr) {
-	const ULONG *pImg = (const ULONG *)s_pRouteImg;
-	// (world 2, once its art is loaded: rows 1-2, the plane rows FB_BPP .. 3 * FB_BPP - 1, are this mission's from the overlays)
-	const ULONG *pOver = s_sGame.world && s_sGame.world == s_ubWorld ? s_pRouteOver[s_sGame.mission] : 0;
+	// (world 2, once its art is loaded: this mission's map, made at the load)
+	const ULONG *pImg = s_sGame.world && s_sGame.world == s_ubWorld ? s_pRouteOver[s_sGame.mission] : (const ULONG *)s_pRouteImg;
 	UBYTE *pRow = s_pFb[ubBfr]->Planes[0] + s_pFbRowOffs[ROUTE_Y] + (FB_X0 + ROUTE_X0) / 8;
 	for(UBYTE y = 0; y < ROUTE_H * FB_BPP; ++y, pRow += FB_PLANE_BYTES) {
 		const ULONG *pSrc = pImg + y * (ROUTE_ROW_BYTES / 4);
-		if(pOver && y >= FB_BPP && y < 3 * FB_BPP) pSrc = pOver + (y - FB_BPP) * (ROUTE_ROW_BYTES / 4);
 		ULONG *pDst = (ULONG *)pRow;   // (even addresses: longs are fine on a 68000)
 		for(UBYTE k = 0; k < ROUTE_ROW_BYTES / 4; ++k) *pDst++ = *pSrc++;
 	}
@@ -3359,6 +3351,8 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	if(g->events & EV_SHRUG) agkPrint("AGK hit ignored (invincible)\n");
 	if(g->events & EV_TANKTELL) agkPrint("AGK tank tell\n");
 	if(g->events3) {   // (one test a picture in world 1)
+		if(g->events3 & EV3_WINCHSTART) agkPrint("AGK winch start\n");
+		if(g->events3 & EV3_WINCHBOARD) { agkState("winch board", g->aboard); agkEnd(); }
 		if(g->events3 & EV3_GUSTTELL) agkPrint("AGK gust tell\n");
 		if(g->events3 & EV3_GUST) agkPrint("AGK gust start\n");
 	}

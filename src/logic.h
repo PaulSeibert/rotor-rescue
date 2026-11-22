@@ -95,7 +95,7 @@ enum {
 	BOB_HOSTAGE, BOB_SHOT, BOB_BOMB, BOB_SHELL, BOB_BOOM, BOB_SHADOW, BOB_SMOKE, BOB_HANGAR,
 	BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_JET, BOB_MINE, BOB_FLAG,
 	BOB_W2_BARRACKS, BOB_PATROL, BOB_GUNBOAT, BOB_PAD48, BOB_PAD64, BOB_PAD80, BOB_PAD96,
-	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET, BOB_RADAR, BOB_SOCK,
+	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET, BOB_RADAR, BOB_SOCK, BOB_DECK, BOB_ROPE, BOB_HOOK, BOB_CLIMB,
 	BOB_TYPES
 };
 #define BOB_W1_FIRST BOB_FENCE       // world 1's own BOBs: BOB_FENCE .. BOB_FLAG
@@ -121,6 +121,9 @@ enum { PATROL_L, PATROL_R, PATROL_TELL_L, PATROL_TELL_R };
 enum { GUNBOAT_L, GUNBOAT_TELL_L, GUNBOAT_FIRE_L, GUNBOAT_R, GUNBOAT_TELL_R, GUNBOAT_FIRE_R };
 // The radar site's dish turns: wide, half, thin, half (the red lamp blinks on the even frames)
 enum { RADAR_F0, RADAR_F1, RADAR_F2, RADAR_F3 };
+enum { DECK_F0, DECK_F1 };                       // the cargo ship: idle, bow wake
+enum { ROPE_HANG, ROPE_LADDER_L, ROPE_LADDER_R };   // the winch rope, the ladder swaying left, right
+enum { CLIMB_F0, CLIMB_F1 };                     // a person climbing
 enum { SOCK_LIMP, SOCK_FULL };   // the windsock: it fills (and whips) for a gust
 enum { PAD_LAMP_RED, PAD_LAMP_YELLOW };                  // off the pad, over it (no green in PF1)
 // A pad is one BOB a width (BOB_PAD48 + (px - 48) / 16: PAD_ROWS tall, an end cap with its pylon, the
@@ -254,6 +257,19 @@ typedef struct { int16_t lo, hi; } tZone;
 #define GUST_GAP_MIN 600         // frames from one gust's end to the next one's tell: 12-20 s
 #define GUST_GAP_MAX 1000
 #define GUST_BARRACKS_CLEAR 100  // skill 2-3: no gust within this many px of a barracks
+// World 2's ship deck (mission 5; SPEC 11, "World 2, slice 2", slice C): a moored cargo ship replaces the third island's barracks. 16
+// people wait on it; the chopper hovers in a 24 x 20 px box above its flat deck and a rope brings one up every DECK_PERSON_FRAMES
+#define DECK_X 1730              // the hull's left edge, world px (124 x 30, art/world2/deck_ship.txt); its top is DECK_TOP
+#define DECK_TOP 219             // (the waterline row is BOAT_BOTTOM_Y 248 at the hull's last row, 29 below it)
+#define DECK_Y 227               // the flat deck edge: the skids stop here over the hull (not a landing)
+#define DECK_BARRACKS 2          // the barracks slot (and the people's slots) it takes in mission 5
+#define DECK_PEOPLE HOSTAGES_PER_BARRACKS
+#define DECK_BOX_X0 (DECK_X + 47)   // the hover box: hull x 47-70, the skids' y 207 .. 227
+#define DECK_BOX_X1 (DECK_X + 70)
+#define DECK_BOX_Y0 (DECK_Y - 20)
+#define DECK_HOVER_SPEED 8       // the most the chopper may move (1/16 px a frame, each axis) and still be hovering
+#define DECK_ROPE_SET 12         // frames of hover before the rope is down and a person starts to climb (the hook falls 2 px a frame)
+#define DECK_PERSON_FRAMES 50    // a person's climb: 8 people take 8 s
 #define SOCK_DX 60               // a windsock stands this far right of each island's pad centre
 
 enum { SHOT_CANNON, SHOT_BOMB };
@@ -352,6 +368,10 @@ typedef struct {
 	uint8_t gustFx;      // the push's sub-pixel accumulator (1/16)
 	uint16_t gustSeed;   // its own random sequence: the game's LFSR is not disturbed
 	uint8_t events3;     // EV3_*
+	uint8_t deckOn;      // mission 5: the ship deck stands
+	uint8_t deckLeft;    // people still on it
+	uint8_t deckTimer;   // frames of the current person's climb (kept when the chopper drifts out)
+	uint8_t winch;       // frames the chopper has hovered in the box (0: not winching): a landed-class state
 	uint8_t atkWait;     // frames until another boat may start a tell (one attack at a time, 3 s apart)
 	uint8_t atkLast;     // the boat that started the latest one (it may go on by its own gap)
 	uint8_t wet;         // the skids are in the water (a splash made; rises again when they lift)
@@ -392,6 +412,8 @@ typedef struct {
 
 #define EV3_GUSTTELL 0x01     // a gust's tell began
 #define EV3_GUST     0x02     // its push began
+#define EV3_WINCHSTART 0x04   // the chopper began a winch hover
+#define EV3_WINCHBOARD 0x08   // a person came aboard up the rope
 
 #define EV2_JETTELL  0x01     // a jet started its flash (a missile or bomb follows)
 #define EV2_JETFIRE  0x02     // a jet launched one
@@ -752,10 +774,12 @@ const char *logicBrief(const tGame *g);
 #define ROUTE_W (WORLD_W / ROUTE_SCALE)   // 256 px
 // (World 2's map is world x / 18: ROUTE_ISLAND the land)
 enum { ROUTE_ENEMY, ROUTE_HOME, ROUTE_FENCE, ROUTE_BARRACKS, ROUTE_PAD, ROUTE_HANGAR, ROUTE_HERE,
-	ROUTE_ISLAND, ROUTE_ZONE, ROUTE_RADAR };   // (world 2 missions 5-6: a jet zone's red line, a radar site's tick)
+	ROUTE_ISLAND, ROUTE_ZONE, ROUTE_RADAR, ROUTE_DECK };   // (world 2 missions 5-6: a jet zone's red line, a radar site's tick)
 typedef struct { uint8_t kind, x, w; } tRouteMark;   // x, w in map px
-#define ROUTE_MARKS (6 + 4 * BARRACKS_COUNT + 2 * RADAR_MAX)
+#define ROUTE_MARKS (7 + 4 * BARRACKS_COUNT + 2 * RADAR_MAX)
 uint8_t logicRouteMap(const tGame *g, tRouteMark *pOut);   // back to front
+// World 2's map of mission ubMission (0-2) of the world, whatever mission g is in: the card's maps are made for all three at the world's load
+uint8_t logicRouteMapFor(const tGame *g, uint8_t ubMission, tRouteMark *pOut);
 uint8_t logicRouteX2(int16_t x);   // world 2's map x for a world x (x / 18): the card's jet zones and radar sites
 
 #endif // _LOGIC_H_

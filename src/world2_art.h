@@ -101,11 +101,35 @@
 #define ART_SOCK_H 20
 #define ART_SOCK_FRAMES 2
 #define ART_SOCK_BITMAP_W 16
+#define ART_DECK_W 124
+#define ART_DECK_H 30
+#define ART_DECK_FRAMES 2
+#define ART_DECK_BITMAP_W 128
+#define ART_ROPE_W 8
+#define ART_ROPE_H 40
+#define ART_ROPE_FRAMES 3
+#define ART_ROPE_BITMAP_W 16
+#define ART_HOOK_W 8
+#define ART_HOOK_H 12
+#define ART_HOOK_FRAMES 1
+#define ART_HOOK_BITMAP_W 16
+#define ART_CLIMB_W 16
+#define ART_CLIMB_H 12
+#define ART_CLIMB_FRAMES 2
+#define ART_CLIMB_BITMAP_W 16
 #define WORLD2X_RADAR_OFFS 0
 #define WORLD2X_RADARMASK_OFFS 2808
 #define WORLD2X_SOCK_OFFS 5616
 #define WORLD2X_SOCKMASK_OFFS 5856
-#define WORLD2X_BYTES 6096
+#define WORLD2X_DECK_OFFS 6096
+#define WORLD2X_DECKMASK_OFFS 8976
+#define WORLD2X_ROPE_OFFS 11856
+#define WORLD2X_ROPEMASK_OFFS 12576
+#define WORLD2X_HOOK_OFFS 13296
+#define WORLD2X_HOOKMASK_OFFS 13368
+#define WORLD2X_CLIMB_OFFS 13440
+#define WORLD2X_CLIMBMASK_OFFS 13584
+#define WORLD2X_BYTES 13728
 
 // Per mission (4, 5, 6): PF2 pens 1-7 (index 0 unused), dark to light; the sky gradient
 // top to H (lines 24-179), the sea's H to C (180-207), C under the strip; AGA: 24 bits

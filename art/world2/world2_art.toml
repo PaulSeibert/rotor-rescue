@@ -97,3 +97,19 @@ kind = "bob"
 # right-facing, forward turret: x 129, y 11
 # Pad: assemble from 8 px units on a 46-row canvas: cap (rows 0-45), then slab units at row 30 (cap, chevron or plain units
 # pointing in, the 16 px centre H, units, cap): 48, 64, 80 or 96 px; lit and dark phases blink.
+
+[w2_deck]                  # 2 frame(s) 124 x 30: the moored cargo ship (slice C, mission 5): 0 idle, 1 bow wake; one facing, bow left
+source = "world2/deck_ship.txt"
+kind = "bob"
+
+[w2_rope]                  # 3 frame(s) 8 x 40: the winch rope hanging, the rope ladder swaying left, swaying right
+source = "world2/winch_rope.txt"
+kind = "bob"
+
+[w2_hook]                  # 1 frame(s) 8 x 12: the short rope and hook of the first moment of a winch
+source = "world2/winch_hook.txt"
+kind = "bob"
+
+[w2_man_climb]             # 2 frame(s) 16 x 12: a person climbing, arms up (MAN_CLIMB0 / MAN_CLIMB1), the hostage art's drawing and pens
+source = "world2/man_climb.txt"
+kind = "bob"
