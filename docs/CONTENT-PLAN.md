@@ -273,6 +273,7 @@ skill); shown on the preview card and on the HUD. Losing a site only loses the p
 **Wind gusts** (W2 M5 on, W3, W4): a gust applies 0.25 px/frame sideways for 3 s every 12-20 s; the tell is 50
 frames before: the windsock turns, spray or snow streaks, a rising howl. No gusts while landed; none at all on skill 1; within
 100 px of a barracks on skill 2-3. The pad logic gives a 6 px landing tolerance that is reduced by wind never (it stays 6).
+**Built 2026-11-21 (SPEC v1.21, slice B):** direction +x, 3 s = 150 frames, a gap of 600-1000 frames, the first not before 18 s into a mission, none while landed or in the 2 s after take-off, a landing cancels it; the tell is the windsock only (no howl: no sample is drawn, none added); one sock beside each island's pad.
 
 **Winch rescue** (W2 M5 on): at a ledge, a ship deck or a rooftop you cannot land on, hover in a 24 x 20 px box above
 the site for the climb: 8 people take 8 s on normal (the climb is paused, not reset, if you drift out). A rope and ladder
