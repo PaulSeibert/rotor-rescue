@@ -18,7 +18,7 @@ const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_SHADOW] = 32, [BOB_SMOKE] = 16,
 	[BOB_W2_BARRACKS] = 51, [BOB_PATROL] = 43, [BOB_GUNBOAT] = 61, [BOB_PAD48] = 48,
 	[BOB_PAD64] = 64, [BOB_PAD80] = 80, [BOB_PAD96] = 96, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 32,
-	[BOB_RADAR] = 33, [BOB_SOCK] = 10, [BOB_DECK] = 124, [BOB_ROPE] = 8, [BOB_HOOK] = 8, [BOB_CLIMB] = 16,
+	[BOB_RADAR] = 33, [BOB_SOCK] = 10, [BOB_DECK] = 124, [BOB_ROPE] = 8, [BOB_HOOK] = 8, [BOB_CLIMB] = 16, [BOB_FRTR] = 128, [BOB_SPRAY] = 24,
 };
 const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_HANGAR] = 40, [BOB_FENCE] = 32, [BOB_BARRACKS] = 28, [BOB_TANK] = 14,
@@ -27,7 +27,7 @@ const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_SHADOW] = 4, [BOB_SMOKE] = 8,
 	[BOB_W2_BARRACKS] = 31, [BOB_PATROL] = 17, [BOB_GUNBOAT] = 30, [BOB_PAD48] = PAD_ROWS,
 	[BOB_PAD64] = PAD_ROWS, [BOB_PAD80] = PAD_ROWS, [BOB_PAD96] = PAD_ROWS, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 12,
-	[BOB_RADAR] = 39, [BOB_SOCK] = 20, [BOB_DECK] = 30, [BOB_ROPE] = 40, [BOB_HOOK] = 12, [BOB_CLIMB] = 12,
+	[BOB_RADAR] = 39, [BOB_SOCK] = 20, [BOB_DECK] = 30, [BOB_ROPE] = 40, [BOB_HOOK] = 12, [BOB_CLIMB] = 12, [BOB_FRTR] = 36, [BOB_SPRAY] = 12,
 };
 // (world 2's frames are the ones the floppy set carries: art/tools/make_world_disk.py picks
 // them from the art: one wake frame a facing and the patrol boat's tell a facing, the gunboat's fire frame is its second tell's,
@@ -39,7 +39,7 @@ const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_SHADOW] = SHADOW_SIZES * 2, [BOB_SMOKE] = 3,
 	[BOB_W2_BARRACKS] = 4, [BOB_PATROL] = 4, [BOB_GUNBOAT] = 6, [BOB_PAD48] = 1,
 	[BOB_PAD64] = 1, [BOB_PAD80] = 1, [BOB_PAD96] = 1, [BOB_PAD_LAMP] = 2, [BOB_SPLASH] = 5, [BOB_W2_JET] = 4,
-	[BOB_RADAR] = 4, [BOB_SOCK] = 2, [BOB_DECK] = 2, [BOB_ROPE] = 3, [BOB_HOOK] = 1, [BOB_CLIMB] = 2,
+	[BOB_RADAR] = 4, [BOB_SOCK] = 2, [BOB_DECK] = 2, [BOB_ROPE] = 3, [BOB_HOOK] = 1, [BOB_CLIMB] = 2, [BOB_FRTR] = 4, [BOB_SPRAY] = 3,
 };
 
 // World 2's islands (logic.h): the tile map's "island" lines (art/world2/tilemap.txt), px
@@ -360,7 +360,7 @@ static const tBoatPlace s_pBoatPlace[MISSION_COUNT][BOAT_MAX] = {
 	{{560, 980, BOAT_PATROL, 0}, {1690, 1890, BOAT_GUN, 1}, {2450, 2900, BOAT_GUN, 2}, {3620, 3960, BOAT_PATROL, 0}},
 	{{560, 1000, BOAT_GUN, 1}, {2450, 2680, BOAT_GUN, 1}, {0, 0, BOAT_GUN, 1}, {2680, 2900, BOAT_GUN, 3},
 		{3620, 3960, BOAT_PATROL, 0}},
-	{{540, 1020, BOAT_GUN, 1}, {1680, 1900, BOAT_GUN, 1}, {2440, 2680, BOAT_GUN, 1}, {2680, 2910, BOAT_GUN, 2},
+	{{540, 1020, BOAT_GUN, 1}, {2440, 2680, BOAT_GUN, 1}, {0, 0, BOAT_GUN, 1}, {2680, 2910, BOAT_GUN, 2},
 		{560, 780, BOAT_GUN, 4}, {3620, 3960, BOAT_PATROL, 0}},
 };
 
@@ -408,13 +408,18 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 		g->pBarracks[b].released = 0;
 		g->pBarracks[b].timer = 0;
 	}
-	g->deckOn = g->world && ubMission == 1;   // (mission 5: a moored ship in place of the third island's barracks)
+	g->deckOn = g->world && (ubMission == 1 || ubMission == 2);   // (mission 5: a moored ship, mission 6: a sinking freighter, in place of the third island's barracks)
 	g->deckLeft = g->deckOn ? DECK_PEOPLE : 0;
 	g->deckTimer = 0;
 	g->winch = 0;
+	g->sinkTimer = 0;
+	g->sinkStage = 0;
+	g->sunk = 0;
+	g->deckLost = 0;
+	g->sinkTotal = (g->deckOn && ubMission == 2) ? (uint16_t)(logicSinkSeconds(g->difficulty) * 50) : 0;
 	if(g->deckOn) {
 		tBarracks *pD = &g->pBarracks[DECK_BARRACKS];
-		pD->x = pD->wx = (int16_t)((DECK_BOX_X0 + DECK_BOX_X1) >> 1);   // (the HUD radar's dot; nothing to shoot open, nobody to release)
+		pD->x = pD->wx = (int16_t)(ubMission == 2 ? FRTR_X + FRTR_BOX_DX + 12 : (DECK_BOX_X0 + DECK_BOX_X1) >> 1);   // (the HUD radar's dot; nothing to shoot open, nobody to release)
 		pD->hp = 0;
 		pD->released = HOSTAGES_PER_BARRACKS;
 	}
@@ -644,6 +649,33 @@ uint8_t logicJetsMax(const tGame *g) {
 	return g->mission >= MISSION_COUNT - 1 ? s_pJetsMaxM3[g->difficulty] : s_pJetsMax[g->difficulty];
 }
 
+const uint8_t g_pFrtrFloor[FRTR_STAGES] = {230, 230, 230, 229};
+// The plan's timer table (CONTENT-PLAN 4.4): 120 / 105 / 90 / 75 / 60 s by skill 1-5, GODMODE as normal
+static const uint8_t s_pSinkSecs[DIFFICULTY_MAX + 1] = {90, 120, 105, 90, 75, 60};
+uint8_t logicSinkSeconds(uint8_t ubDifficulty) { return ubDifficulty <= DIFFICULTY_MAX ? s_pSinkSecs[ubDifficulty] : 0; }
+
+// a / b for a < 65536 * b: one DIVU on the 68000 (the maths library has no 16-bit divide)
+static inline uint16_t divu16(uint32_t a, uint16_t b) {
+#if defined(__mc68000__)
+	__asm__("divu.w %1,%0" : "+d"(a) : "dmi"(b));
+	return (uint16_t)a;
+#else
+	return (uint16_t)(a / b);
+#endif
+}
+
+uint8_t logicSinkBar(const tGame *g) {
+	if(!g->deckOn || g->mission != 2 || g->sunk || !g->deckLeft || !g->sinkTotal) return 0;
+	uint16_t uwUnit = (uint16_t)(g->sinkTotal >> 5);
+	return (uint8_t)divu16((uint32_t)(uint16_t)((g->sinkTotal - g->sinkTimer) >> 5) * SINK_BAR_PX, uwUnit ? uwUnit : 1);
+}
+
+// Where the site is (mission 5 the ship, mission 6 the freighter) and where its floor is: the ship's deck edge, or the hold's coaming
+// following the tilt
+static inline int16_t siteLeft(const tGame *g) { return g->mission == 2 ? FRTR_X : DECK_X; }
+static inline int16_t siteFloor(const tGame *g) { return g->mission == 2 ? (int16_t)g_pFrtrFloor[g->sinkStage] : DECK_Y; }
+static inline int16_t siteBoxX0(const tGame *g) { return g->mission == 2 ? FRTR_X + FRTR_BOX_DX : DECK_BOX_X0; }
+
 uint8_t logicGustsOn(const tGame *g) {
 	return g->world && g->mission >= 1 && g->difficulty != 1;
 }
@@ -681,10 +713,39 @@ static uint8_t gustClear(const tGame *g) {
 	return 1;
 }
 
+// The freighter's timer, in play only (not on the card, not while the chopper is down): a stage a quarter of it; at the end it sinks and the
+// people still aboard are lost (killed: the mission's count still reaches 64)
+static void frtrTick(tGame *g) {
+	if(g->sunk || !g->deckLeft || g->state != GS_PLAY) return;
+	++g->sinkTimer;
+	uint16_t uwStep = (uint16_t)(g->sinkTotal >> 2);
+	uint8_t ubStage = g->sinkTimer >= 3 * uwStep ? 3 : g->sinkTimer >= 2 * uwStep ? 2 : g->sinkTimer >= uwStep ? 1 : 0;
+	if(ubStage != g->sinkStage) {
+		g->sinkStage = ubStage;
+		g->events3 |= EV3_SINKSTAGE;
+	}
+	if(g->sinkTimer < g->sinkTotal) return;
+	for(uint8_t k = 0; k < g->deckLeft; ++k) {
+		tHostage *h = &g->pHostages[DECK_BARRACKS * HOSTAGES_PER_BARRACKS + (DECK_PEOPLE - g->deckLeft) + k];
+		h->state = HS_DEAD;
+		h->timer = 0;
+		++g->killed;
+	}
+	g->deckLost = g->deckLeft;
+	g->deckLeft = 0;
+	g->sunk = 1;
+	g->winch = 0;
+	g->events |= EV_DIED;
+	g->events3 |= EV3_SUNK;
+	boomAt(g, (int16_t)(FRTR_X + 64), 232);
+}
+
 __attribute__((noinline)) static void winchUpdate(tGame *g) {
 	const tChopper *c = &g->chop;
-	uint8_t isIn = c->alive && !c->landed && g->deckLeft && g->aboard < CABIN_MAX && c->x >= DECK_BOX_X0 && c->x <= DECK_BOX_X1 &&
-		c->y >= DECK_BOX_Y0 && c->y <= DECK_Y && absw(c->vx) <= DECK_HOVER_SPEED && absw(c->vy) <= DECK_HOVER_SPEED;
+	if(g->mission == 2) frtrTick(g);
+	int16_t wX0 = siteBoxX0(g), wFloor = siteFloor(g);
+	uint8_t isIn = c->alive && !c->landed && g->deckLeft && !g->sunk && g->aboard < CABIN_MAX && c->x >= wX0 && c->x <= wX0 + 23 &&
+		c->y >= wFloor - 20 && c->y <= wFloor && absw(c->vx) <= DECK_HOVER_SPEED && absw(c->vy) <= DECK_HOVER_SPEED;
 	if(!isIn) { g->winch = 0; return; }
 	if(!g->winch) g->events3 |= EV3_WINCHSTART;
 	if(g->winch < 255) ++g->winch;
@@ -952,12 +1013,13 @@ static void chopperDestroy(tGame *g) {
 	c->crashTimer = CRASH_FRAMES;
 	c->vx = (int16_t)(c->vx >> 1);
 	// everyone aboard is lost
-	for(uint8_t i = 0; i < HOSTAGE_COUNT; ++i) {
+	for(uint8_t i = 0, ubLeft = g->aboard; i < HOSTAGE_COUNT && ubLeft; ++i) {   // (it stops when the last one aboard is found)
 		tHostage *h = &g->pHostages[i];
 		if(h->state == HS_ABOARD) {
 			h->state = HS_DEAD;
 			h->timer = 0;
 			++g->killed;
+			--ubLeft;
 		}
 	}
 	g->aboard = 0;
@@ -973,9 +1035,9 @@ static void chopperDestroy(tGame *g) {
 // The highest the skids may go down to at x: the ground, or a roof
 static int16_t floorAt(const tGame *g, int16_t x, uint8_t *pIsGround) {
 	*pIsGround = 1;
-	if(g->deckOn && x >= DECK_X + 2 && x < DECK_X + 122) {   // the ship deck: a floor to stop on, not a landing
+	if(g->deckOn && x >= siteLeft(g) + 3 && x < siteLeft(g) + 122) {   // the ship's deck, the freighter's hold: a floor to stop on, not a landing (the sea once it has sunk)
 		*pIsGround = 0;
-		return DECK_Y;
+		return g->sunk ? GROUND_Y : siteFloor(g);
 	}
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
 		if(absw((int16_t)(x - g->pBarracks[b].x)) < 24 + 12) {
@@ -1555,7 +1617,8 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 	if(g->jetWait) --g->jetWait;
 	// the jet budget starts afresh on the home pad
 	if(c->landed && onBasePad(g, c->x)) g->jetsTrip = 0;
-	uint8_t ubMax = logicJetsMax(g);
+	uint8_t ubMax = 0xFF;   // (asked when a jet needs it: not every picture)
+#define JETS_MAX() (ubMax != 0xFF ? ubMax : (ubMax = logicJetsMax(g)))
 	uint8_t isBombOk = 0;   // (only a chopper on the ground can be bombed: the dwell table is asked then, not every picture)
 	if(c->landed) {
 		uint16_t uwDwell = logicGroundDwell(g);
@@ -1565,7 +1628,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 	for(uint8_t i = 0; i < JET_MAX; ++i) {
 		tJet *j = &g->pJets[i];
 		if(!j->active) {
-			if(!logicJetsOn(g) || !c->alive || c->x > (g->world ? W2_JET_SAFE_X : BORDER_X + 120) || i >= ubMax) continue;
+			if(!logicJetsOn(g) || !c->alive || c->x > (g->world ? W2_JET_SAFE_X : BORDER_X + 120) || i >= JETS_MAX()) continue;
 			if(g->radarCount && !logicJetZone(g, c->x)) continue;   // (world 2 missions 5-6: only inside a live radar site's zone; the delay counts there too)
 			if(g->jetsTrip >= logicJetsTripMax(g)) continue;   // this trip's jets are all out
 			if(j->cool) { --j->cool; continue; }
@@ -1639,7 +1702,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 			}
 		}
 		else if(c->alive && !j->cool && !j->warn && jetNearlyOnScreen(g, j, ubTell) && (c->landed ? isBombOk : isMissileOk) &&
-			(!g->jetWait || g->jetLast == i) && (ubMax > 1 || !jetEarlierOut(g, i)) &&
+			(!g->jetWait || g->jetLast == i) && (JETS_MAX() > 1 || !jetEarlierOut(g, i)) &&
 			(!g->world || !g->atkWait || g->atkLast == ATK_JET)) {
 			// start the flash if a shot is on, allowing for how far the jet flies meanwhile
 			// (4 px a frame): a missile needs JET_AHEAD_MIN left at the end, a bomb the chopper under it
@@ -1670,6 +1733,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 			j->cool = (uint16_t)((wRest < 40 ? 40 : wRest) + (logicRandom(g) & 63));
 		}
 	}
+#undef JETS_MAX
 }
 
 // --------------------------------------------------------------- boats ---
@@ -2317,7 +2381,9 @@ COLD static uint8_t drawAddS(tDraw *pOut, uint8_t n, int16_t sx, int16_t sy, uin
 // hover box (yellow in it, red out of it), up to three people waving on the deck, and the person climbing the rope
 COLD static uint8_t deckDraw(const tGame *g, tDraw *pOut, uint8_t n) {
 	int16_t cam = g->cam;
-	if(DECK_X + 124 < cam || DECK_X > cam + SCREEN_W) return n;
+	int16_t wLeft = siteLeft(g), wFloor = siteFloor(g), wX0 = siteBoxX0(g);
+	uint8_t isFrtr = g->mission == 2;
+	if(g->sunk || wLeft + 128 < cam || wLeft > cam + SCREEN_W) return n;
 	const tChopper *c = &g->chop;
 	int16_t wBelly = (int16_t)(c->y - 8);
 	if(g->winch && g->winch < DECK_ROPE_SET) {   // the hook falls 2 px a frame from the belly
@@ -2325,24 +2391,28 @@ COLD static uint8_t deckDraw(const tGame *g, tDraw *pOut, uint8_t n) {
 	}
 	else if(g->winch) {   // the rope hangs from above the belly (behind the chopper) to below the deck (behind the hull); the ladder sways
 		uint8_t ubF = g->winch < DECK_ROPE_SET + 8 ? ROPE_HANG : (uint8_t)(ROPE_LADDER_L + ((g->winch >> 4) & 1));
-		int16_t wTop = wBelly < DECK_Y - 17 ? wBelly : (int16_t)(DECK_Y - 17);   // (its 40 rows end behind the hull, not below the keel)
+		int16_t wTop = wBelly < wFloor - 17 ? wBelly : (int16_t)(wFloor - 17);   // (its 40 rows end behind the hull, not below the keel)
 		n = drawAddS(pOut, n, (int16_t)(c->x - 4 - cam), wTop, BOB_ROPE, ubF);
 	}
-	n = drawAddS(pOut, n, (int16_t)(DECK_X - cam), DECK_TOP, BOB_DECK, (uint8_t)((g->frame / 14) & 1));
-	int16_t wMid = (int16_t)((DECK_BOX_X0 + DECK_BOX_X1) >> 1);
-	if(c->alive && absw((int16_t)(c->x - wMid)) < 150 && ((g->frame >> 3) & 3) != 3) {
-		uint8_t isIn = c->x >= DECK_BOX_X0 && c->x <= DECK_BOX_X1 && c->y >= DECK_BOX_Y0 && c->y <= DECK_Y;
-		n = drawAddS(pOut, n, (int16_t)(DECK_X + 42 - cam), DECK_Y - 5, BOB_PAD_LAMP, isIn ? PAD_LAMP_YELLOW : PAD_LAMP_RED);
-		n = drawAddS(pOut, n, (int16_t)(DECK_X + 71 - cam), DECK_Y - 5, BOB_PAD_LAMP, isIn ? PAD_LAMP_YELLOW : PAD_LAMP_RED);
+	if(isFrtr) {
+		n = drawAddS(pOut, n, (int16_t)(FRTR_X - cam), FRTR_TOP, BOB_FRTR, g->sinkStage);
+		if(g->sinkStage) n = drawAddS(pOut, n, (int16_t)(FRTR_X + 3 - cam), FRTR_TOP + 23, BOB_SPRAY, (uint8_t)(g->sinkStage - 1));
 	}
-	static const uint8_t s_pMenX[3] = {28, 76, 82};
+	else n = drawAddS(pOut, n, (int16_t)(DECK_X - cam), DECK_TOP, BOB_DECK, (uint8_t)((g->frame / 14) & 1));
+	int16_t wMid = (int16_t)(wX0 + 12);
+	if(c->alive && absw((int16_t)(c->x - wMid)) < 150 && ((g->frame >> 3) & 3) != 3) {
+		uint8_t isIn = c->x >= wX0 && c->x <= wX0 + 23 && c->y >= wFloor - 20 && c->y <= wFloor;
+		n = drawAddS(pOut, n, (int16_t)(wX0 - 5 - cam), (int16_t)(wFloor - 5), BOB_PAD_LAMP, isIn ? PAD_LAMP_YELLOW : PAD_LAMP_RED);
+		n = drawAddS(pOut, n, (int16_t)(wX0 + 24 - cam), (int16_t)(wFloor - 5), BOB_PAD_LAMP, isIn ? PAD_LAMP_YELLOW : PAD_LAMP_RED);
+	}
+	static const uint8_t s_pMenX[2][3] = {{28, 76, 82}, {86, 92, 98}};
 	for(uint8_t i = 0; i < g->deckLeft && i < 3; ++i) {
-		n = drawAddS(pOut, n, (int16_t)(DECK_X + s_pMenX[i] - cam), DECK_Y - 12, BOB_HOSTAGE, (uint8_t)(((g->frame >> 3) + i) & 1 ? MAN_WAVE1 : MAN_WAVE0));
+		n = drawAddS(pOut, n, (int16_t)(wLeft + s_pMenX[isFrtr][i] - cam), (int16_t)(wFloor - 12), BOB_HOSTAGE, (uint8_t)(((g->frame >> 3) + i) & 1 ? MAN_WAVE1 : MAN_WAVE0));
 	}
 	if(g->winch >= DECK_ROPE_SET) {   // the climber: from the deck up to the belly in DECK_PERSON_FRAMES
-		int16_t wRise = (int16_t)(DECK_Y + 8 - c->y);   // (the rungs to climb: 8 px with the skids on the deck's level, 28 at the top of the box)
+		int16_t wRise = (int16_t)(wFloor + 8 - c->y);   // (the rungs to climb: 8 px with the skids on the floor, 28 at the top of the box)
 		if(wRise < 0) wRise = 0;
-		int16_t wY = (int16_t)(DECK_Y - 12 - (int16_t)(((uint16_t)g->deckTimer * (uint16_t)wRise * 41u) >> 11));
+		int16_t wY = (int16_t)(wFloor - 12 - (int16_t)(((uint16_t)g->deckTimer * (uint16_t)wRise * 41u) >> 11));
 		n = drawAddS(pOut, n, (int16_t)(c->x - 7 - cam), wY, BOB_CLIMB, (uint8_t)((g->frame / 6) & 1));
 	}
 	return n;
@@ -2789,11 +2859,11 @@ COLD static uint8_t routeMap2(const tGame *g, uint8_t ubMission, tRouteMark *pOu
 		logicRadarZoneOf(pX[i], &sZone);
 		pOut[n++] = (tRouteMark){ROUTE_ZONE, logicRouteX2(sZone.lo), (uint8_t)(logicRouteX2(sZone.hi) - logicRouteX2(sZone.lo))};
 	}
-	uint8_t isDeck = ubMission == 1;   // (the ship deck stands in mission 5 in place of the third barracks)
+	uint8_t isDeck = ubMission == 1 || ubMission == 2;   // (the ship deck, the freighter, in place of the third barracks)
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
 		if(!(isDeck && b == DECK_BARRACKS)) pOut[n++] = (tRouteMark){ROUTE_BARRACKS, logicRouteX2(g_pIslands[b].barracksX), 7};
 	}
-	if(isDeck) pOut[n++] = (tRouteMark){ROUTE_DECK, logicRouteX2(DECK_X), 7};
+	if(isDeck) pOut[n++] = (tRouteMark){ROUTE_DECK, logicRouteX2(ubMission == 2 ? FRTR_X : DECK_X), 7};
 	for(uint8_t i = 0; i < nr; ++i) pOut[n++] = (tRouteMark){ROUTE_RADAR, logicRouteX2(pX[i]), 3};
 	for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
 		pOut[n++] = (tRouteMark){ROUTE_PAD, logicRouteX2((int16_t)(g_pIslands[i].padX - logicPadPx(g, i) / 2)), (uint8_t)(logicPadPx(g, i) / 18 + 1)};

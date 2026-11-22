@@ -117,6 +117,14 @@
 #define ART_CLIMB_H 12
 #define ART_CLIMB_FRAMES 2
 #define ART_CLIMB_BITMAP_W 16
+#define ART_FRTR_W 128
+#define ART_FRTR_H 36
+#define ART_FRTR_FRAMES 4
+#define ART_FRTR_BITMAP_W 128
+#define ART_SPRAY_W 24
+#define ART_SPRAY_H 12
+#define ART_SPRAY_FRAMES 3
+#define ART_SPRAY_BITMAP_W 32
 #define WORLD2X_RADAR_OFFS 0
 #define WORLD2X_RADARMASK_OFFS 2808
 #define WORLD2X_SOCK_OFFS 5616
@@ -129,7 +137,11 @@
 #define WORLD2X_HOOKMASK_OFFS 13368
 #define WORLD2X_CLIMB_OFFS 13440
 #define WORLD2X_CLIMBMASK_OFFS 13584
-#define WORLD2X_BYTES 13728
+#define WORLD2X_FRTR_OFFS 13728
+#define WORLD2X_FRTRMASK_OFFS 20640
+#define WORLD2X_SPRAY_OFFS 27552
+#define WORLD2X_SPRAYMASK_OFFS 27984
+#define WORLD2X_BYTES 28416
 
 // Per mission (4, 5, 6): PF2 pens 1-7 (index 0 unused), dark to light; the sky gradient
 // top to H (lines 24-179), the sea's H to C (180-207), C under the strip; AGA: 24 bits

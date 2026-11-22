@@ -1,0 +1,30 @@
+# A real mission clear and the card that follows (the picture that starts a mission after a clear is the heaviest of the game: the HUD's
+# barracks are closed again, the lists, the card). Ctrl+L, W, 5 starts mission 5; the test hook Ctrl+L, K rescues everyone at once: the clear
+# screen, then mission 6's card (it names the freighter's timer), then its play. No dropped frame anywhere, and the card text is the freighter's.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x05
+wait-serial "AGK world 2 loaded" 400
+key 0x63
+key 0x28
+wait 5
+key 0x01
+wait 30
+press fire 2
+wait 60
+key 0x63
+key 0x28
+wait 5
+key 0x27
+wait-serial "state=1 mission=2" 800
+screenshot card6
+wait 150
+screenshot play6
+expect-no-serial "AGK ERR|missing"
+expect-no-dropped-frames
+expect-max-load 90
+expect-min-chip-free 96

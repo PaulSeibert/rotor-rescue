@@ -95,7 +95,7 @@ enum {
 	BOB_HOSTAGE, BOB_SHOT, BOB_BOMB, BOB_SHELL, BOB_BOOM, BOB_SHADOW, BOB_SMOKE, BOB_HANGAR,
 	BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_JET, BOB_MINE, BOB_FLAG,
 	BOB_W2_BARRACKS, BOB_PATROL, BOB_GUNBOAT, BOB_PAD48, BOB_PAD64, BOB_PAD80, BOB_PAD96,
-	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET, BOB_RADAR, BOB_SOCK, BOB_DECK, BOB_ROPE, BOB_HOOK, BOB_CLIMB,
+	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET, BOB_RADAR, BOB_SOCK, BOB_DECK, BOB_ROPE, BOB_HOOK, BOB_CLIMB, BOB_FRTR, BOB_SPRAY,
 	BOB_TYPES
 };
 #define BOB_W1_FIRST BOB_FENCE       // world 1's own BOBs: BOB_FENCE .. BOB_FLAG
@@ -270,6 +270,16 @@ typedef struct { int16_t lo, hi; } tZone;
 #define DECK_HOVER_SPEED 8       // the most the chopper may move (1/16 px a frame, each axis) and still be hovering
 #define DECK_ROPE_SET 12         // frames of hover before the rope is down and a person starts to climb (the hook falls 2 px a frame)
 #define DECK_PERSON_FRAMES 50    // a person's climb: 8 people take 8 s
+// World 2's sinking freighter (mission 6; SPEC 11, "World 2, slice 2", slice D): in the same sea gap, in place of the third barracks. A timer
+// (SINK_SECONDS by skill, in four stages: the BOB's frames) runs from the start of play; the winch box is the ship's hold, 20 px above the
+// coaming, and follows the tilt; when it sinks the people still aboard are lost
+#define FRTR_X 1728              // the hull's left edge (128 x 36, art/world2/freighter.txt); its top is FRTR_TOP
+#define FRTR_TOP 213             // (the waterline row, 33, is y 246)
+#define FRTR_BOX_DX 52           // the hover box: hull x 52-75
+#define FRTR_STAGES 4
+#define SINK_BAR_PX 192          // the timer bar's length (HUD row 22-23, from RADAR_X0): the whole timer
+enum { SPRAY_F0, SPRAY_F1, SPRAY_F2 };
+extern const uint8_t g_pFrtrFloor[FRTR_STAGES];   // the skids' floor over the hold by stage (the coaming's top): 230 230 230 229
 #define SOCK_DX 60               // a windsock stands this far right of each island's pad centre
 
 enum { SHOT_CANNON, SHOT_BOMB };
@@ -372,6 +382,10 @@ typedef struct {
 	uint8_t deckLeft;    // people still on it
 	uint8_t deckTimer;   // frames of the current person's climb (kept when the chopper drifts out)
 	uint8_t winch;       // frames the chopper has hovered in the box (0: not winching): a landed-class state
+	uint16_t sinkTimer, sinkTotal;   // the freighter: frames of play so far, and the whole timer (fixed at the mission's start)
+	uint8_t sinkStage;   // 0-3, a quarter of the timer each
+	uint8_t sunk;        // it has gone down
+	uint8_t deckLost;    // the people lost with it
 	uint8_t atkWait;     // frames until another boat may start a tell (one attack at a time, 3 s apart)
 	uint8_t atkLast;     // the boat that started the latest one (it may go on by its own gap)
 	uint8_t wet;         // the skids are in the water (a splash made; rises again when they lift)
@@ -414,6 +428,8 @@ typedef struct {
 #define EV3_GUST     0x02     // its push began
 #define EV3_WINCHSTART 0x04   // the chopper began a winch hover
 #define EV3_WINCHBOARD 0x08   // a person came aboard up the rope
+#define EV3_SINKSTAGE 0x10    // the freighter reached the next stage
+#define EV3_SUNK     0x20     // it sank
 
 #define EV2_JETTELL  0x01     // a jet started its flash (a missile or bomb follows)
 #define EV2_JETFIRE  0x02     // a jet launched one
@@ -568,6 +584,9 @@ uint8_t logicJetsTripMax(const tGame *g);   // most jets that may appear in one 
 uint8_t logicJetZone(const tGame *g, int16_t x);
 // Gusts may happen in this mission at this skill (missions 5 and 6, not skill 1)
 uint8_t logicGustsOn(const tGame *g);
+// The freighter's timer bar: 0 .. SINK_BAR_PX px for the time left (0 when there is no freighter or nobody aboard); the timer in seconds by skill
+uint8_t logicSinkBar(const tGame *g);
+uint8_t logicSinkSeconds(uint8_t ubDifficulty);
 // The zones of the live sites (ubAll: of every site, for the card), cut to 0 .. W2_JET_SAFE_X: how many, in pOut (RADAR_MAX)
 uint8_t logicRadarZones(const tGame *g, tZone *pOut, uint8_t ubAll);
 // A mission's sites (0-2 within world 2: the x of each, up to RADAR_MAX; how many) and the zone of a site at x: for the card's

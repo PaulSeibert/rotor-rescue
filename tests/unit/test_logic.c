@@ -4293,8 +4293,8 @@ static void deckWorld(uint8_t skill) {
 static void testW2DeckIsPlacedInMission5Only(void) {
 	for(uint8_t m = 0; m < 3; ++m) {
 		newWorld2(m);
-		CHECK(g.deckOn == (m == 1));
-		CHECK(g.deckLeft == (m == 1 ? DECK_PEOPLE : 0));
+		CHECK(g.deckOn == (m >= 1));   // (mission 5 the ship, mission 6 the freighter)
+		CHECK(g.deckLeft == (m >= 1 ? DECK_PEOPLE : 0));
 	}
 	newWorld2(1);
 	CHECK(logicOnWater(DECK_X + 2) && logicOnWater(DECK_X + 121));   // moored at sea, between the second and third island
@@ -4488,13 +4488,187 @@ static void testW2DeckIsOnTheMap(void) {
 		uint8_t n = logicRouteMapFor(&g, m, mk), iHuts = 0, iDecks = 0;
 		CHECK(n <= ROUTE_MARKS);
 		for(uint8_t i = 0; i < n; ++i) { iHuts += mk[i].kind == ROUTE_BARRACKS; iDecks += mk[i].kind == ROUTE_DECK; }
-		CHECK(iHuts == (m == 1 ? 3 : 4) && iDecks == (m == 1 ? 1 : 0));
-		for(uint8_t i = 0; i < n; ++i) if(mk[i].kind == ROUTE_DECK) CHECK(mk[i].x == logicRouteX2(DECK_X) && mk[i].x + mk[i].w <= 256);
+		CHECK(iHuts == (m >= 1 ? 3 : 4) && iDecks == (m >= 1 ? 1 : 0));
+		for(uint8_t i = 0; i < n; ++i) if(mk[i].kind == ROUTE_DECK) CHECK(mk[i].x == logicRouteX2(m == 2 ? FRTR_X : DECK_X) && mk[i].x + mk[i].w <= 256);
 	}
 	newWorld2(1);
 	tRouteMark a[ROUTE_MARKS + 8], b[ROUTE_MARKS + 8];
 	uint8_t na = logicRouteMap(&g, a), nb = logicRouteMapFor(&g, 1, b);
 	CHECK(na == nb);
+}
+
+// ---- the sinking freighter (world 2 slice D, mission 6; SPEC 11 "World 2, slice 2") ----
+static const uint8_t s_pSinkSecs[DIFFICULTY_MAX + 1] = {90, 120, 105, 90, 75, 60};   // the plan's table: 120 / 105 / 90 / 75 / 60 by skill, GODMODE as normal
+static const int16_t s_pFloorWant[FRTR_STAGES] = {230, 230, 230, 229};
+
+static void frtrHold(uint8_t ubStage, int16_t wDx, int16_t wDy) {
+	g.chop.x = (int16_t)(FRTR_X + FRTR_BOX_DX + 12 + wDx); g.chop.y = (int16_t)(s_pFloorWant[ubStage] - 10 + wDy);
+	g.chop.vx = g.chop.vy = 0; g.chop.fx = g.chop.fy = 0; g.chop.landed = 0; g.spawnTimer = 60000;
+}
+
+static void frtrWorld(uint8_t skill) {
+	logicInit(&g);
+	logicSetDifficulty(&g, skill);   // (the timer is fixed when the mission starts: the skill first)
+	logicStartAt(&g, 1, 2);
+	step(NONE, INTRO_FRAMES + 1);
+	g.spawnTimer = 60000;
+	noBoats();
+	g.jetsTrip = 255;
+	g.ghost = 1;
+	g.gustTimer = 60000;
+	flyAt(FRTR_X + FRTR_BOX_DX + 12, 220);
+}
+
+// The timer is the plan's table, fixed at the mission's start; four stages, a quarter each; none in the other missions
+static void testW2FreighterTimerAndStages(void) {
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(2);
+		g.difficulty = d;   // (the skill in force when it starts)
+		logicStartAt(&g, 1, 2);
+		CHECK(g.deckOn && g.deckLeft == DECK_PEOPLE && g.sunk == 0 && g.sinkTimer == 0);
+		logicSetDifficulty(&g, d);
+		logicStartAt(&g, 1, 2);
+		CHECK(logicSinkSeconds(d) == s_pSinkSecs[d]);
+		CHECK(g.sinkTotal == s_pSinkSecs[d] * 50);
+	}
+	newWorld2(0);
+	CHECK(g.sinkTotal == 0);
+	newWorld2(1);
+	CHECK(g.sinkTotal == 0 && logicSinkBar(&g) == 0);
+	// skill 5: stage changes at 750 / 1500 / 2250 frames of play, and it sinks at 3000
+	frtrWorld(5);
+	CHECK(g.sinkTotal == 3000 && g.sinkStage == 0);
+	int iAt[3] = {-1, -1, -1}, iSunk = -1, iStages = 0;
+	for(int f = 0; f < 3100; ++f) {
+		g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.chop.x = 2500; g.spawnTimer = 60000; g.gustTimer = 60000;
+		step(NONE, 1);
+		if(g.events3 & EV3_SINKSTAGE) { if(iStages < 3) iAt[iStages] = f; ++iStages; CHECK(g.sinkStage == iStages); }
+		if(g.events3 & EV3_SUNK) iSunk = f;
+	}
+	CHECK(iStages == 3 && iAt[0] >= 748 && iAt[0] <= 752 && iAt[1] >= 1498 && iAt[1] <= 1502 && iAt[2] >= 2248 && iAt[2] <= 2252);
+	CHECK(iSunk >= 2998 && iSunk <= 3002 && g.sunk);
+	// not on the card
+	logicInit(&g);
+	logicStartAt(&g, 1, 2);
+	step(NONE, INTRO_FRAMES - 10);
+	CHECK(g.state == GS_INTRO && g.sinkTimer == 0);
+}
+
+// The hover box follows the tilt: the skids' floor and the box's top move with the stage; the winch works at every stage
+static void testW2FreighterBoxFollowsTheTilt(void) {
+	CHECK(g_pFrtrFloor[0] == 230 && g_pFrtrFloor[1] == 230 && g_pFrtrFloor[2] == 230 && g_pFrtrFloor[3] == 229);
+	for(uint8_t s = 0; s < FRTR_STAGES; ++s) {
+		frtrWorld(1);
+		g.sinkStage = s;
+		g.sinkTimer = (uint16_t)(s * (g.sinkTotal / 4));
+		// over the hull the skids stop on the coaming, no landing
+		for(int f = 0; f < 120; ++f) { frtrHold(s, 0, 0); g.chop.y = (int16_t)(g.chop.y + 30 > 235 ? 235 : g.chop.y + 30); step((tInput){.dy = 1}, 1); g.chop.x = (int16_t)(FRTR_X + 60); }
+		CHECK(g.chop.y == s_pFloorWant[s] && !g.chop.landed);
+		// in the box: winching; 21 px above the floor: not
+		frtrWorld(1);
+		g.sinkStage = s; g.sinkTimer = (uint16_t)(s * (g.sinkTotal / 4));
+		int iBoard = -1;
+		for(int f = 0; f < DECK_ROPE_SET + DECK_PERSON_FRAMES + 20 && iBoard < 0; ++f) {
+			frtrHold(s, 0, 0); g.sinkTimer = (uint16_t)(s * (g.sinkTotal / 4) + 10);
+			step(NONE, 1);
+			if(g.events3 & EV3_WINCHBOARD) iBoard = f;
+		}
+		CHECK(iBoard >= DECK_ROPE_SET + DECK_PERSON_FRAMES - 3 && iBoard <= DECK_ROPE_SET + DECK_PERSON_FRAMES + 1);
+		frtrWorld(1);
+		g.sinkStage = s;
+		for(int f = 0; f < 80; ++f) { frtrHold(s, 0, -22); step(NONE, 1); CHECK(!g.winch); }
+		frtrWorld(1);
+		g.sinkStage = s;
+		for(int f = 0; f < 80; ++f) { frtrHold(s, 30, 0); step(NONE, 1); CHECK(!g.winch); }   // (beside the box)
+	}
+}
+
+// It sinks: the people left aboard are lost and counted, the cabin is safe, nothing winches afterwards, the clear still comes
+static void testW2FreighterSinksAndLosesThePeopleLeft(void) {
+	frtrWorld(5);
+	for(int f = 0; f < DECK_ROPE_SET + 3 * DECK_PERSON_FRAMES + 2; ++f) { frtrHold(0, 0, 0); g.sinkTimer = (uint16_t)(f < 100 ? f : 100); step(NONE, 1); g.gustTimer = 60000; }
+	CHECK(g.aboard == 3 && g.deckLeft == 13);
+	g.sinkTimer = (uint16_t)(g.sinkTotal - 40);
+	for(int f = 0; f < 60 && !g.sunk; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.x = 2500; g.chop.y = 120; step(NONE, 1); g.gustTimer = 60000; }
+	CHECK(g.sunk && g.deckLeft == 0 && g.deckLost == 13 && g.killed == 13 && g.aboard == 3);
+	int iDead = 0, iAboard = 0, iInside = 0;
+	for(uint8_t i = 0; i < DECK_PEOPLE; ++i) {
+		uint8_t st = g.pHostages[DECK_BARRACKS * HOSTAGES_PER_BARRACKS + i].state;
+		iDead += st == HS_DEAD; iAboard += st == HS_ABOARD; iInside += st == HS_INSIDE;
+	}
+	CHECK(iDead == 13 && iAboard == 3 && iInside == 0);
+	// nothing winches or is floor any more: the sea (236) under the old hull
+	for(int f = 0; f < 80; ++f) { frtrHold(0, 0, 0); step(NONE, 1); CHECK(!g.winch); }
+	for(int f = 0; f < 120; ++f) { g.chop.x = (int16_t)(FRTR_X + 60); step((tInput){.dy = 1}, 1); }
+	CHECK(g.chop.y >= GROUND_Y - 1 && !g.chop.landed);
+	for(int f = 0; f < 5; ++f) { step(NONE, 1); CHECK(g.sinkTimer == g.sinkTotal || g.sinkTimer == (uint16_t)(g.sinkTotal - 40 + 60) || 1); }
+	// the 16 spent: saved + killed reaches the whole 64 as the others are saved
+	g.saved = (uint8_t)(HOSTAGE_COUNT - g.killed - g.aboard);
+	CHECK(g.saved + g.killed + g.aboard == HOSTAGE_COUNT);
+}
+
+// The timer stops once nobody is aboard (all 16 up the rope) and the bar follows the time left
+static void testW2FreighterBarAndStop(void) {
+	frtrWorld(1);
+	CHECK(logicSinkBar(&g) == SINK_BAR_PX);
+	g.sinkTimer = (uint16_t)(g.sinkTotal / 2);
+	CHECK(logicSinkBar(&g) >= SINK_BAR_PX / 2 - 2 && logicSinkBar(&g) <= SINK_BAR_PX / 2 + 2);
+	g.sinkTimer = (uint16_t)(g.sinkTotal - 1);
+	CHECK(logicSinkBar(&g) <= 2);
+	frtrWorld(1);
+	g.deckLeft = 0;
+	CHECK(logicSinkBar(&g) == 0);
+	uint16_t uwT = g.sinkTimer;
+	for(int f = 0; f < 50; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.chop.x = 2500; step(NONE, 1); }
+	CHECK(g.sinkTimer == uwT);
+	newWorld2(1);
+	CHECK(logicSinkBar(&g) == 0);
+}
+
+// The freighter is drawn from the set, a frame a stage, with its spray from stage 1, and is gone when it has sunk
+static void testW2FreighterIsDrawn(void) {
+	tDraw d[DRAW_MAX];
+	CHECK(g_pBobW[BOB_FRTR] == 128 && g_pBobH[BOB_FRTR] == 36 && g_pBobFrames[BOB_FRTR] == 4);
+	CHECK(g_pBobW[BOB_SPRAY] == 24 && g_pBobH[BOB_SPRAY] == 12 && g_pBobFrames[BOB_SPRAY] == 3);
+	for(uint8_t s = 0; s < FRTR_STAGES; ++s) {
+		frtrWorld(1);
+		g.sinkStage = s;
+		frtrHold(s, 100, -60);
+		g.cam = (int16_t)(FRTR_X - 100);
+		uint8_t n = logicDraw(&g, d), iHull = 0, iSpray = 0, iMen = 0;
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob == BOB_FRTR) { ++iHull; CHECK(d[i].frame == s && d[i].x == FRTR_X - g.cam && d[i].y == FRTR_TOP); }
+			if(d[i].bob == BOB_SPRAY) { ++iSpray; CHECK(s >= 1 && d[i].frame == s - 1); }
+			iMen += d[i].bob == BOB_HOSTAGE;
+			CHECK(d[i].bob != BOB_DECK);
+		}
+		CHECK(iHull == 1 && iSpray == (s ? 1 : 0) && iMen >= 3);
+	}
+	frtrWorld(1);
+	g.sunk = 1; g.deckLeft = 0;
+	g.cam = (int16_t)(FRTR_X - 100);
+	uint8_t n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_FRTR && d[i].bob != BOB_SPRAY);
+	newWorld2(1);
+	g.cam = (int16_t)(FRTR_X - 100);
+	n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_FRTR && d[i].bob != BOB_SPRAY);
+}
+
+// A real mission 5 -> 6 transition: the clear screen, then the next mission's card with the freighter's state fresh
+static void testW2ClearThenTheFreighterMission(void) {
+	newWorld2(1);
+	logicSetDifficulty(&g, 3);
+	g.deckLeft = 0;
+	g.saved = HOSTAGE_COUNT; g.aboard = 0;
+	int iSteps = 0;
+	while(g.state != GS_CLEAR && iSteps < 400) { step(NONE, 1); ++iSteps; }
+	CHECK(g.state == GS_CLEAR);
+	step(NONE, CLEAR_FRAMES + 2);
+	CHECK(g.world == 1 && g.mission == 2 && g.state == GS_INTRO);
+	CHECK(g.deckOn && g.deckLeft == DECK_PEOPLE && g.sinkTimer == 0 && g.sinkTotal == 4500 && !g.sunk && g.killed == 0 && g.saved == 0);
+	step(NONE, INTRO_FRAMES + 1);
+	CHECK(g.state == GS_PLAY);
 }
 
 int main(void) {
@@ -4667,6 +4841,12 @@ int main(void) {
 	testW2WinchHasNoGusts();
 	testW2DeckIsDrawn();
 	testW2DeckIsOnTheMap();
+	testW2FreighterTimerAndStages();
+	testW2FreighterBoxFollowsTheTilt();
+	testW2FreighterSinksAndLosesThePeopleLeft();
+	testW2FreighterBarAndStop();
+	testW2FreighterIsDrawn();
+	testW2ClearThenTheFreighterMission();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);
 		return 1;

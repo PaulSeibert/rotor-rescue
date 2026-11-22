@@ -406,6 +406,21 @@ __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 		agkPrint("AGK overrun\n");
 		return;
 	}
+	if(keyUse(KEY_K)) {
+		// everyone rescued at once: the mission's clear and the next card (tests/w2clear.agk)
+		s_sGame.saved = HOSTAGE_COUNT;
+		s_sGame.killed = 0;
+		s_sGame.aboard = 0;
+		s_sGame.deckLeft = 0;
+		s_ubSkillKeyWait = 0;
+		return;
+	}
+	if(keyUse(KEY_Z)) {
+		// the freighter 3 s from sinking (tests/w2frtr.agk)
+		if(s_sGame.deckOn && s_sGame.sinkTotal) s_sGame.sinkTimer = (UWORD)(s_sGame.sinkTotal - 150);
+		s_ubSkillKeyWait = 0;
+		return;
+	}
 	if(keyUse(KEY_H)) {
 		// the hall of fame read from the disk again, as at boot (tests)
 		s_ubSkillKeyWait = 0;
@@ -1393,7 +1408,7 @@ static UBYTE s_pMsgAnyFix[2];
 static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
-#define TPL_MAX 72   // the shared BOBs' 28 frames + world 2's 33 (world 1's own: 23); one more than the last template made
+#define TPL_MAX 80   // the shared BOBs' 28 frames + world 2's 33 (world 1's own: 23); one more than the last template made
 static tAgkBlitArea s_pErase[2][DRAW_MAX];
 static UBYTE s_pErased[2];
 static UBYTE s_ubLastDrawn;          // objects in the last picture (the HUD types less after a busy one)
@@ -1582,6 +1597,8 @@ __attribute__((noinline, optimize("Os"))) static void bobsBind(UBYTE ubWorld) {
 		BOB_W2X(BOB_ROPE, ROPE);
 		BOB_W2X(BOB_HOOK, HOOK);
 		BOB_W2X(BOB_CLIMB, CLIMB);
+		BOB_W2X(BOB_FRTR, FRTR);
+		BOB_W2X(BOB_SPRAY, SPRAY);
 		b0 = BOB_W2_FIRST;
 		b1 = BOB_TYPES;
 	}
@@ -2059,6 +2076,18 @@ static inline void radarDot(UBYTE *pRow, UBYTE ubX, UBYTE ubPen) {
 // The strip's rows 0..RADAR_DYN_H-1 are cleared by the blitter (radarClear(),
 // queued first in the picture); row RADAR_H-1 is the ground line, drawn once.
 static tAgkBlitArea s_pRadarArea[2];
+static void radarBar(UBYTE *pRow, UBYTE ubX0, UBYTE ubX1);
+static UBYTE s_pSinkBar[2];   // the freighter's timer bar as drawn (px) in each HUD buffer
+
+// The timer bar of the sinking freighter (SPEC 11, slice D): the two HUD rows under the radar (22-23), pen 5, ubLen px from the radar's left edge
+__attribute__((noinline, optimize("Os"))) static void sinkBarDraw(UBYTE *pRadarTop, UBYTE ubLen) {
+	for(UBYTE r = RADAR_H; r < RADAR_H + 2; ++r) {
+		UBYTE *p = pRadarTop + r * HUD_ROW_BYTES;
+		for(UBYTE k = 0; k < RADAR_W / 8; ++k) { p[k] = 0; p[RADAR_P1 + k] = 0; p[RADAR_P2 + k] = 0; }
+		if(ubLen) radarBar(p, 0, (UBYTE)(ubLen - 1));
+	}
+}
+
 static UBYTE s_pRadarZones[2];   // the same for the radar sites and their zones (0: none, world 1; else bit 6, the mission, the sites standing)
 static UBYTE s_pRadarBuildings[2] = {0xFF, 0xFF};   // which barracks were open when drawn
 
@@ -2135,6 +2164,11 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 	if(isW2) {
 		ubZoneKey = (UBYTE)(0x40 | ((g->mission + 1) << 3));
 		for(UBYTE i = 0; i < g->radarCount; ++i) ubZoneKey |= (UBYTE)(g->pRadars[i].alive << i);
+		UBYTE ubBar = logicSinkBar(g);   // (mission 6: the freighter's time left, 0 when there is none or nobody aboard)
+		if(ubBar != s_pSinkBar[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {   // (not in the first pictures of the card, as the sites')
+			s_pSinkBar[ubBfr] = ubBar;
+			sinkBarDraw(pTop, ubBar);
+		}
 	}
 	if(ubZoneKey != s_pRadarZones[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {
 		s_pRadarZones[ubBfr] = ubZoneKey;
@@ -2388,7 +2422,10 @@ __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey) {
 				szA[8] = (char)('4' + g->mission);
 				szA[9] = 0;
 				pText[1] = pW2Name[g->mission];
-				pText[2] = "64 HELD ON 4 ISLANDS";
+				// (mission 5: three islands and a ship; mission 6: the freighter's timer, the skill in force at the card)
+				static const char *const pSink[DIFFICULTY_MAX + 1] = {"FREIGHTER SINKS IN 90 SECONDS", "FREIGHTER SINKS IN 120 SECONDS",
+					"FREIGHTER SINKS IN 105 SECONDS", "FREIGHTER SINKS IN 90 SECONDS", "FREIGHTER SINKS IN 75 SECONDS", "FREIGHTER SINKS IN 60 SECONDS"};
+				pText[2] = g->mission == 0 ? "64 HELD ON 4 ISLANDS" : g->mission == 1 ? "48 ON 3 ISLANDS, 16 ON A SHIP" : pSink[g->difficulty];
 			}
 		} break;
 		case GS_LOST:
@@ -2726,6 +2763,7 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 		s_pStripMem = 0;
 		if(s_pW2X) memFree(s_pW2X, WORLD2X_BYTES);
 		s_pW2X = 0;
+		for(UBYTE b = 0; b < 2; ++b) { s_pSinkBar[b] = 0; sinkBarDraw(s_pRadarArea[b].pD, 0); }   // (no freighter's bar in world 1's HUD)
 		if(agkLoadFile("world1.bin.pk", pArena, WORLD1_BANDS_BYTES) != WORLD1_BANDS_BYTES) agkPrint("AGK ERR world1 art missing\n");
 		s_pCloudsBm = s_pW1CloudsBm;
 		s_pFarBm = s_pMountains;
@@ -3351,6 +3389,8 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	if(g->events & EV_SHRUG) agkPrint("AGK hit ignored (invincible)\n");
 	if(g->events & EV_TANKTELL) agkPrint("AGK tank tell\n");
 	if(g->events3) {   // (one test a picture in world 1)
+		if(g->events3 & EV3_SINKSTAGE) { agkState("sink stage", g->sinkStage); agkEnd(); }
+		if(g->events3 & EV3_SUNK) { agkState("sunk lost", g->deckLost); agkEnd(); }
 		if(g->events3 & EV3_WINCHSTART) agkPrint("AGK winch start\n");
 		if(g->events3 & EV3_WINCHBOARD) { agkState("winch board", g->aboard); agkEnd(); }
 		if(g->events3 & EV3_GUSTTELL) agkPrint("AGK gust tell\n");
