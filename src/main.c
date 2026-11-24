@@ -2662,9 +2662,9 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	if(s_ubRadarHeavy) {
 		// The radar's redraw (a card's seventh and eighth pictures, a barracks opening) and two letters of text
 		// in one picture were the mission start's heaviest (w2barrage, w2dest, w2frtr 98-102 %): the letters wait
-		// one picture (nothing was erased in this one: letters crossed by an object are still done now)
+		// one picture on a mission card (nothing was erased in this one: letters crossed by an object are still done now)
 		s_ubRadarHeavy = 0;
-		if(!s_pMsgAnyFix[ubBfr]) return;
+		if(s_sGame.state == GS_INTRO && !s_pMsgAnyFix[ubBfr]) return;   // (the cards: the title's and the play states' text keeps its pictures)
 	}
 	if(uwKey == s_pMsgKey[ubBfr] && uwKey == s_pMsgTypeKey[ubBfr]) {   // (settled, so a fix is what is wanted)
 		msgFixOnly(ubBfr);
