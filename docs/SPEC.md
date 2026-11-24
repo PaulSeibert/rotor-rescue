@@ -1123,8 +1123,9 @@ column (pad). The surface between two joints is the straight line (the tile's pr
 - **Slopes:** up to 45 degrees (a rise of 16 per 16 px) the chopper slides up the flank as the floor lifts it. **Walls:** a flank
   of 60 degrees or more (a rise of 28 or more) is solid from the side: the chopper's body (half-width 16) stops at it, its vx goes
   to 0, no damage (the wall bump costs speed only), and the bump sets an event for the puff.
-- `ceilAt(x)` is the lowest y the chopper may reach: `CEIL_Y` (44) with no ceiling, the deck's base (85 and below, per column of
-  the ceiling map) where the cloud ceiling or a tunnel roof hangs. The ceiling map is a height map too (M8, M9).
+- `ceilAt(x)` is the highest y the skids can reach: `CEIL_Y` (44) with no ceiling; under a cloud deck or a tunnel roof, the deck's base
+  line plus the chopper's height (20), so its top stops at the base (eased down 3 px a frame, never a pop). The ceiling map is a height
+  map too (M8, M9; one base line per 16 px joint, 0 = none).
 - A barracks, pad or ledge stands on a bench tile: its y is `floorAt` of its column.
 
 ### 13.6 Nest tells by skill
@@ -1136,7 +1137,11 @@ at skill 1-5**. The fire frame is the tell held with a muzzle flash.
 1:1 terrain strip streamed a 16 px column at a time into a ring in PF2, the far range at 1/4, the haze, the strip fill under the world
 card, and the world's art loaded into the shared arena in place of the previous world's (`disk/world3.bin`, `art/tools/make_world3_disk.py`).
 Missions 8 and 9 show a "not built" card. No enemy behaviour yet (the nest and lodge are scenery): that is for amiga-game.
-Numbers (chip, copper entries, frame cost) are in docs/WORLD3-HANDOFF.md as measured.
+Measured in vAmiga (docs/WORLD3-HANDOFF.md has all of it): chip free in play 104 KB on the a500 (the floor is 96; world 1 and 2 are
+unchanged), 82 KB with WinUAE's 23 KB taken away (floor 64); the world's art, gradients and the strip's 18.3 KB ring all live in the
+shared arena world 2 already sized (world 3 adds no chip: `WORLD3_END` 45.5 KB of the arena's 68.2 KB, so M7's pilot is under the 62 / 71 KB targets with room for the ceiling strip); copper entries 631 (OCS) and
+1,333 (AGA) against the lists' 661 and 1,340; frame load 26-47 % average, worst 74 % (the card's fill window); `disk/world3.bin` 25.5 KB,
+12.8 KB packed.
 
 ## Open questions for Paul
 

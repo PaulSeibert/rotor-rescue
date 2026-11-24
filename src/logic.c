@@ -40,7 +40,7 @@ const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_SHADOW] = SHADOW_SIZES * 2, [BOB_SMOKE] = 3,
 	[BOB_W2_BARRACKS] = 4, [BOB_PATROL] = 4, [BOB_GUNBOAT] = 6, [BOB_PAD48] = 1,
 	[BOB_PAD64] = 1, [BOB_PAD80] = 1, [BOB_PAD96] = 1, [BOB_PAD_LAMP] = 2, [BOB_SPLASH] = 5, [BOB_W2_JET] = 4,
-	[BOB_W3_LODGE] = 2, [BOB_W3_NEST] = 3,
+	[BOB_W3_LODGE] = 3, [BOB_W3_NEST] = 3,   // (the lodge: intact, shot, burning)
 };
 
 // World 2's islands (logic.h): the tile map's "island" lines (art/world2/tilemap.txt), px
@@ -2381,6 +2381,15 @@ static const tBandLayout s_pBandLayout[3] = {
 };
 const tBandLayout *logicBands(uint8_t ubWorld) { return &s_pBandLayout[ubWorld > 2 ? 2 : ubWorld]; }
 
+void logicStripNew(int16_t wLo, int16_t wOldLo, uint8_t ubSpan, int16_t *pFrom, int16_t *pTo) {
+	int16_t wFrom = wLo, wTo = (int16_t)(wLo + ubSpan);
+	if(wLo > wOldLo && wLo < wOldLo + ubSpan) wFrom = (int16_t)(wOldLo + ubSpan);          // moved right: the new right end
+	else if(wLo < wOldLo && wLo + ubSpan > wOldLo) wTo = wOldLo;                              // moved left: the new left end
+	else if(wLo == wOldLo) wTo = wFrom;                                                       // not moved
+	*pFrom = wFrom;
+	*pTo = wTo;
+}
+
 uint16_t logicBandOffset(int16_t wCam, uint8_t ubShift, uint16_t uwLoopW) {
 	uint16_t x = (uint16_t)wCam >> ubShift;
 	while(x >= uwLoopW) x = (uint16_t)(x - uwLoopW);
@@ -2653,7 +2662,7 @@ static const char *const s_pW2BriefJets[MISSION_COUNT] = {
 };
 
 COLD const char *logicBrief(const tGame *g) {
-	if(logicIsW3(g)) return g->mission ? "NOT BUILT: THE PILOT MAP, THIS PALETTE" : "THE FIRST SCREENS: A PASS, A PAD, A NEST";
+	if(logicIsW3(g)) return g->mission ? "NOT BUILT: PILOT PALETTE" : "A PASS, A PAD, A NEST";
 	if(g->world) return logicJetsPossible(g) ? s_pW2BriefJets[g->mission] : s_pW2Brief[g->mission];
 	// the threats this mission starts with (trip 0, this difficulty)
 	if(logicMinesOn(g)) return "TANKS, JETS AND AIR MINES";

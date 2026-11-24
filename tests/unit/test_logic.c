@@ -3957,8 +3957,52 @@ static void testW3BuiltInMapIsPlayable(void) {
 	}
 }
 
+
+// T5 (SPEC 13): the terrain strip's ring keeps SPAN (22) columns drawn, lo .. lo + 21; the picture shows (and the back picture will show)
+// the 21 words from the column its camera's first word is on. logicStripNew gives the columns that come into the ring when lo moves
+// (one range): a sweep of the camera at any speed, either way, never leaves a displayed column undrawn.
+static void testStripStreamsEveryColumn(void) {
+	enum { SPAN = 22 };
+	int16_t from, to;
+	logicStripNew(10, 10, SPAN, &from, &to);
+	CHECK(from >= to);                                      // nothing moved: nothing to draw
+	logicStripNew(11, 10, SPAN, &from, &to);
+	CHECK(from == 32 && to == 33);                          // one column in on the right
+	logicStripNew(9, 10, SPAN, &from, &to);
+	CHECK(from == 9 && to == 10);                           // one column in on the left
+	logicStripNew(40, 10, SPAN, &from, &to);
+	CHECK(from == 40 && to == 62);                          // a jump: the whole span
+	for(int speed = 1; speed <= 5; ++speed) {
+		for(int dir = -1; dir <= 1; dir += 2) {
+			static uint8_t drawn[400];
+			memset(drawn, 0, sizeof(drawn));
+			int16_t cam = dir > 0 ? 0 : 3700;
+			int16_t lo = (int16_t)(((cam - 1) >> 4));
+			for(int j = lo; j < lo + SPAN; ++j) if(j >= 0) drawn[j] = 1;     // the fill after a jump
+			int16_t prevFirst = lo, prevFirst0 = lo;
+			for(int f = 0; f < 4000 / speed - 30; ++f) {
+				cam = (int16_t)(cam + dir * speed);
+				int16_t first = (int16_t)((cam - 1) >> 4);
+				// as stripUpdate: the span covers this picture's columns and the last one's
+				int16_t wLo = first < prevFirst ? first : prevFirst;
+				if(dir > 0) wLo = prevFirst < first ? prevFirst : first;
+				int16_t oldLo = lo;
+				logicStripNew(wLo, oldLo, SPAN, &from, &to);
+				for(int j = from; j < to; ++j) if(j >= 0 && j < 400) drawn[j] = 1;
+				lo = wLo;
+				prevFirst = first;
+				// the 21 words this picture fetches, and the last picture's (still on screen until the swap)
+				for(int j = first; j < first + 21; ++j) if(j >= 0 && j < 260) CHECK(drawn[j]);
+				for(int j = prevFirst0; j < prevFirst0 + 21; ++j) if(j >= 0 && j < 260) CHECK(drawn[j]);
+				prevFirst0 = first;
+			}
+		}
+	}
+}
+
 int main(void) {
 	testBandLayoutTable();
+	testStripStreamsEveryColumn();
 	testW3SurfaceInterpolates();
 	testW3SkidsStopAtTheHighestSurfaceUnderThem();
 	testW3LandsOnABenchPad();

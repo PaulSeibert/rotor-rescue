@@ -657,6 +657,10 @@ int16_t logicW3CeilAt(int16_t x);                      // the highest y the skid
 uint8_t logicW3WallAt(int16_t xEdge, int16_t y, int8_t bDir);   // the body's leading edge at xEdge, skids at y, heading bDir: in a wall?
 uint8_t logicW3GapOk(const uint8_t *pHeight, const uint8_t *pFlags, const uint8_t *pCeil);   // SPEC 13.2 (0, 0, 0: the built-in map)
 
+// The terrain strip's ring (worlds 2 and 3) keeps ubSpan columns drawn, wLo .. wLo + ubSpan - 1: when wLo moves from wOldLo, the columns
+// that come into it are [*pFrom, *pTo) (one range; empty when *pFrom >= *pTo; a jump draws the whole span)
+void logicStripNew(int16_t wLo, int16_t wOldLo, uint8_t ubSpan, int16_t *pFrom, int16_t *pTo);
+
 // Radar: 0..RADAR_W-1 from a world x
 #define RADAR_W 192
 #define RADAR_X0 64

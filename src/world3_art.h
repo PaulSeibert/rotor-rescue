@@ -11,31 +11,33 @@
 #define W3_FAR_LOOP_W 320
 #define W3_STRIP_ROWS 126
 #define W3_TILE_COUNT 27
-#define W3_FILL_COUNT 8
+#define W3_FILL_COUNT 16
+#define W3_FILL_ROW0 21
+#define W3_FILL_ROWS 105
 #define W3_MAP_COLS 256
 #define WORLD3_FAR_OFFS 0
 #define WORLD3_TILETAB_OFFS 10080
 #define WORLD3_TILES_OFFS 10192
 #define WORLD3_FILLS_OFFS 14320
-#define WORLD3_PLAN_OFFS 20368
-#define WORLD3_FILLS_BYTES 6048
+#define WORLD3_PLAN_OFFS 24400
+#define WORLD3_FILLS_BYTES 10080
 #define ART_W3_LODGE_W 52
 #define ART_W3_LODGE_H 32
-#define ART_W3_LODGE_FRAMES 2
+#define ART_W3_LODGE_FRAMES 3
 #define ART_W3_LODGE_BITMAP_W 64
-#define WORLD3_LODGE_OFFS 21136
+#define WORLD3_LODGE_OFFS 25168
 #define ART_W3_NEST_W 30
 #define ART_W3_NEST_H 24
 #define ART_W3_NEST_FRAMES 3
 #define ART_W3_NEST_BITMAP_W 32
-#define WORLD3_NEST_OFFS 22672
-#define WORLD3_NESTMASK_OFFS 23536
+#define WORLD3_NEST_OFFS 27472
+#define WORLD3_NESTMASK_OFFS 28336
 #define ART_W3_PAD64_W 64
 #define ART_W3_PAD64_H 46
 #define ART_W3_PAD64_FRAMES 1
 #define ART_W3_PAD64_BITMAP_W 64
-#define WORLD3_PAD64_OFFS 24400
-#define WORLD3_BYTES 25504
+#define WORLD3_PAD64_OFFS 29200
+#define WORLD3_BYTES 30304
 
 static const uint16_t g_pW3FarPal[3][8] = {
 	{0x000, 0x345, 0x456, 0x568, 0x78A, 0x9AC, 0xDDE, 0xFFF},
@@ -44,12 +46,12 @@ static const uint16_t g_pW3FarPal[3][8] = {
 };
 static const uint16_t g_pW3StripPal[3][8] = {
 	{0x000, 0x112, 0x435, 0x765, 0xC96, 0x9AC, 0xDDE, 0xFFF},
-	{0x000, 0x123, 0x445, 0x876, 0xCB8, 0x8CF, 0xDEF, 0xFFF},
+	{0x000, 0x123, 0x544, 0x765, 0xA86, 0x8CF, 0xDEF, 0xFFF},
 	{0x000, 0x011, 0x223, 0x445, 0xA87, 0x689, 0xBCD, 0xEEF},
 };
 static const uint16_t g_pW3CeilPal[3][8] = {
 	{0x000, 0x223, 0x435, 0x987, 0xCAA, 0xEDD, 0xFEE, 0xFFF},
-	{0x000, 0x234, 0x546, 0x78A, 0x9BD, 0xCDE, 0xEEF, 0xFFF},
+	{0x000, 0x234, 0x456, 0x78A, 0x9BD, 0xCDE, 0xEEF, 0xFFF},
 	{0x000, 0x011, 0x223, 0x445, 0x556, 0x778, 0x99A, 0xCA9},
 };
 static const uint16_t g_pW3SkyDotPal[3][3] = {{0x9AC, 0xEDE, 0xFFF}, {0xBDF, 0xFFF, 0xFFE}, {0x445, 0x889, 0xBBB}};

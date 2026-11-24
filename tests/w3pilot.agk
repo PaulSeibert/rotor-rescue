@@ -1,0 +1,49 @@
+# World 3, the Highlands (SPEC 13; docs/STYLE-world3.md): the hardware pilot. Ctrl+L, W, 7 starts mission 7 (Foothills) behind its
+# card; disk/world3.bin loads into the world arena there (replacing the previous world's art), the terrain strip's ring fills under
+# the card (1 column a picture, behind a blank strip), then the chopper takes off from the pad and flies east along the pass:
+# - lines 24-129: the sky gradient (COLOR00 a line), the far range (88-129) at 1/4;
+# - lines 130-255: the terrain strip, 1:1, a 16 px column streamed in as the camera moves, the haze gradient behind it;
+# The same flight is the world's frame budget: no dropped frames.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x07
+wait-serial "AGK world 3 loaded" 400
+wait 60
+screenshot card
+key 0x63
+key 0x28
+wait 5
+key 0x02
+wait 40
+screenshot start
+# the pilot's own pixels: the sky's top (SPEC 13.3: 236), the far range's pens, the strip's rock (pens 2, 3, 1 of M7)
+expect-color start 60 100 0x9AC
+expect-color start 10 105 0x568
+expect-color start 4 250 0x765
+expect-color start 100 240 0x435
+expect-color start 300 200 0x112
+press up 40
+hold right
+wait 100
+screenshot fly1
+wait 100
+screenshot fly2
+wait 100
+screenshot fly3
+wait 100
+screenshot fly4
+release
+press fire 10
+wait 30
+screenshot end
+expect-serial "AGK start world=3 mission=7"
+expect-serial "AGK world=3 mission=7"
+expect-serial "world3 copper_used=\d+ copper_max=\d+"
+expect-no-serial "ERR|missing"
+expect-no-dropped-frames
+expect-max-load 85
+expect-min-chip-free 96

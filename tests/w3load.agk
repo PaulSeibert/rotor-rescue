@@ -1,0 +1,81 @@
+# World 3's REAL transitions (the way tests/w1card.agk and w2over.agk cover worlds 1 and 2): world 1 -> world 2 -> world 3
+# (mission 7, then 8 and 9 on the same map: the palettes patched into both lists, no rewrite), -> world 2 -> world 1 -> world 3.
+# Each world's load replaces the previous world's art in the shared arena with the bitplanes off for two pictures, and
+# world 3's strip fills under its card (1 column a picture behind a blank strip). No dropped frame anywhere.
+wait-serial "AGK t0" 1000
+press fire 2
+wait 120
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x04
+wait-serial "AGK world 2 loaded" 400
+wait 80
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x07
+wait-serial "AGK world 3 loaded" 400
+wait 90
+screenshot m7card
+press fire 2
+wait 60
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x08
+wait-serial "AGK start world=3 mission=8" 200
+wait 90
+screenshot m8card
+press fire 2
+wait 60
+screenshot m8
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x09
+wait-serial "AGK start world=3 mission=9" 200
+wait 90
+screenshot m9card
+press fire 2
+wait 60
+screenshot m9
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x05
+wait-serial "AGK world 2 loaded" 400
+wait 90
+screenshot back2
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x01
+wait-serial "AGK world 1 loaded" 400
+wait 90
+screenshot back1
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x07
+wait-serial "AGK world 3 loaded" 400
+wait 90
+press fire 2
+wait 60
+screenshot again3
+expect-no-serial "ERR|missing"
+expect-no-dropped-frames

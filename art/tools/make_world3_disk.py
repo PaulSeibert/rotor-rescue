@@ -130,6 +130,7 @@ def map_header(ter, objects, L):
 
 # ------------------------------------------------------------------------------------------------ the world file
 STRIP_ROWS = 126          # the ring: lines 130-255
+FILL_ROW0 = 21            # a fill's first stored row (the art's highest rock row is 6, the flattest tile 15 rows)
 FAR_W, FAR_LOOP, FAR_H = 640, 320, 42   # the far range: a 320 px loop stored twice (a fetch of 336 px starts anywhere in the first loop)
 PAD_W, PAD_ROWS = 64, 46  # the pilot's pad: world 2's kit composed to 64 px (the skill-3 width)
 
@@ -174,6 +175,7 @@ def build_world(art, L, ter):
     import w3compose as C   # noqa: E402
     import w3tiles as T     # noqa: E402
     import w3bobs as BO     # noqa: E402
+    import w3bobs2 as B2    # noqa: E402
     parts = []
     facts = {}
 
@@ -208,7 +210,7 @@ def build_world(art, L, ter):
     add("tiles", bytes(blob))
     fb = bytearray()
     for fam, v, arr in fills:
-        fb += planar_rows(arr.astype(np.uint8))
+        fb += planar_rows(arr[FILL_ROW0:].astype(np.uint8))   # rows 0-20 are never visible (rock starts at row 6 + a 15-row tile)
     add("fills", bytes(fb))
 
     # the column plan: tile, fill, the tile's top row in the ring; checked against the art's own raster below
@@ -220,17 +222,9 @@ def build_world(art, L, ter):
         arr = t["arr"]
         r0 = col["Y"] - L.STRIP_Y
         d = col["d"]
-        if t["name"].find("bench") >= 0 or t["name"].find("spike") >= 0 or t["name"].find("notch") >= 0:
-            fam = "F"
-        else:
-            fam = "L" if d > 0 else "R" if d < 0 else "F"
-        if prev > 0 and d < 0:
-            fam = "LR"
-        elif prev < 0 and d > 0:
-            fam = "RL"
-        prev = d if d != 0 else prev
-        opts = [(i, f) for i, f in enumerate(fills) if f[0] == fam]
-        fi = opts[int(L.hash01(c, ter.seed, 7) * len(opts)) % len(opts)][0]
+        fam, fi = col["fam"], col["fi"]   # the art's own picker (neighbour-aware): never recomputed here
+        if r0 + min(arr.shape[0], STRIP_ROWS - r0) < FILL_ROW0 and r0 + arr.shape[0] < STRIP_ROWS:
+            raise SystemExit("make_world3_disk: column %d's fill would start above row %d (the stored fill rows)" % (c, FILL_ROW0))
         if not 0 <= r0 < STRIP_ROWS:
             raise SystemExit("make_world3_disk: column %d's tile starts at ring row %d (rows 0-5 are sky: lower the line)" % (c, r0))
         plan += bytes([index[id(t)], fi, r0])
@@ -246,6 +240,7 @@ def build_world(art, L, ter):
         raise SystemExit("make_world3_disk: the column plan does not reproduce the art's strip (first diff at row %d, x %d)" % tuple(bad[0]))
     add("plan", bytes(plan))
     facts["tiles"] = len(tiles)
+    facts["fills"] = len(fills)
     facts["bank"] = len(bank)
 
     # the BOB set: the lodge (intact, open), the AA nest (idle, tell, fire) and the 64 px pad, from the art's own generators
@@ -258,7 +253,7 @@ def build_world(art, L, ter):
         if masked:
             add(name + "mask", msk)
         facts[name] = (frames[0].shape[1], h, len(frames), arrs[0].shape[1])
-    bob("lodge", [BO.lodge(False), BO.lodge(True)], masked=False)   # (a plain copy, like the other barracks)
+    bob("lodge", [BO.lodge(False), B2.lodge_shot(), B2.lodge_burn(0)], masked=False)   # (a plain copy, like the other barracks)
     bob("nest", [BO.aa_nest(0), BO.aa_nest(1), BO.aa_nest(2)])
     padp = pad_to_words(BO.pad(PAD_W))
     add("pad64", planar_rows(padp))
@@ -275,7 +270,8 @@ def build_world(art, L, ter):
 
 def world_header(offs, facts, L):
     o = ["#define W3_FAR_W %d" % FAR_W, "#define W3_FAR_H %d" % FAR_H, "#define W3_FAR_LOOP_W %d" % FAR_LOOP,
-         "#define W3_STRIP_ROWS %d" % STRIP_ROWS, "#define W3_TILE_COUNT %d" % facts["tiles"], "#define W3_FILL_COUNT 8",
+         "#define W3_STRIP_ROWS %d" % STRIP_ROWS, "#define W3_TILE_COUNT %d" % facts["tiles"], "#define W3_FILL_COUNT %d" % facts["fills"],
+         "#define W3_FILL_ROW0 %d" % FILL_ROW0, "#define W3_FILL_ROWS %d" % (STRIP_ROWS - FILL_ROW0),
          "#define W3_MAP_COLS %d" % PILOT_COLS]
     for k in ("far", "tiletab", "tiles", "fills", "plan"):
         o.append("#define WORLD3_%s_OFFS %d" % (k.upper(), offs[k][0]))
