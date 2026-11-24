@@ -2637,7 +2637,7 @@ static int16_t w3HeightAt(int16_t x) {
 	if(x >= W3_W) x = W3_W - 1;
 	uint16_t j = (uint16_t)x >> 4;
 	int16_t a = s_pW3H[j], b = s_pW3H[j + 1];
-	return (int16_t)(a + (((b - a) * (x & 15)) >> 4));
+	return (int16_t)(a + (((int16_t)((int16_t)(b - a) * (int16_t)(x & 15))) >> 4));   // (16-bit operands: MULS.W)
 }
 
 int16_t logicW3SurfaceY(int16_t x) { return (int16_t)(GROUND_Y - w3HeightAt(x)); }
@@ -2646,7 +2646,7 @@ int16_t logicW3FloorAt(int16_t x) {
 	int16_t hMax = w3HeightAt((int16_t)(x - W3_SKID_HALF)), hB = w3HeightAt((int16_t)(x + W3_SKID_HALF));
 	if(hB > hMax) hMax = hB;
 	// (a joint between the skids can be higher than both)
-	for(int16_t jx = (int16_t)(((x - W3_SKID_HALF) >> 4) + 1); jx * 16 <= x + W3_SKID_HALF; ++jx) {
+	for(int16_t jx = (int16_t)(((x - W3_SKID_HALF) >> 4) + 1); (jx << 4) <= x + W3_SKID_HALF; ++jx) {
 		if(jx >= 0 && jx <= W3_COLS && s_pW3H[jx] > hMax) hMax = s_pW3H[jx];
 	}
 	return (int16_t)(GROUND_Y - hMax);
@@ -2668,7 +2668,7 @@ int16_t logicW3CeilAt(int16_t x) {
 	if(x >= W3_W) x = W3_W - 1;
 	uint16_t j = (uint16_t)x >> 4;
 	int16_t a = s_pW3C[j], b = s_pW3C[j + 1], base;
-	if(a && b) base = (int16_t)(a + (((b - a) * (x & 15)) >> 4));
+	if(a && b) base = (int16_t)(a + (((int16_t)((int16_t)(b - a) * (int16_t)(x & 15))) >> 4));
 	else base = a ? a : b;
 	if(!base) return CEIL_Y;
 	return (int16_t)(base + W3_DECK_CLEAR > CEIL_Y ? base + W3_DECK_CLEAR : CEIL_Y);
@@ -2737,7 +2737,7 @@ __attribute__((noinline)) static void w3ChopperTerrain(tGame *g, int16_t wPrevX)
 	tChopper *c = &g->chop;
 	if(c->vx) {
 		int8_t bDir = c->vx > 0 ? 1 : -1;
-		if(logicW3WallAt((int16_t)(c->x + bDir * W3_BODY_HALF), c->y, bDir)) {
+		if(logicW3WallAt((int16_t)(c->x + (bDir > 0 ? W3_BODY_HALF : -W3_BODY_HALF)), c->y, bDir)) {
 			c->x = wPrevX;
 			c->fx = 0;
 			c->vx = 0;

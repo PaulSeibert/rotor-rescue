@@ -273,6 +273,7 @@ static tBitMap s_sW2Clouds, s_sW2Far, s_sW2Sea, s_sStrip;
 // replaces world 2's art, BOBs and ring (a chip block of its own) and adds no chip to the game.
 static tBitMap s_sW3Far;
 static const UBYTE *s_pW3Tiles, *s_pW3Fills, *s_pW3Plan, *s_pW3TileTab;   // (in the arena)
+static const UWORD s_pW3GradOffs[3] = {0, W3_GRAD_WORDS, 2 * W3_GRAD_WORDS};   // (a mission's gradients: no multiply)
 static UWORD *s_pW3Grad;            // (in the arena) per mission W3_GRAD_WORDS: sky, sky low nibbles, haze, haze low nibbles
 static ULONG s_ulStripPlane = STRIP_PLANE_BYTES;   // the ring's plane bytes in the world on screen
 static UBYTE s_isRingAlloc;         // s_pStripMem is a chip block of its own (world 2's); world 3's ring is in the arena
@@ -665,10 +666,10 @@ __attribute__((noinline, optimize("Os"))) static void cwSea(tAgkCopWriter *pW, U
 // at line 87 (its palette, slot 0, loads in the vertical blank: M7 has no ceiling strip yet), the strip's palette at the start of line 129
 // (the far range's bare last row), PF2 to the strip at its end, then the strip from line 130 with the haze behind it: COLOR00 a line.
 __attribute__((noinline, optimize("Os"))) static void cwWorld3(tAgkCopWriter *pW, UBYTE ubBfr, UBYTE ubMission, const tBitMap *pFb, const tBandLayout *pLay) {
-	const UWORD *pG = s_pW3Grad + (UWORD)ubMission * W3_GRAD_WORDS;
+	const UWORD *pG = s_pW3Grad + s_pW3GradOffs[ubMission];
 	const UWORD *pH = pG + 2 * W3_SKY_LINES;
 	const UWORD uwFarY = pLay->b[BK_FAR].y, uwStripY = pLay->b[BK_GROUND].y;
-	ULONG ulFbFarRow = (ULONG)(uwFarY * FB_ROW_BYTES + FB_FETCH_OFFS);
+	ULONG ulFbFarRow = (UWORD)((UWORD)(uwFarY * FB_ROW_BYTES) + FB_FETCH_OFFS);   // (16-bit maths: the row is under 64 KB)
 	tCopSlots *pFar = &s_sMtnSlots[0][ubBfr];
 	for(UWORD y = PLAY_TOP; y < pLay->skyEnd; ++y) {
 		agkCopWait(pW, y, 0);
@@ -709,7 +710,7 @@ __attribute__((noinline, optimize("Os"))) static void cwWorld3(tAgkCopWriter *pW
 
 // A new mission in world 3: the same layout, the sky, the haze and the two PF2 palettes patched
 __attribute__((noinline, optimize("Os"))) static void w3Mission(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission) {
-	const UWORD *pG = s_pW3Grad + (UWORD)ubMission * W3_GRAD_WORDS;
+	const UWORD *pG = s_pW3Grad + s_pW3GradOffs[ubMission];
 	for(UBYTE y = 0; y < W3_SKY_LINES; ++y) {
 		UWORD i = s_pSkySlot[ubBfr][y];
 		copSetMoveVal(&pList[i].sMove, pG[y]);
@@ -1328,14 +1329,14 @@ __attribute__((noinline, optimize("Os"))) static void stripColumn3(WORD j) {
 		uwRows = pT[2];
 		if(uwTop + uwRows > STRIP3_ROWS) uwRows = (UWORD)(STRIP3_ROWS - uwTop);
 		pTile = s_pW3Tiles + (UWORD)((pT[0] << 8) | pT[1]);
-		pFill = s_pW3Fills + (UWORD)pP[1] * (W3_FILL_ROWS * 6) - W3_FILL_ROW0 * 6;   // (a fill stores rows W3_FILL_ROW0 .. 125)
+		pFill = s_pW3Fills + (UWORD)((UWORD)pP[1] * (W3_FILL_ROWS * 6)) - W3_FILL_ROW0 * 6;   // (a fill stores rows W3_FILL_ROW0 .. 125)
 		uwFrom = (UWORD)(uwTop + uwRows);
 	}
 	for(UBYTE p = 0; p < 3; ++p) {
 		UBYTE *pCol = (UBYTE *)s_sStrip.Planes[p] + 2 * j;
 		if(uwTop) stripBlit3(USED, 0, pCol, 0, uwTop);
-		if(uwRows) stripBlit3(USEA | USED | MINTERM_A, pTile + 2 * p, pCol + uwTop * STRIP_RB, 6 - 2, uwRows);
-		if(uwFrom < STRIP3_ROWS) stripBlit3(USEA | USED | MINTERM_A, pFill + uwFrom * 6 + 2 * p, pCol + uwFrom * STRIP_RB, 6 - 2, (UWORD)(STRIP3_ROWS - uwFrom));
+		if(uwRows) stripBlit3(USEA | USED | MINTERM_A, pTile + 2 * p, pCol + (UWORD)(uwTop * STRIP_RB), 6 - 2, uwRows);
+		if(uwFrom < STRIP3_ROWS) stripBlit3(USEA | USED | MINTERM_A, pFill + (UWORD)(uwFrom * 6) + 2 * p, pCol + (UWORD)(uwFrom * STRIP_RB), 6 - 2, (UWORD)(STRIP3_ROWS - uwFrom));
 	}
 }
 
