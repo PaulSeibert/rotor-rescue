@@ -1069,6 +1069,75 @@ writable disk.)
 | the program without the unused ACE code (v1.13) | the game on a real A500 and on WinUAE: nothing the linker dropped was in use (the title, a mission, the hall of fame, the demo, both worlds, the music, all effects; `-Wl,--gc-sections` can only drop what nothing references, but a code path the scenarios never take is the risk) | Paul, WinUAE | **unproven**: all 4 profiles pass their scenarios; no real hardware |
 | the approved new art (landed 567e6c5) | the scrolled bands show no seam at 1x on a real display; the palette reads on all three missions | Paul after the art merge | pending: Paul on WinUAE/real display |
 
+## 13. World 3 Highlands: the terrain strip and the hardware pilot (v1.30)
+
+Added by the `w3-pilot` branch (the first slice of CONTENT-PLAN phase 3). It is a new section on purpose: it does not
+touch sections 1-12 and the version row is v1.30, so it merges beside the other branches' v1.19-v1.24. Status: the **hardware
+pilot** is built behind `W3_PILOT` (a debug entry, Ctrl+L, W, 7; mission 7's first screens); everything else in World 3 is
+*approved, not built*.
+
+### 13.1 Decisions (Paul, 2026-11-24)
+- Peaks stay **100 px** and the flyable height stays **192 px (44-236)**, with **no vertical scrolling**.
+- The **tunnel is in mission 8**: a lit rock-roof tunnel (a rock roof hanging from the cloud-ceiling strip, plus a portal BOB).
+  There is no dark fade.
+- The **cloud ceiling is in M8 and M9 only**; M7 has none.
+- The **perspective floor is dropped in World 3** (CONTENT-PLAN sections 2 and 6.2 are amended): the strip is the ground on all its lines.
+- The **valley haze** is as drawn (a COLOR00 gradient H to V behind the strip, lines 130-255).
+- The M9 enemy helicopter is drawn in one facing and the other is **flipped**; M8 has **no trucks and no AA guns** (the nests carry the ground fire).
+
+### 13.2 Level-design rule: the air gap under the cloud deck
+The deck (ceiling strip, lines 44-84) makes `ceilAt` 85 where it is present. A peak 100 px high leaves 51 px of air between the deck
+and the crest: less than the chopper (20 px high) can fly through in comfort. **Rule: no stretch with a deck may need the chopper to
+pass over terrain higher than 80 px (a gap of at least 70 px).** The route (a pass, a valley, a tunnel) must never force the 50 px
+gap. Taller peaks (up to 100 px) are allowed beside a deck stretch only as walls the route goes round or through (a pass lower than
+80 px, a tunnel). `logicW3GapOk` checks a height map against it; the pilot map and every future map carry this test.
+
+### 13.3 Display (band table; STYLE-world3 sections 2 and 3)
+One table per world drives the copper builder (`g_pBands`, logic.c: the band's first line, its rows, its camera speed as a shift
+or 1:1, its palette index; 7 pens per band, dark to light). World 3 in game lines:
+
+| lines | layer | speed | bitmap | palette |
+|---|---|---|---|---|
+| 24-129 | sky: COLOR00 gradient `sky_top` to H | n/a | none | n/a |
+| 44-84 | cloud-ceiling strip (M8, M9 only), 41 rows | 1:1 | ring of 16 px columns | ceiling pens 1-7, loaded at 43 |
+| 88-129 | far range, 42 rows | 1/4 | 320 x 42 loop | far pens 1-7, loaded at 87 |
+| 130-255 | terrain strip, 126 rows, rows 0-5 empty of rock | 1:1 | ring of 16 px columns, 3 planes | strip pens 1-7, loaded at 129 |
+| 130-255 behind | haze gradient H to V | n/a | COLOR00 per line | n/a |
+
+Per-mission pens 1-7 (12-bit): see STYLE-world3 section 3 (the table is the contract: M7 far `345 456 568 78A 9AC DDE FFF`, strip
+`112 435 765 C96 9AC DDE FFF`; M8 and M9 as there). Far pens 6, 7 equal strip pens 6, 7 in every mission.
+
+### 13.4 Memory
+- The world arena target is **<= 62 KB on the a500 and <= 71 KB with WinUAE's smaller chip** (derived in STYLE-world3 section 6;
+  the pilot re-measures them). The floors stay **96 KB (a500 in play) and 64 KB (squeeze)** in worlds 1, 2 and 3: never lowered.
+- One tile bank for all three missions, **at most 40 top tiles**; only the palette differs per mission.
+- Loading world 3 **replaces** the previous world's art in the arena; it never adds to it.
+
+### 13.5 Height-map semantics (`floorAt` / `ceilAt`)
+A map is one byte per 16 px column: the surface height `h` (px above `GROUND_Y`, 0-100) at the column's left joint, plus a flag per
+column (pad). The surface between two joints is the straight line (the tile's profile is its art). Quantised rises per 16 px:
+0, 4, 9, 16, 28, 44 (0, 15, 30, 45, 60 and 70 degrees).
+- `floorAt(x)` is the highest surface under the skids (x - 10 .. x + 10), as a y; the skids stop there and the chopper never goes
+  below it. It lands only where the column is a **pad** (flat by construction, a bench tile); anywhere else the floor is a soft stop
+  (no damage, no landing), as water is in world 2.
+- **Slopes:** up to 45 degrees (a rise of 16 per 16 px) the chopper slides up the flank as the floor lifts it. **Walls:** a flank
+  of 60 degrees or more (a rise of 28 or more) is solid from the side: the chopper's body (half-width 16) stops at it, its vx goes
+  to 0, no damage (the wall bump costs speed only), and the bump sets an event for the puff.
+- `ceilAt(x)` is the lowest y the chopper may reach: `CEIL_Y` (44) with no ceiling, the deck's base (85 and below, per column of
+  the ceiling map) where the cloud ceiling or a tunnel roof hangs. The ceiling map is a height map too (M8, M9).
+- A barracks, pad or ledge stands on a bench tile: its y is `floorAt` of its column.
+
+### 13.6 Nest tells by skill
+The mountain AA nest raises its barrels (the tell frame: silhouette, a red lamp) before it fires: **26 / 22 / 18 / 16 / 14 frames
+at skill 1-5**. The fire frame is the tell held with a muzzle flash.
+
+### 13.7 The pilot (what is built)
+`W3_PILOT`: world index 2, mission 7's first screens (foothills with a low pass, a pad on a bench, a nest, the lodge, the pines): a
+1:1 terrain strip streamed a 16 px column at a time into a ring in PF2, the far range at 1/4, the haze, the strip fill under the world
+card, and the world's art loaded into the shared arena in place of the previous world's (`disk/world3.bin`, `art/tools/make_world3_disk.py`).
+Missions 8 and 9 show a "not built" card. No enemy behaviour yet (the nest and lodge are scenery): that is for amiga-game.
+Numbers (chip, copper entries, frame cost) are in docs/WORLD3-HANDOFF.md as measured.
+
 ## Open questions for Paul
 
 (Numbers are kept from before. Questions 2, 4, 5 and 7 are decided, decided by Paul, 2026-11-11: see v1.2.)
@@ -1113,3 +1182,4 @@ writable disk.)
 | v1.16 | 2026-11-16 | Paul's playtest, 2026-11-14 ("mission 4 at skill 3: nobody firing, not enough to dodge, no airplanes"; studio tuning, pending his playtest). Also records what `c4b5fbc` (merged in 9886ad1) did and the spec never said: the patrol boat is armed in mission 4 from skill 3 (`logicPatrolArmed`; unarmed on skill 1-2), boats fire faster from skill 3 (`logicBoatGap`, `s_pBoatCool`: 0 / 0 / 0 / -15 / -25 / -30 frames on the tank's pause). Jets come to world 2 (section 6, "Jets in world 2"; section 7 table; section 11: `BOB_W2_JET`, +1,152 bytes of chip, a500 chip free 98 -> 97 KB, `TPL_MAX` 58; open question 15; section 12): mission 4 skill 3 from the second trip, 3 a trip, scaled up by skill and mission, nothing on skill 1-2 in mission 4, one attack at a time across jets and boats. Every chip allocation in `main.c` is checked and a squeeze hook (Ctrl+L, Q / E) with `tests/chipwinuae.agk` reproduces WinUAE's smaller chip |
 | v1.17 | 2026-11-17 | decided by the coordinator on Paul's behalf, 2026-11-17 (open question 15; flagged for his WinUAE playtest): world 2's jets begin on the first trip in mission 4 at skill 3 and 4 (`s_pW2JetsFrom` row 4: 0 / 255 / 255 / 0 / 0 / 0; budgets 3 / 4 / 5 unchanged), the first jet of a world 2 mission comes after `W2_JET_FIRST` (500 frames) of flying, and the mission card's brief says AND JETS where jets can appear at the skill in force (`logicJetsPossible`; the world 2 card goldens change on all 4 profiles; no chip). Skill 1-2 stay gentle. Tests: `testW2FirstTripJetComesLate`, `testW2BriefSaysJetsExactlyWhenTheyCanAppear`, the table and monotone checks, `tests/w2jets.agk`. Merge note: `rotor-sound` also bumps the version (expect a docs conflict) |
 | v1.18 | 2026-11-16 | rotor v4 (merged after v1.17; numbered v1.16 on its branch `rotor-sound`; Paul's playtest 2026-11-14, studio tuning, pending his ears): the rotor loop is stored at twice the rate (Paula period = the logic's / 2: sampling lines at 12 kHz, the same 4.8 KB of chip), a softer, lower slap, descending settles lower, the empty take-off peaks at 7.8 a second (was 9.8 with a climb); the approved empty hover and cruise numbers unchanged. Section 9 (cause measured in WinUAE and vAmiga), 12; `logicRotorSynth`, `logicRotorHwPeriod`; tests; `sound/tools/check_rotor_audio.py`, `make_rotor_v4.py` |
+| v1.30 | 2026-11-24 | decided by Paul, 2026-11-24 (World 3 questions): peaks 100 px and 192 px flyable, no vertical scroll; the tunnel in mission 8 (lit rock roof and a portal BOB, no dark fade); the cloud ceiling in M8 and M9 only; the perspective floor dropped in World 3; valley haze as drawn; the flipped second enemy-helicopter facing and no trucks or AA guns in M8 accepted. New section 13 (display band table, the 62 / 71 KB arena target, the 40-tile bank limit, `floorAt` / `ceilAt` semantics, the air-gap rule, nest tells by skill, the pilot behind `W3_PILOT`); CONTENT-PLAN sections 2 and 6.2 amended. Branch `w3-pilot`: the band layout table (T3), the height map (T4 slice), the terrain strip (T5), `disk/world3.bin` |
