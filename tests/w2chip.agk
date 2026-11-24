@@ -1,11 +1,12 @@
 # World 2's chip budget (SPEC 11, "World 2, slice 2"): the DPS logo of the boot splash (37,456 bytes and its two
-# copper lists, 47 KB) stayed allocated for the whole game; it is freed when world 2 loads (display off, the floppy
-# load already runs with the OS on). Slice 2's BOBs are in two blocks: the common set (radar, windsock, rope, hook, climbing man:
+# copper lists, 47 KB) is freed at the title, right after the splash (v1.40: `AGK splash freed`; the first version of this
+# test saw it freed when world 2 loaded, which is the same memory at the same point of the game). Slice 2's BOBs are in two blocks: the common set (radar, windsock, rope, hook, climbing man:
 # 7,968 bytes) from the world's load, and the mission's own part (mission 5: the ship deck, 5,760; mission 6: the freighter and the strait
 # destroyer's set, 25,616) made at the mission's card and freed at the next one (the per-mission lever, v1.24). The game prints the chip
-# free to the byte after each: a500 measured 139,416 in mission 4 (136 KB), 133,656 in mission 5 (130), 113,800 in mission 6 (111). The checks
+# free to the byte after each: a500 measured 139,416 in mission 4 (136 KB), 133,656 in mission 5 (130), 113,800 in mission 6 (111): the same
+# numbers before and after the integration (the memory was already free at the world's load). The checks
 # are measured minus 2 KB (134 / 128 / 109): a guard on this work, not the game's floor; the a1200 has 1.2 MB. The game's floors, 96 KB
-# (memory.agk, the world 2 scenarios) and 64 KB (chipwinuae), are untouched. World 1 keeps its 105 KB (nothing is freed there).
+# (memory.agk, the world 2 scenarios) and 64 KB (chipwinuae), are untouched. World 1 now plays with 151 KB (tests/splashfree.agk guards 149).
 wait-serial "AGK t0" 1000
 key 0x63
 key 0x28
