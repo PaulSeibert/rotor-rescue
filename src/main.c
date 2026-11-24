@@ -2456,8 +2456,7 @@ static void msgBodyFrom(UBYTE ubBfr, UWORD uwKey, UBYTE ubSpent) {
 __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey, UBYTE ubSpent) {
 	const tGame *g = &s_sGame;
 	// (the texts of these states do not change under one key: lines are planned for msgTypeFast)
-	UBYTE isPlan = g->state == GS_LOST || g->state == GS_CLEAR || g->state == GS_OVER || g->state == GS_VICTORY ||
-		g->state == GS_SCORES;
+	UBYTE isPlan = g->state == GS_LOST || g->state == GS_CLEAR || g->state == GS_OVER || g->state == GS_VICTORY;   // (not the hall of fame: seven lines planned at its first picture cost it 10 points)
 	if(!isPlan) s_pPlanOn[ubBfr] = 0;
 	else if(uwKey != s_pMsgTypeKey[ubBfr] || !s_pPlanOn[ubBfr]) {
 		s_pPlanOn[ubBfr] = 1;
