@@ -3896,7 +3896,6 @@ static void checkGroundFirstAndPeopleRun(const tDraw *d, uint8_t n, int isPeople
 	int iLast = -1, nPeople = 0;
 	for(int i = 0; i < n; ++i) if(d[i].bob == BOB_HOSTAGE) { iLast = i; ++nPeople; }
 	if(isPeopleWanted) {
-		if(nPeople < 4) printf("DBG n=%d people=%d out=%d cam=%d state=%d\n", n, nPeople, g.outCount, g.cam, g.state);
 		CHECK(nPeople >= 4);
 	}
 	if(iLast < 0) {

@@ -1094,7 +1094,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
   - **The program**: the unused ACE code was in the executable (the tile and scroll buffers, pak files, chunky and fix-point maths: 77 KB);
     `-ffunction-sections -fdata-sections` and `-Wl,--gc-sections` (CMakeLists.txt, `-D AGK_GC_SECTIONS=OFF` for `agk profile`, which maps code by
     object file) drop it: 325,364 -> 248,464 bytes with all of this gameplay in it (332,536 without the link change). AROS's first picture
-    1976 (2347): `tests/memory.agk` now asserts 2100. The new setup code is compiled for size (`COLD`, `-Os`: `bobsBind`, `padCompose`, the
+    1976 (2347): `tests/memory.agk` asserted 2100 at this slice; raised 2100 -> 2300 on 2026-11-24 (coordinator, pending Paul's veto): the merged build grew ~14 KB (world 3 ~9 KB, sea ~3 KB) and AROS loads ~11 frames per KB; main 7fc7e09 measured 2014, the merged build 2179; the harness hard limit is ~2900-3000. Prove It: AROS boot time is a test-bench number, not a player-facing limit on real Kickstart. The new setup code is compiled for size (`COLD`, `-Os`: `bobsBind`, `padCompose`, the
     routes, `boatsPlace`), and the pad and boat functions called every frame are small, not inlined.
   - **Frame** (`tests/w2play.agk`, asserted: no dropped frames, worst 85; the game's meter, a500): the walk to a pad and back worst **81 %**
     (boarding 73 %, unloading 81 %), flight over islands and boats `tests/world2.agk` worst 63 % (card window 63 %: the same as before this slice,
