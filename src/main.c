@@ -2249,7 +2249,23 @@ static void radarBar(UBYTE *pRow, UBYTE ubX0, UBYTE ubX1);
 static UBYTE s_pSinkBar[2];   // the freighter's timer bar as drawn (px) in each HUD buffer
 
 // The timer bar of the sinking freighter (SPEC 11, slice D): the two HUD rows under the radar (22-23), pen 5, ubLen px from the radar's left edge
-__attribute__((noinline, optimize("Os"))) static void sinkBarDraw(UBYTE *pRadarTop, UBYTE ubLen) {
+__attribute__((noinline, optimize("Os"))) static void sinkBarDraw(UBYTE *pRadarTop, UBYTE ubLen, UBYTE ubOld) {
+	if(ubLen < ubOld) {
+		// the bar only shrinks as the freighter sinks: the pixels it lost are cleared in both rows (the bar redrawn whole was 40 raster lines a picture)
+		for(UBYTE r = RADAR_H; r < RADAR_H + 2; ++r) {
+			UBYTE *p = pRadarTop + r * HUD_ROW_BYTES;
+			for(UBYTE ubByte = (UBYTE)(ubLen >> 3); ubByte <= (UBYTE)((ubOld - 1) >> 3); ++ubByte) {   // (a byte at a time: the bar can drop 100 pixels at a stage)
+				UBYTE ubLo = (UBYTE)(ubByte << 3) >= ubLen ? 0 : (UBYTE)(ubLen & 7);   // bits kept on the left
+				UBYTE ubHi = (UBYTE)((ubByte << 3) + 8) <= ubOld ? 8 : (UBYTE)(ubOld & 7);   // bits up to here are cleared
+				UBYTE ubMask = (UBYTE)~((0xFF >> ubLo) & (0xFF << (8 - ubHi)));
+				UBYTE *q = p + ubByte;
+				q[0] &= ubMask;
+				q[RADAR_P1] &= ubMask;
+				q[RADAR_P2] &= ubMask;
+			}
+		}
+		return;
+	}
 	for(UBYTE r = RADAR_H; r < RADAR_H + 2; ++r) {
 		UBYTE *p = pRadarTop + r * HUD_ROW_BYTES;
 		for(UBYTE k = 0; k < RADAR_W / 8; ++k) { p[k] = 0; p[RADAR_P1 + k] = 0; p[RADAR_P2 + k] = 0; }
@@ -2257,6 +2273,7 @@ __attribute__((noinline, optimize("Os"))) static void sinkBarDraw(UBYTE *pRadarT
 	}
 }
 
+static UBYTE s_ubRadarHeavy;   // this picture redrew a part of the radar strip (60-90 raster lines): msgUpdate lets its typing wait one picture
 static UBYTE s_pRadarZones[2];   // the same for the radar sites and their zones (0: none, world 1; else bit 6, the mission, the sites standing)
 static UBYTE s_pRadarBuildings[2] = {0xFF, 0xFF};   // which barracks were open when drawn
 
@@ -2302,6 +2319,7 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 		((g->pBarracks[3].hp == 0) << 3) | (isW2 << 4));
 	// (a new mission's barracks are closed again: that redraw waits six pictures of its card, as the sites' below: the picture that starts a mission is the heaviest of the game)
 	if(ubOpen != s_pRadarBuildings[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {
+		s_ubRadarHeavy = 1;
 		s_pRadarBuildings[ubBfr] = ubOpen;
 		s_pRadarZones[ubBfr] = 0xFF;   // (rows 5-6 are cleared: the radar sites' dots are drawn again with the zones)
 		for(UBYTE y = 5; y < 7; ++y) {
@@ -2335,11 +2353,14 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 		for(UBYTE i = 0; i < g->radarCount; ++i) ubZoneKey |= (UBYTE)(g->pRadars[i].alive << i);
 		UBYTE ubBar = logicSinkBar(g);   // (mission 6: the freighter's time left, 0 when there is none or nobody aboard)
 		if(ubBar != s_pSinkBar[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {   // (not in the first pictures of the card, as the sites')
+			UBYTE ubOldBar = s_pSinkBar[ubBfr];
+			if(ubBar > ubOldBar) s_ubRadarHeavy = 1;   // (a shrinking bar is two pixels' work)
 			s_pSinkBar[ubBfr] = ubBar;
-			sinkBarDraw(pTop, ubBar);
+			sinkBarDraw(pTop, ubBar, ubOldBar);
 		}
 	}
 	if(ubZoneKey != s_pRadarZones[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {
+		s_ubRadarHeavy = 1;
 		s_pRadarZones[ubBfr] = ubZoneKey;
 		for(UBYTE i = 0; i < g->radarCount; ++i) {
 			UBYTE x = logicRadarX2(g->pRadars[i].x);
@@ -2561,6 +2582,7 @@ static UWORD s_pPlanHave[2], s_pPlanBlank[2];   // per line (a bit): its text is
 static char s_pPlan[2][MSG_LINES][MSG_LEN + 4] __attribute__((aligned(4)));
 static UBYTE s_pPlanCol[2][MSG_LINES];          // per line: typed up to here (a multiple of 4): where the scan resumes
 static void msgBodyFrom(UBYTE ubBfr, UWORD uwKey, UBYTE ubSpent);
+static const char s_szSpaces[MSG_LEN + 4] __attribute__((aligned(4))) = {[0 ... MSG_LEN + 2] = ' '};
 __attribute__((noinline)) static UBYTE msgTypeFast(UBYTE ubBfr, UWORD uwKey) {
 	if(!s_pPlanOn[ubBfr] || uwKey != s_pMsgTypeKey[ubBfr]) return 0;
 	UBYTE ubLayout = msgLayout();
@@ -2569,14 +2591,17 @@ __attribute__((noinline)) static UBYTE msgTypeFast(UBYTE ubBfr, UWORD uwKey) {
 		UWORD uwLineBit = (UWORD)(1 << l);
 		if(s_pMsgDone[ubBfr] & uwLineBit) continue;
 		ULONG *pInk = s_pMsgInk[ubBfr][l];
+		const char *pLine;
 		if(s_pPlanBlank[ubBfr] & uwLineBit) {
-			if(pInk[0] | pInk[1]) { msgBodyFrom(ubBfr, uwKey, (UBYTE)(MSG_TYPE_PER_FRAME - ubBudget)); return 1; }
-			s_pMsgDone[ubBfr] |= uwLineBit;
-			continue;
+			if(!(pInk[0] | pInk[1])) {
+				s_pMsgDone[ubBfr] |= uwLineBit;
+				continue;
+			}
+			pLine = s_szSpaces;   // (a line to be blank with letters on it: spaces typed over them, as the body does)
 		}
-		if(!(s_pPlanHave[ubBfr] & uwLineBit)) { msgBodyFrom(ubBfr, uwKey, (UBYTE)(MSG_TYPE_PER_FRAME - ubBudget)); return 1; }
+		else if(!(s_pPlanHave[ubBfr] & uwLineBit)) { msgBodyFrom(ubBfr, uwKey, (UBYTE)(MSG_TYPE_PER_FRAME - ubBudget)); return 1; }
+		else pLine = s_pPlan[ubBfr][l];
 		char *pStage = s_pMsgStage[ubBfr][l];
-		const char *pLine = s_pPlan[ubBfr][l];
 		tAgkText *pT = &s_pMsg[ubBfr][l];
 		UBYTE c = s_pPlanCol[ubBfr][l], isChange = 0;
 		while(c < MSG_LEN && ubBudget) {
@@ -2634,6 +2659,13 @@ __attribute__((noinline)) static void msgFixOnly(UBYTE ubBfr) {
 __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	UWORD uwKey = msgKeyNow();
 	if(uwKey == s_pMsgKey[ubBfr] && !s_pMsgAnyFix[ubBfr]) return;
+	if(s_ubRadarHeavy) {
+		// The radar's redraw (a card's seventh and eighth pictures, a barracks opening) and two letters of text
+		// in one picture were the mission start's heaviest (w2barrage, w2dest, w2frtr 98-102 %): the letters wait
+		// one picture (nothing was erased in this one: letters crossed by an object are still done now)
+		s_ubRadarHeavy = 0;
+		if(!s_pMsgAnyFix[ubBfr]) return;
+	}
 	if(uwKey == s_pMsgKey[ubBfr] && uwKey == s_pMsgTypeKey[ubBfr]) {   // (settled, so a fix is what is wanted)
 		msgFixOnly(ubBfr);
 		return;
@@ -2652,7 +2684,15 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 			return;
 		}
 	}
-	if(!s_pMsgAnyFix[ubBfr] && msgTypeFast(ubBfr, uwKey)) return;
+	if(!s_pMsgAnyFix[ubBfr]) {
+		if(msgTypeFast(ubBfr, uwKey)) return;
+	}
+	else if(uwKey == s_pMsgTypeKey[ubBfr] && s_pPlanOn[ubBfr]) {
+		// letters crossed while the text is still typing out (a missile over a prompt): the crossed ones
+		// first, then the typing, both from the plan: the body's set-up was 25-30 raster lines a picture
+		msgFixOnly(ubBfr);
+		if(msgTypeFast(ubBfr, uwKey)) return;
+	}
 	msgUpdateBody(ubBfr, uwKey, 0);
 }
 static void msgBodyFrom(UBYTE ubBfr, UWORD uwKey, UBYTE ubSpent) {
@@ -2662,7 +2702,7 @@ static void msgBodyFrom(UBYTE ubBfr, UWORD uwKey, UBYTE ubSpent) {
 __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey, UBYTE ubSpent) {
 	const tGame *g = &s_sGame;
 	// (the texts of these states do not change under one key: lines are planned for msgTypeFast)
-	UBYTE isPlan = g->state == GS_LOST || g->state == GS_CLEAR || g->state == GS_OVER || g->state == GS_VICTORY;   // (not the hall of fame: seven lines planned at its first picture cost it 10 points)
+	UBYTE isPlan = g->state == GS_LOST || g->state == GS_CLEAR || g->state == GS_OVER || g->state == GS_VICTORY || g->state == GS_PLAY;   // (play: the bomb prompt, one line; not the hall of fame: seven lines planned at its first picture cost it 10 points)
 	if(!isPlan) s_pPlanOn[ubBfr] = 0;
 	else if(uwKey != s_pMsgTypeKey[ubBfr] || !s_pPlanOn[ubBfr]) {
 		s_pPlanOn[ubBfr] = 1;
@@ -3092,7 +3132,7 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 		s_pW2M = 0;
 		s_ulW2MBytes = 0;
 		s_ubMPart = 0xFF;
-		for(UBYTE b = 0; b < 2; ++b) { s_pSinkBar[b] = 0; sinkBarDraw(s_pRadarArea[b].pD, 0); }   // (no freighter's bar in world 1's HUD)
+		for(UBYTE b = 0; b < 2; ++b) { s_pSinkBar[b] = 0; sinkBarDraw(s_pRadarArea[b].pD, 0, 0); }   // (no freighter's bar in world 1's HUD)
 		if(agkLoadFile("world1.bin.pk", pArena, WORLD1_BANDS_BYTES) != WORLD1_BANDS_BYTES) agkPrint("AGK ERR world1 art missing\n");
 		s_pCloudsBm = s_pW1CloudsBm;
 		s_pFarBm = s_pMountains;
