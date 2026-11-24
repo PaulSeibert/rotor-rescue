@@ -153,3 +153,82 @@ _objBlitsAsm:
 		move.w	d6,OB_DRAWN(a0)
 		movem.l	(sp)+,d2-d7/a2-a6
 		rts
+
+; erasesMergeAsm: erase areas side by side on the same rows near the ground (the people at a
+; barracks) become one clear of the box around them (main.c: erasesMerge, its C twin; read
+; the reasons there). Entries are tAgkBlitArea: pD.l, size.w (rows << 6 | words), mod.w.
+; In:  a0 = the entries, d0.w = how many, a1 = the floor: only areas at or below it merge
+; Out: d0.w = how many are left
+ER_BYTES	equ	24		; (main.c ERASE_MERGE_BYTES) the widest box
+ER_ROWS		equ	(14*3)<<6	; (ERASE_MERGE_ROWS << 6) the tallest rows
+PLANE_BYTES	equ	54		; (FB_PLANE_BYTES)
+
+		xdef	_erasesMergeAsm
+_erasesMergeAsm:
+		cmp.w	#2,d0
+		bcc.s	.go
+		rts
+.go:
+		movem.l	d2-d6/a2-a3,-(sp)
+		move.l	a0,a2			; the last kept entry
+		lea	8(a0),a3		; the next to look at
+		move.l	a1,d3			; the floor
+		subq.w	#2,d0
+		move.w	d0,d5			; n - 1 to look at (dbra)
+.eloop:
+		move.l	(a3),d1			; this one's start
+		cmp.l	d3,d1
+		blo.s	.ekeep
+		move.l	(a2),d4			; the last kept one's start
+		cmp.l	d3,d4
+		blo.s	.ekeep
+		move.w	4(a3),d2
+		move.w	4(a2),d6
+		eor.w	d2,d6
+		and.w	#$ffc0,d6		; the same rows?
+		bne.s	.ekeep
+		move.w	d2,d0
+		and.w	#$ffc0,d0		; rows << 6
+		cmp.w	#ER_ROWS,d0
+		bhi.s	.ekeep
+		moveq	#63,d6
+		and.w	d2,d6			; its words
+		add.w	d6,d6
+		add.l	d1,d6			; its end
+		moveq	#63,d2
+		and.w	4(a2),d2		; the last one's words
+		add.w	d2,d2
+		add.l	d4,d2			; its end
+		cmp.l	d2,d6
+		bhs.s	.e1
+		move.l	d2,d6			; the later end
+.e1:
+		move.l	d4,d2
+		cmp.l	d2,d1
+		bhs.s	.s1
+		move.l	d1,d2			; the earlier start
+.s1:
+		sub.l	d2,d6			; the box's bytes (a different row: a row's bytes more, too wide)
+		cmp.l	#ER_BYTES,d6
+		bhi.s	.ekeep
+		move.l	d2,(a2)			; the last one grows to the box
+		moveq	#PLANE_BYTES,d4
+		sub.w	d6,d4
+		move.w	d4,6(a2)		; modulo
+		lsr.w	#1,d6
+		or.w	d0,d6
+		move.w	d6,4(a2)		; rows, words
+		bra.s	.enext
+.ekeep:
+		addq.l	#8,a2
+		move.l	(a3),(a2)
+		move.l	4(a3),4(a2)
+.enext:
+		addq.l	#8,a3
+		dbra	d5,.eloop
+		move.l	a2,d0
+		sub.l	a0,d0
+		lsr.l	#3,d0
+		addq.w	#1,d0
+		movem.l	(sp)+,d2-d6/a2-a3
+		rts

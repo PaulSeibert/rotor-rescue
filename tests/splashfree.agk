@@ -1,0 +1,25 @@
+# The boot logo's picture and its two copper lists (47 KB of chip RAM) are freed once the
+# game's copper list is showing, behind the black screen before the title's colours (SPEC 11,
+# "The logo's memory"): nothing shows the logo again (no attract page, no credits, not the card,
+# the hall of fame or a game over). They were held for the whole game; world 1 now plays with
+# that much more chip, and the worlds after it start from there.
+# - the marker: once, and the harness's frame count goes on (no dropped frame: the long frame
+#   of the OS trip is a skipped one for the meter)
+# - the guard: after the marker no `AGK mem` line shows less than 149 KB free (measured on the
+#   a500, the profile with the least chip: 151 KB; the game's floor is 96 in tests/memory.agk,
+#   64 in the squeeze test, and stays: this is the headroom the next worlds count on)
+wait-serial "AGK t0" 1000
+expect-serial "AGK splash freed"
+expect-no-serial "AGK splash freed[\s\S]*AGK splash freed"
+press fire 2
+wait 125
+press up 30
+press left 170
+wait 60
+press down 70
+expect-serial "landed x=2334"
+wait 60
+expect-no-serial "ERR|missing"
+expect-no-serial "AGK splash freed[\s\S]*AGK mem chip=([0-9]|[0-9][0-9]|1[0-3][0-9]|14[0-8]) "
+expect-no-dropped-frames
+expect-min-chip-free 96

@@ -508,6 +508,7 @@ typedef struct {
 	uint8_t bob, frame;
 } tDraw;
 #define DRAW_MAX 96
+extern uint8_t g_ubDrawPeople0, g_ubDrawPeople1;   // (set by logicDraw: where its people are in the list, for main.c's merged erases)
 uint8_t logicDraw(const tGame *g, tDraw *pOut);
 uint8_t logicChopperFrame(const tGame *g);   // CHOP_*, + 0x80 if facing left
 uint8_t logicChopperVisible(const tGame *g);

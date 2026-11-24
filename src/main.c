@@ -1391,6 +1391,7 @@ static ULONG s_pMsgFix[2][MSG_LINES][2];    // columns an erase crossed: redraw 
 static ULONG s_pMsgInk[2][MSG_LINES][2];    // columns with a letter staged (not a space): the only ones a fix redraws
 static UBYTE s_pMsgAnyFix[2];
 static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
+static UWORD s_pMsgCoverLines[2], s_pMsgFixLines[2];   // per buffer, the lines (a bit each) that may hold cover or fix bits: objectsQueue visits only those
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
 #define TPL_MAX 58   // the shared BOBs' 28 frames + world 2's 29 (world 1's own: 23); one more than the last template made
@@ -1652,6 +1653,7 @@ static void msgCoverBob(UBYTE ubBfr, WORD x, WORD y, UBYTE b, UBYTE ubFirst, UBY
 		if(y < s_pMsgY[l] + 8 && y + g_pBobH[b] > s_pMsgY[l]) {
 			s_pMsgCover[ubBfr][l][0] |= pCols[0];
 			s_pMsgCover[ubBfr][l][1] |= pCols[1];
+			s_pMsgCoverLines[ubBfr] |= (UWORD)(1 << l);
 		}
 	}
 }
@@ -1669,11 +1671,18 @@ __attribute__((noinline)) static void msgCoverAll(UBYTE ubBfr) {
 	if(!ulInk) return;
 	// the objects drawn (objectsQueue's test) across the layout's lines
 	WORD wTop = s_pMsgY[ubFirst], wEnd = (WORD)(s_pMsgY[ubEnd - 1] + 8);
-	const tDraw *pD = s_pDraw;
-	for(UBYTE i = s_ubDraws; i--; ++pD) {
+	// (from the last object back: in the play layout the lines are above everything on the ground,
+	// and logicDraw puts the ground first - structures, pads, the shadow, tanks, the people - and the
+	// air after them, so the walk stops at the last person: with 9 of 17 objects people, that
+	// was half the 9 raster lines this took in a crash's typing pictures)
+	UBYTE isPlay = ubLayout == LAYOUT_PLAY;
+	const tDraw *pD = s_pDraw + s_ubDraws;
+	for(UBYTE i = s_ubDraws; i--;) {
+		--pD;
+		UBYTE b = pD->bob;
+		if(isPlay && b == BOB_HOSTAGE) break;
 		WORD y = pD->y;
 		if(y >= wEnd) continue;
-		UBYTE b = pD->bob;
 		if(y + g_pBobH[b] <= wTop) continue;
 		WORD x = (WORD)(pD->x + FB_X0);
 		const tBobInfo *pI = &s_pBobInfo[b];
@@ -1701,11 +1710,55 @@ __attribute__((noinline)) static void erasesQueue(UBYTE ubBfr) {
 	}
 }
 
+// Erase areas side by side on the same rows near the ground (the people at a barracks, two
+// tanks): one clear of the box around them, a blit the CPU starts instead of up to sixteen
+// (each start was ~1 raster line of an A500 frame, and the heaviest pictures draw a crowd).
+// The erases all run before any object is drawn, so what the gap between two areas held (an
+// object's pixels, erased on its own, or nothing) goes either way: the picture is the same.
+// None of the text lives that low (ERASE_MERGE_Y: below the lowest message line), and the
+// box is at most ERASE_MERGE_BYTES wide, so a lone far-off object never grows a big clear.
+#define ERASE_MERGE_Y (TITLE_TEXT_Y + 46 + 8)
+#define ERASE_MERGE_BYTES 24
+#define ERASE_MERGE_MIN 4          // fewer people than this: the merge costs more than it saves
+#define ERASE_MERGE_ROWS (14 * FB_BPP)
+_Static_assert(ERASE_MERGE_Y <= FEET_Y - 14, "tanks and people stand below the lowest message line");
+#ifndef OBJ_BLITS_C
+UWORD erasesMergeAsm(AGK_REG(tAgkBlitArea *pE, "a0"), AGK_REG(UWORD n, "d0"), AGK_REG(const UBYTE *pFloor, "a1"));   // (src/objblits.s)
+#define erasesMerge(pE, n, pFloor) ((UBYTE)erasesMergeAsm(pE, n, pFloor))
+#else
+static UBYTE erasesMerge(tAgkBlitArea *pE, UBYTE n, const UBYTE *pFloor) {
+	if(n < 2) return n;
+	tAgkBlitArea *pLast = pE;
+	for(UBYTE i = 1; i < n; ++i) {
+		const tAgkBlitArea *pA = &pE[i];
+		UWORD uwRows = pA->uwSize & 0xFFC0;
+		if(uwRows == (pLast->uwSize & 0xFFC0) && uwRows <= (ERASE_MERGE_ROWS << 6) &&
+			pA->pD >= pFloor && pLast->pD >= pFloor) {
+			// (a different row is a whole row's bytes away: too wide, so not merged)
+			UBYTE *pS = pA->pD < pLast->pD ? pA->pD : pLast->pD;
+			UBYTE *pEnd = pA->pD + 2 * (pA->uwSize & 63);
+			UBYTE *pEndL = pLast->pD + 2 * (pLast->uwSize & 63);
+			if(pEndL > pEnd) pEnd = pEndL;
+			ULONG ulBytes = (ULONG)(pEnd - pS);
+			if(ulBytes <= ERASE_MERGE_BYTES) {
+				pLast->pD = pS;
+				pLast->uwSize = (UWORD)(uwRows | (ulBytes >> 1));
+				pLast->wMod = (WORD)(FB_PLANE_BYTES - ulBytes);
+				continue;
+			}
+		}
+		*++pLast = *pA;
+	}
+	return (UBYTE)(pLast - pE + 1);
+}
+#endif
+
 __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 	tBitMap *pFb = s_pFb[ubBfr];
 	// (the picture the world changes in: the new world's BOBs are loaded at the start of the next)
 	UBYTE n = s_sGame.world == s_ubWorld ? logicDraw(&s_sGame, s_pDraw) : 0;
 	tAgkBlitArea *pErase = s_pErase[ubBfr];
+	tAgkBlitArea *const pErase0 = pErase;
 	UBYTE ubDrawn = 0;
 	const tDraw *pD = s_pDraw;
 	// the lines this state writes in (only their letters need guarding)
@@ -1721,15 +1774,27 @@ __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 		ULONG *pCover = s_pMsgCover[ubBfr][0], *pFix = s_pMsgFix[ubBfr][0];
 		const ULONG *pInk = s_pMsgInk[ubBfr][0];
 		ULONG ulAny = 0;
-		for(UBYTE l = 0; l < MSG_LINES; ++l, pCover += 2, pFix += 2, pInk += 2) {
-			if(l >= ubMsgFirst && l < ubMsgEnd) {
-				ULONG ulFix0 = pCover[0] & pInk[0], ulFix1 = pCover[1] & pInk[1];
-				pFix[0] |= ulFix0;
-				pFix[1] |= ulFix1;
+		// (only the lines that may hold bits: the sixteen lines' covers and fixes cleared or
+		// checked each time were 9 raster lines of a typing picture with a missile crossing the text)
+		UWORD uwLayout = (UWORD)(((1UL << ubMsgEnd) - 1) & ~((1UL << ubMsgFirst) - 1));
+		UWORD uwCov = s_pMsgCoverLines[ubBfr], uwFixOut = (UWORD)(s_pMsgFixLines[ubBfr] & ~uwLayout);
+		s_pMsgCoverLines[ubBfr] = 0;
+		s_pMsgFixLines[ubBfr] &= uwLayout;
+		for(UBYTE l = 0; uwFixOut; ++l, uwFixOut >>= 1) {
+			if(uwFixOut & 1) pFix[2 * l] = pFix[2 * l + 1] = 0;   // (the other layouts' lines keep no fix)
+		}
+		for(UBYTE l = 0; uwCov; ++l, uwCov >>= 1) {
+			if(!(uwCov & 1)) continue;
+			ULONG *pC = pCover + 2 * l, *pF = pFix + 2 * l;
+			if(uwLayout & (1 << l)) {
+				ULONG ulFix0 = pC[0] & pInk[2 * l], ulFix1 = pC[1] & pInk[2 * l + 1];
+				pF[0] |= ulFix0;
+				pF[1] |= ulFix1;
 				ulAny |= ulFix0 | ulFix1;
+				if(ulFix0 | ulFix1) s_pMsgFixLines[ubBfr] |= (UWORD)(1 << l);
 			}
-			else pFix[0] = pFix[1] = 0;
-			pCover[0] = pCover[1] = 0;
+			else pF[0] = pF[1] = 0;
+			pC[0] = pC[1] = 0;
 		}
 		if(ulAny) s_pMsgAnyFix[ubBfr] = 1;
 	}
@@ -1786,7 +1851,22 @@ __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 		++ubDrawn;
 	}
 #endif
-	s_pErased[ubBfr] = ubDrawn;
+	// the people's erases (logicDraw's run of them: a crowd at a barracks) merged; the rest move up
+	UBYTE ubErases = ubDrawn;
+	{
+		UBYTE ubP0 = g_ubDrawPeople0 < ubDrawn ? g_ubDrawPeople0 : ubDrawn, ubP1 = g_ubDrawPeople1 < ubDrawn ? g_ubDrawPeople1 : ubDrawn;
+		if(ubP1 >= ubP0 + ERASE_MERGE_MIN) {
+			tAgkBlitArea *pE = pErase0;
+			UBYTE ubKept = erasesMerge(pE + ubP0, (UBYTE)(ubP1 - ubP0), pFb->Planes[0] + s_pFbRowOffs[ERASE_MERGE_Y]);
+			UBYTE ubGone = (UBYTE)(ubP1 - ubP0 - ubKept);
+			if(ubGone) {
+				tAgkBlitArea *pTo = pE + ubP0 + ubKept, *pFrom = pE + ubP1;
+				for(UBYTE i = ubP1; i < ubDrawn; ++i) *pTo++ = *pFrom++;
+				ubErases = (UBYTE)(ubDrawn - ubGone);
+			}
+		}
+	}
+	s_pErased[ubBfr] = ubErases;
 	s_ubLastDrawn = ubDrawn;
 }
 
@@ -1888,10 +1968,16 @@ static UBYTE textType(char *pStage, const char *szTarget, UBYTE ubLen, UBYTE *pB
 		for(UBYTE e = (UBYTE)(c + 4); c < e && c < ubLen; ++c) {
 			if(pStage[c] != szTarget[c]) {
 				if(ubBudget) { pStage[c] = szTarget[c]; --ubBudget; isChange = 1; pCols[c >> 5] |= 1UL << (c & 31); }
-				else isDone = 0;
+				else {
+					// no letters left and one still differs: not done, whatever is further on
+					// (the rest of the line was scanned for nothing, on each picture of a HUD change)
+					isDone = 0;
+					goto out;
+				}
 			}
 		}
 	}
+out:
 	if(isChange) *pDraw |= ubDrawBit;
 	*pBudget = ubBudget;
 	return isDone;
@@ -2286,19 +2372,98 @@ static UWORD msgKeyNow(void) {
 		(g->state == GS_LOST && g->stateTimer < LOST_FRAMES - 40 ? 2 : 0));
 }
 
-__attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey);
+__attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey, UBYTE ubSpent);
 
-// Nothing new, nothing crossed: nothing to do (the usual case in play). The key
-// first, here, with no stack frame: the body's set-up (its text table, the
-// aligned line) was 4-5 lines of the A500's frame on every picture
+// Typing text over many pictures (a lost chopper's lines, the hall of fame): the body sets it all
+// up again each picture (16 line pointers, the state's strings, each centred line) to find two
+// letters to draw: ~3/4 of the CPU of a typing picture, the heaviest ones of a crash. In the
+// states whose texts do not change under one key the body keeps each line's centred text (or
+// that it is blank) as it first needs it; the next pictures walk the lines here, as the body
+// does, and hand over to it (with the letters still to type) when a line has no plan yet or a
+// blank line has letters on it to clear. New key, or a letter an erase crossed: the body's.
+static UBYTE s_pPlanOn[2];                      // the plan below is for s_pMsgTypeKey
+static UWORD s_pPlanHave[2], s_pPlanBlank[2];   // per line (a bit): its text is planned / planned blank
+static char s_pPlan[2][MSG_LINES][MSG_LEN + 4] __attribute__((aligned(4)));
+static UBYTE s_pPlanCol[2][MSG_LINES];          // per line: typed up to here (a multiple of 4): where the scan resumes
+static void msgBodyFrom(UBYTE ubBfr, UWORD uwKey, UBYTE ubSpent);
+__attribute__((noinline)) static UBYTE msgTypeFast(UBYTE ubBfr, UWORD uwKey) {
+	if(!s_pPlanOn[ubBfr] || uwKey != s_pMsgTypeKey[ubBfr]) return 0;
+	UBYTE ubLayout = msgLayout();
+	UBYTE ubBudget = MSG_TYPE_PER_FRAME;
+	for(UBYTE l = s_pMsgFirst[ubLayout]; l < s_pMsgEnd[ubLayout] && ubBudget; ++l) {
+		UWORD uwLineBit = (UWORD)(1 << l);
+		if(s_pMsgDone[ubBfr] & uwLineBit) continue;
+		ULONG *pInk = s_pMsgInk[ubBfr][l];
+		if(s_pPlanBlank[ubBfr] & uwLineBit) {
+			if(pInk[0] | pInk[1]) { msgBodyFrom(ubBfr, uwKey, (UBYTE)(MSG_TYPE_PER_FRAME - ubBudget)); return 1; }
+			s_pMsgDone[ubBfr] |= uwLineBit;
+			continue;
+		}
+		if(!(s_pPlanHave[ubBfr] & uwLineBit)) { msgBodyFrom(ubBfr, uwKey, (UBYTE)(MSG_TYPE_PER_FRAME - ubBudget)); return 1; }
+		char *pStage = s_pMsgStage[ubBfr][l];
+		const char *pLine = s_pPlan[ubBfr][l];
+		tAgkText *pT = &s_pMsg[ubBfr][l];
+		UBYTE c = s_pPlanCol[ubBfr][l], isChange = 0;
+		while(c < MSG_LEN && ubBudget) {
+			if(*(const tUlongAlias *)&pStage[c] == *(const tUlongAlias *)&pLine[c]) {
+				c += 4;
+				continue;
+			}
+			for(UBYTE e = (UBYTE)(c + 4); c < e && ubBudget; ++c) {
+				if(pStage[c] != pLine[c]) {
+					pStage[c] = pLine[c];
+					ULONG ulBit = 1UL << (c & 31);
+					if(pLine[c] != ' ') pInk[c >> 5] |= ulBit;
+					else pInk[c >> 5] &= ~ulBit;
+					msgChar(pT, c, pLine[c]);
+					--ubBudget;
+					isChange = 1;
+				}
+			}
+		}
+		if(c >= MSG_LEN) s_pMsgDone[ubBfr] |= uwLineBit;
+		else s_pPlanCol[ubBfr][l] = (UBYTE)(c & ~3);
+		if(isChange) s_pMsgLit[ubBfr] |= uwLineBit;
+	}
+	s_pMsgKey[ubBfr] = ubBudget ? uwKey : 0xFFFF;
+	return 1;
+}
+
 __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	UWORD uwKey = msgKeyNow();
 	if(uwKey == s_pMsgKey[ubBfr] && !s_pMsgAnyFix[ubBfr]) return;
-	msgUpdateBody(ubBfr, uwKey);
+	if(uwKey != s_pMsgKey[ubBfr] && !s_pMsgAnyFix[ubBfr] &&
+		(s_sGame.state == GS_PLAY || (s_sGame.state == GS_LOST && s_sGame.stateTimer >= LOST_FRAMES - 40))) {
+		// A new key with nothing to say (play starting, the 40 pictures after a lost chopper before
+		// its text) over lines with no letters: settled at once, which is all the body would do
+		// after its set-up (the heavy picture of a crash)
+		const ULONG *pInk = s_pMsgInk[ubBfr][0];   // lines 0-3: the play layout's
+		if(!(pInk[0] | pInk[1] | pInk[2] | pInk[3] | pInk[4] | pInk[5] | pInk[6] | pInk[7])) {
+			s_pMsgTypeKey[ubBfr] = uwKey;
+			s_pMsgDone[ubBfr] = 0xFFFF;
+			s_pMsgKey[ubBfr] = uwKey;
+			s_pPlanOn[ubBfr] = 0;
+			return;
+		}
+	}
+	if(!s_pMsgAnyFix[ubBfr] && msgTypeFast(ubBfr, uwKey)) return;
+	msgUpdateBody(ubBfr, uwKey, 0);
+}
+static void msgBodyFrom(UBYTE ubBfr, UWORD uwKey, UBYTE ubSpent) {
+	msgUpdateBody(ubBfr, uwKey, ubSpent);
 }
 
-__attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey) {
+__attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey, UBYTE ubSpent) {
 	const tGame *g = &s_sGame;
+	// (the texts of these states do not change under one key: lines are planned for msgTypeFast)
+	UBYTE isPlan = g->state == GS_LOST || g->state == GS_CLEAR || g->state == GS_OVER || g->state == GS_VICTORY ||
+		g->state == GS_SCORES;
+	if(!isPlan) s_pPlanOn[ubBfr] = 0;
+	else if(uwKey != s_pMsgTypeKey[ubBfr] || !s_pPlanOn[ubBfr]) {
+		s_pPlanOn[ubBfr] = 1;
+		s_pPlanHave[ubBfr] = s_pPlanBlank[ubBfr] = 0;
+		for(UBYTE l = 0; l < MSG_LINES; ++l) s_pPlanCol[ubBfr][l] = 0;
+	}
 	const char *pText[MSG_LINES] = {"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""};
 	char szA[24], szB[28];
 	static char pRows[HI_COUNT][HI_ROW_LEN + 1];   // (msgMenu keeps them while the table stays)
@@ -2389,7 +2554,20 @@ __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey) {
 		s_pMsgDone[ubBfr] = 0;
 	}
 	char szLine[MSG_LEN + 4] __attribute__((aligned(4)));
-	UBYTE ubBudget = MSG_TYPE_PER_FRAME;
+	if(isPlan && !isSettled) {
+		// every line's text for msgTypeFast, at the first picture of the key (the picture is a light
+		// one: the typing starts; a later line's first picture was the heavy one otherwise)
+		for(UBYTE l = s_pMsgFirst[ubLayout]; l < s_pMsgEnd[ubLayout]; ++l) {
+			UWORD uwBit = (UWORD)(1 << l);
+			if((s_pPlanHave[ubBfr] | s_pPlanBlank[ubBfr]) & uwBit) continue;
+			if(!pText[l][0]) s_pPlanBlank[ubBfr] |= uwBit;
+			else {
+				msgCentre(s_pPlan[ubBfr][l], pText[l]);
+				s_pPlanHave[ubBfr] |= uwBit;
+			}
+		}
+	}
+	UBYTE ubBudget = (UBYTE)(MSG_TYPE_PER_FRAME - ubSpent);
 	// (just this layout's lines: msgLayoutClear() blanks the others)
 	for(UBYTE l = s_pMsgFirst[ubLayout]; l < s_pMsgEnd[ubLayout]; ++l) {
 		char *pStage = s_pMsgStage[ubBfr][l];
@@ -3404,12 +3582,20 @@ void genericProcess(void) {
 	else if(s_ubSongsPending) songsLoad();
 	if(s_isRotorPending) rotorSetup();
 	if(s_ubAfterSplash < 3 && ++s_ubAfterSplash == 2) {
-		// the game's copper list is showing now: its colours back, the logo freed
+		// the game's copper list is showing now (the screen still black): the logo's 47 KB go, then
+		// the colours are back. Nothing shows the logo again (no attract page, no credits, not the
+		// card or the hall of fame use it), and 47 KB of chip RAM were held for the whole game: world 1
+		// plays with that much more room, and the worlds after it start from there. ACE's memFree
+		// switches the OS on and off for each free (three of them froze the title for ~6 frames when
+		// they came after its colours): all three in one trip through the OS, before the colours,
+		// is two frames with nothing to see (like the floppy loads), and a long frame to the meter.
+		systemUse();
+		splashDestroy();
+		systemUnuse();
+		agkPerfSkip();
+		agkPrint("AGK splash freed\n");
 		if(s_isAga) agaWaitPaletteWindow();
 		for(UBYTE i = 1; i < 32; ++i) g_pCustom->color[i] = s_pVPort->pPalette[i];
-		// The splash's 47 KB stay allocated until the game quits (genericDestroy):
-		// ACE's memFree switches the OS back on for each free, which froze the
-		// title for ~6 frames right as it appeared. Chip RAM has room for it.
 	}
 	UBYTE ubBfr = backBuffer();
 	// (the back list must not be the one the copper still shows: tests/tear.agk)

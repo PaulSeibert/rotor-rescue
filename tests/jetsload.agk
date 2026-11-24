@@ -1,0 +1,29 @@
+# The headroom guard for the skill-5 crash (the `jets` flight: a jet's missile, the chopper lost
+# among explosions, CHOPPER DOWN typing over them). Every picture of it is blitter-bound and the
+# worst ones were 97% on the A500 (limit 97: layout sensitive, it flipped to 98 with a dropped
+# frame four times on unrelated code). Real savings (merged erases of a crowd, a typing plan for
+# the lost chopper's lines, a cover walk that stops at the last person, a HUD scan that stops
+# at the first letter it cannot afford) took it to 92; this holds the line at 94, with the
+# typed text itself checked: three shots of it, recorded from the build before those savings, so
+# the saved work shows no difference in any pixel.
+start-at boarding
+key 0x63
+key 0x28
+wait 5
+key 0x05
+wait 30
+expect-serial "difficulty=5"
+press up 40
+wait-serial "jet tell"
+wait-serial "jet fire"
+wait-serial "chopper lost" 1200
+# (the lines start typing 40 pictures after the crash, two letters a picture)
+wait 44
+screenshot first
+wait 8
+screenshot second
+wait 90
+screenshot typed
+expect-no-serial "AGK ERR"
+expect-no-dropped-frames
+expect-max-load 94

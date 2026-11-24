@@ -795,12 +795,13 @@ static void chopperDestroy(tGame *g) {
 	c->crashTimer = CRASH_FRAMES;
 	c->vx = (int16_t)(c->vx >> 1);
 	// everyone aboard is lost
-	for(uint8_t i = 0; i < HOSTAGE_COUNT; ++i) {
+	for(uint8_t i = 0, ubLeft = g->aboard; i < HOSTAGE_COUNT && ubLeft; ++i) {   // (it stops when the last one aboard is found)
 		tHostage *h = &g->pHostages[i];
 		if(h->state == HS_ABOARD) {
 			h->state = HS_DEAD;
 			h->timer = 0;
 			++g->killed;
+			--ubLeft;
 		}
 	}
 	g->aboard = 0;
@@ -2155,6 +2156,7 @@ COLD static uint8_t seaDraw(const tGame *g, tDraw *pOut, uint8_t n) {
 	return n;
 }
 
+uint8_t g_ubDrawPeople0, g_ubDrawPeople1;   // the run of people in the list logicDraw made: [first, end)
 uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 	uint8_t n = 0;
 	int16_t cam = g->cam;
@@ -2190,6 +2192,7 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 			(uint8_t)((t->dir < 0 ? TANK_L0 : TANK_R0) + ((t->anim >> 2) & 1));
 		n = drawAdd(pOut, n, (int16_t)(t->x - 16 - cam), FEET_Y - 14, BOB_TANK, f);
 	}
+	g_ubDrawPeople0 = n;
 	for(uint8_t k = 0; k < g->outCount; ++k) {
 		const tHostage *h = &g->pHostages[g->pOut[k]];
 		uint8_t f;
@@ -2198,6 +2201,7 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		else continue;
 		n = drawAdd(pOut, n, (int16_t)(h->x - 8 - cam), FEET_Y - 12, BOB_HOSTAGE, f);
 	}
+	g_ubDrawPeople1 = n;
 	if(g->world) n = seaDraw(g, pOut, n);
 	// air
 	for(uint8_t i = 0; i < JET_MAX; ++i) {

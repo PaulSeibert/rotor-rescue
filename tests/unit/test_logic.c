@@ -3741,6 +3741,63 @@ static void testW2JetIsDrawnFromTheSet(void) {
 	CHECK(g_pBobW[BOB_W2_JET] == g_pBobW[BOB_JET] && g_pBobH[BOB_W2_JET] == g_pBobH[BOB_JET] && g_pBobFrames[BOB_W2_JET] == g_pBobFrames[BOB_JET]);
 }
 
+// main.c leans on the shape of the draw list: the people are ONE run (g_ubDrawPeople0/1: it merges
+// their erase areas into one clear, a start of the blitter each saved), and everything before the
+// last person is on the ground, below the play layout's message lines (y >= 154: the last line,
+// 146 + 8): msgCoverAll walks the list from the end and stops at the last person
+static void checkGroundFirstAndPeopleRun(const tDraw *d, uint8_t n, int isPeopleWanted) {
+	int iLast = -1, nPeople = 0;
+	for(int i = 0; i < n; ++i) if(d[i].bob == BOB_HOSTAGE) { iLast = i; ++nPeople; }
+	if(isPeopleWanted) {
+		if(nPeople < 4) printf("DBG n=%d people=%d out=%d cam=%d state=%d\n", n, nPeople, g.outCount, g.cam, g.state);
+		CHECK(nPeople >= 4);
+	}
+	if(iLast < 0) {
+		CHECK(g_ubDrawPeople1 == g_ubDrawPeople0);
+		return;
+	}
+	CHECK(g_ubDrawPeople1 == iLast + 1);
+	CHECK(g_ubDrawPeople1 - g_ubDrawPeople0 == nPeople);
+	for(int i = g_ubDrawPeople0; i < g_ubDrawPeople1; ++i) CHECK(d[i].bob == BOB_HOSTAGE);
+	for(int i = 0; i < iLast; ++i) CHECK(d[i].y >= 154);
+}
+
+static void testDrawPeopleRunAndGroundFirst(void) {
+	tDraw d[DRAW_MAX];
+	for(int w = 0; w < 2; ++w) {
+		if(w) newWorld2(0);
+		else newGame();
+		g.cam = (int16_t)(g.pBarracks[0].x - 100);
+		for(uint8_t i = 0; i < 6; ++i) logicHostageOut(&g, i, HS_FREE, (int16_t)(g.pBarracks[0].x - 40 + 16 * i));   // six out in front of a barracks
+		uint8_t n = logicDraw(&g, d);
+		checkGroundFirstAndPeopleRun(d, n, 1);
+		// with an enemy on the ground, one in the air, a boom, smoke, a shot: still ground first
+		g.pTanks[0].active = 1;
+		g.pTanks[0].x = (int16_t)(g.cam + 150);
+		g.pJets[0].active = 1;
+		g.pJets[0].x = (int16_t)(g.cam + 100);
+		g.pJets[0].y = 60;
+		g.pBooms[0].active = 1;
+		g.pBooms[0].x = (int16_t)(g.cam + 120);
+		g.pBooms[0].y = 120;
+		g.pSmoke[0].active = 1;
+		g.pSmoke[0].x = (int16_t)(g.cam + 60);
+		g.pSmoke[0].y = 100;
+		g.pEShots[0].active = 1;
+		g.pEShots[0].kind = ESHOT_MISSILE;
+		g.pEShots[0].x = (int16_t)(g.cam + 40);
+		g.pEShots[0].y = 140;
+		n = logicDraw(&g, d);
+		checkGroundFirstAndPeopleRun(d, n, 1);
+		CHECK(findBob(d, n, BOB_BOOM) && findBob(d, n, BOB_SMOKE) && findBob(d, n, BOB_SHOT));
+		// nobody out: an empty run
+		g.outCount = 0;
+		n = logicDraw(&g, d);
+		checkGroundFirstAndPeopleRun(d, n, 0);
+		CHECK(g_ubDrawPeople1 == g_ubDrawPeople0);
+	}
+}
+
 int main(void) {
 	testRotorRateFollowsSpeedAndClimb();
 	testRotorIdlesSlowAndSoftOnTheGround();
@@ -3885,6 +3942,7 @@ int main(void) {
 	testW2JetCanBeShotDown();
 	testW2JetsAndBoatsShareTheAttackToken();
 	testW2JetIsDrawnFromTheSet();
+	testDrawPeopleRunAndGroundFirst();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);
 		return 1;
