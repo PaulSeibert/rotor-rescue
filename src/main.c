@@ -2543,6 +2543,7 @@ static UWORD msgKeyNow(void) {
 	return (UWORD)(g->state << 8 | g->world << 6 | g->mission << 4 | uwKeyLow |
 		(g->state == GS_TITLE ? (g->frame >> 5) & 1 : 0) |
 		(g->state == GS_INTRO && logicJetsPossible(g) ? 1 : 0) |   // (the card's brief follows the skill: "AND JETS")
+		(g->hint ? logicHintKey(g) : 0) |   // (in play: the bomb prompt, 0-3; its two wordings alternate)
 		(g->state == GS_LOST && g->stateTimer < LOST_FRAMES - 40 ? 2 : 0));
 }
 
@@ -2638,7 +2639,7 @@ __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 		return;
 	}
 	if(uwKey != s_pMsgKey[ubBfr] && !s_pMsgAnyFix[ubBfr] &&
-		(s_sGame.state == GS_PLAY || (s_sGame.state == GS_LOST && s_sGame.stateTimer >= LOST_FRAMES - 40))) {
+		((s_sGame.state == GS_PLAY && !s_sGame.hint) || (s_sGame.state == GS_LOST && s_sGame.stateTimer >= LOST_FRAMES - 40))) {   // (a bomb prompt is a key with something to say)
 		// A new key with nothing to say (play starting, the 40 pictures after a lost chopper before
 		// its text) over lines with no letters: settled at once, which is all the body would do
 		// after its set-up (the heavy picture of a crash)
@@ -2706,6 +2707,9 @@ __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey, UB
 				pText[2] = g->mission == 0 ? "64 HELD ON 4 ISLANDS" : g->mission == 1 ? "48 ON 3 ISLANDS, 16 ON A SHIP" : pSink[g->difficulty];
 			}
 		} break;
+		case GS_PLAY:
+			pText[0] = logicHintText(logicHintKey(g));   // the first-use bomb prompt (SPEC 3): empty most of the time
+			break;
 		case GS_LOST:
 			if(g->stateTimer < LOST_FRAMES - 40) {
 				pText[1] = "CHOPPER DOWN";
@@ -3742,6 +3746,12 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 	if(g->events2 & EV2_JETFIRE) agkPrint("AGK jet fire\n");
 	if(g->events2 & EV2_DAMAGE) agkPrint("AGK chopper damaged\n");
 	if(g->events2 & EV2_REPAIR) agkPrint("AGK chopper repaired\n");
+	// the bomb prompt starting and ending (tests/hint.agk): "AGK hint=bomb", "=stance", "=none"
+	static UBYTE s_ubHintSeen;
+	if(g->hint != s_ubHintSeen) {
+		s_ubHintSeen = g->hint;
+		agkPrint(g->hint == HINT_BOMB ? "AGK hint=bomb\n" : g->hint == HINT_STANCE ? "AGK hint=stance\n" : "AGK hint=none\n");
+	}
 	if(s_ubScrollTrace) {
 		// the mountains' and hills' fine scroll as written to the copper: the
 		// quarter pixels (BPLCON1 bits 13-12, AGA; always 0 on OCS)

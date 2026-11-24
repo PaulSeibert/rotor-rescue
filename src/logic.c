@@ -459,7 +459,13 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	setState(g, GS_INTRO, INTRO_FRAMES);
 }
 
+COLD static void hintReset(tGame *g) {
+	g->hint = g->hintT = g->hintShowsB = g->hintShowsS = g->bombUses = 0;
+	g->hintCoolB = g->hintCoolS = 0;
+}
+
 COLD void logicStartGame(tGame *g) {
+	hintReset(g);
 	g->lives = LIVES_START;
 	g->score = 0;
 	g->savedTotal = 0;
@@ -474,6 +480,7 @@ COLD void logicStartAt(tGame *g, uint8_t ubWorld, uint8_t ubMission) {
 		g->score = 0;
 		g->savedTotal = 0;
 		g->titleArmed = 0;
+		hintReset(g);
 	}
 	g->world = ubWorld;
 	logicStartMission(g, ubMission);
@@ -1131,6 +1138,7 @@ static void shotFire(tGame *g, uint8_t ubKind) {
 			s->vy = 16;
 			s->life = 120;
 			g->events |= EV_BOMB;
+			if(!g->demo && g->bombUses < 255) ++g->bombUses;   // (the prompts stop after HINT_USES)
 		}
 		return;
 	}
@@ -2350,6 +2358,76 @@ COLD static uint8_t demoStep(tGame *g, const tInput *pIn, tInput *pDemoIn) {
 	return 0;
 }
 
+// ------------------------------------------------------ the bomb prompt ---
+// A thing the bombs are for (a tank, a closed barracks) on screen, ahead of the chopper's
+// cannon (or right under it) within HINT_RANGE: where a bomb dropped now would land soon enough
+static uint8_t hintTarget(const tGame *g, int16_t x) {
+	const tChopper *c = &g->chop;
+	if(x < g->cam || x >= g->cam + SCREEN_W) return 0;
+	int16_t d = (int16_t)(c->faceTarget == FACE_RIGHT ? x - c->x : c->x - x);   // + ahead
+	return d >= -HINT_BEHIND && d <= HINT_RANGE;
+}
+
+static uint8_t hintTargetAhead(const tGame *g) {
+	for(uint8_t i = 0; i < TANK_MAX; ++i) {
+		if(g->pTanks[i].active && hintTarget(g, g->pTanks[i].x)) return 1;
+	}
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
+		if(g->pBarracks[b].hp && hintTarget(g, g->pBarracks[b].x)) return 1;
+	}
+	return 0;   // (boats: the cannon sinks them too, so they don't ask for a bomb)
+}
+
+// Once a frame, after the chopper has moved. Never changes the game: it only says what to print
+static void hintUpdate(tGame *g) {
+	const tChopper *c = &g->chop;
+	if(g->state != GS_PLAY || g->demo) g->hintHold = HINT_HOLD;
+	else {
+		if(g->hintHold) --g->hintHold;
+		if(g->hintCoolB) --g->hintCoolB;
+		if(g->hintCoolS) --g->hintCoolS;
+	}
+	if(g->state != GS_PLAY || g->demo || !c->alive || c->landed || g->bombUses >= HINT_USES) {
+		g->hint = HINT_NONE;
+		return;
+	}
+	uint8_t isFront = c->faceTarget == FACE_FRONT;
+	// it ends with its time, or once the player is where it points (in the stance, or back out of it)
+	if(g->hint && (--g->hintT == 0 || (g->hint == HINT_BOMB) == isFront)) g->hint = HINT_NONE;
+	if(g->hint || g->hintHold) return;
+	if(isFront) {
+		if(!g->hintCoolS && g->hintShowsS < HINT_SHOWS) {
+			g->hint = HINT_STANCE;
+			++g->hintShowsS;
+			g->hintCoolS = HINT_COOL;
+		}
+	}
+	else if(!g->hintCoolB && g->hintShowsB < HINT_SHOWS && hintTargetAhead(g)) {
+		g->hint = HINT_BOMB;
+		++g->hintShowsB;
+		g->hintCoolB = HINT_COOL;
+	}
+	g->hintT = HINT_FRAMES;
+}
+
+uint8_t logicHint(const tGame *g) {
+	return g->hint;
+}
+
+uint8_t logicHintKey(const tGame *g) {
+	if(!g->hint) return HINT_KEY_NONE;
+	if(g->hint == HINT_STANCE) return HINT_KEY_STANCE;
+	// the wording by age: the second HINT_ALT_FRAMES is the button's (no division: it is the 68000's library)
+	uint8_t ubAge = (uint8_t)(HINT_FRAMES - g->hintT);
+	return ubAge >= HINT_ALT_FRAMES && ubAge < 2 * HINT_ALT_FRAMES ? HINT_KEY_BUTTON : HINT_KEY_DOWN;
+}
+
+const char *logicHintText(uint8_t ubKey) {
+	static const char *const pText[4] = {
+		"", "HOLD DOWN, THEN FIRE: BOMB", "BTN 2, THEN FIRE: BOMB", "FIRE: BOMB   UP AND FIRE: GUNS"};
+	return pText[ubKey & 3];
+}
+
 void logicUpdate(tGame *g, const tInput *pIn) {
 	++g->frame;
 	weatherUpdate(g);
@@ -2436,6 +2514,7 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 			if(!g->stateTimer || (pIn->fire && g->stateTimer < OVER_FRAMES - 100)) gameEnded(g);
 			break;
 	}
+	hintUpdate(g);
 }
 
 // --------------------------------------------------------------- drawing ---
