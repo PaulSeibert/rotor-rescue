@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include "hiscore.h"   // the kit's hall of fame (the table, the initials editor)
+#include "world3_art.h"   // world 3's palettes (art/tools/make_world3_disk.py)
 
 // ------------------------------------------------------------- the world ---
 #define SCREEN_W 320
@@ -45,6 +46,20 @@
 // islands, pads, barracks, water and boats (SPEC 4.4, 6; docs/STYLE-world2.md);
 // the mission after world 1's third is its first. MISSIONS_TOTAL: missions 1-6.
 #define WORLD_COUNT 2
+// World 3, the Highlands (SPEC 13): the hardware pilot, reached only by the debug entry (Ctrl+L, W, 7), so WORLD_COUNT
+// (the worlds the game walks through) stays 2. g->world is 2 there; every world-2-only rule asks logicIsW2().
+#define W3_WORLD 2
+#define WORLD_DEBUG_COUNT 3
+#define W3_W 4096
+#define W3_COLS (W3_W / 16)      // 256 columns of 16 px: the height map has W3_COLS + 1 joints
+#define W3_PEAK 100              // the highest surface, px above GROUND_Y
+#define W3_WALL_RISE 28          // a flank rising this much (or more) in 16 px (60 degrees) is a wall
+#define W3_SKID_HALF 10          // the skids are x - 10 and x + 10
+#define W3_BODY_HALF 16          // the body's half width: a wall stops it
+#define W3_DECK_CLEAR 20         // the chopper's height: its skids stop this far under a deck's base
+#define W3_MIN_GAP 70            // the least air between a deck and the crest under it on the route (SPEC 13.2)
+#define W3_FLAG_PAD 1            // a column flag: a pad bed (flat, landable)
+#define W3_FLAG_MASSIF 2         // a column flag: a mass the route goes round (exempt from the air-gap rule)
 #define MISSIONS_TOTAL (WORLD_COUNT * MISSION_COUNT)
 #define W2_W 4608            // 288 tile columns of 16 px
 #define W2_START_X 4136      // on the base island's pad (art/world2/tilemap.txt: pad column 256, 80 px)
@@ -96,10 +111,12 @@ enum {
 	BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_JET, BOB_MINE, BOB_FLAG,
 	BOB_W2_BARRACKS, BOB_PATROL, BOB_GUNBOAT, BOB_PAD48, BOB_PAD64, BOB_PAD80, BOB_PAD96,
 	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET,
+	BOB_W3_LODGE, BOB_W3_NEST,   // world 3's own (its pad is BOB_PAD64 again, in its own art)
 	BOB_TYPES
 };
 #define BOB_W1_FIRST BOB_FENCE       // world 1's own BOBs: BOB_FENCE .. BOB_FLAG
 #define BOB_W2_FIRST BOB_W2_BARRACKS // world 2's: BOB_W2_BARRACKS .. BOB_W2_JET (the jet is world 1's, a copy in the set)
+#define BOB_W3_FIRST BOB_W3_LODGE    // world 3's: BOB_W3_LODGE, BOB_W3_NEST (and BOB_PAD64)
 // The chopper's shadow on the track: frame = size * 2 + dither phase (x & 1),
 // size 0 (on the ground) .. SHADOW_SIZES - 1 (high up)
 #define SHADOW_Y (GROUND_Y + 1)
@@ -332,6 +349,7 @@ typedef struct {
 	// events of the latest frame (sound, serial): bit flags
 	uint16_t events;
 	uint8_t events2;     // more event bits (EV2_*)
+	uint8_t events3;     // EV3_*
 	uint8_t evBarracks;  // which barracks opened (index + 1)
 } tGame;
 
@@ -361,6 +379,7 @@ typedef struct {
 #define EV2_SPLASH   0x20     // the skids touched the water (world 2): a soft stop
 #define EV2_BOATTELL 0x40     // a gunboat started its wind-up (a shell follows)
 #define EV2_BOATFIRE 0x80     // a gunboat fired
+#define EV3_BUMP     0x01     // the chopper's body met a wall (world 3): speed lost, no damage
 
 // --------------------------------------------------------------- tuning ---
 #define VX_MAX 48            // 3 px/frame
@@ -430,7 +449,9 @@ void logicStartMission(tGame *g, uint8_t ubMission);
 void logicStartAt(tGame *g, uint8_t ubWorld, uint8_t ubMission);
 void logicUpdate(tGame *g, const tInput *pIn);
 // The battlefield's width: WORLD_W, or W2_W in world 2
-static inline int16_t logicWorldW(const tGame *g) { return g->world ? W2_W : WORLD_W; }
+static inline int16_t logicWorldW(const tGame *g) { return g->world == W3_WORLD ? W3_W : g->world ? W2_W : WORLD_W; }
+static inline uint8_t logicIsW2(const tGame *g) { return g->world == 1; }
+static inline uint8_t logicIsW3(const tGame *g) { return g->world == W3_WORLD; }
 
 // The chopper on its own (exposed for unit tests)
 void logicChopperUpdate(tGame *g, const tInput *pIn);
@@ -615,6 +636,26 @@ uint32_t logicGrad24(uint32_t ulA, uint32_t ulB, uint8_t ubLine, uint8_t ubLines
 // (tiles 0-7, 32-33) are not landable: TERRAIN_WATER. Off the map: water.
 #define TERRAIN_WATER 0xFF
 uint8_t logicTerrainFloorY(const uint8_t *pMap, int16_t x);
+
+// T3 (SPEC 13.3): the bands of each world's display, one table the copper builder reads (main.c) instead of
+// constants: the band's first game line, its rows, its camera speed as a shift (0 = 1:1, 1 = /2, 2 = /4, 3 = /8) and
+// the PF2 palette slot it loads (0 clouds or ceiling, 1 far, 2 land / sea / strip, 3 islands). rows 0: no such band.
+// World 0 and 1 are the lines the builder had as constants; world 2 (the Highlands) is STYLE-world3 section 2.
+enum { BK_CLOUDS, BK_FAR, BK_FLOOR, BK_HILLS, BK_GROUND, BK_COUNT };   // (the ground band is world 2's and world 3's terrain strip)
+typedef struct { uint8_t y, rows, shift, pal; } tBand;
+typedef struct { uint8_t skyEnd; tBand b[BK_COUNT]; } tBandLayout;   // skyEnd: the game line the sky's COLOR00 MOVEs stop at
+const tBandLayout *logicBands(uint8_t ubWorld);
+
+// World 3's terrain (SPEC 13.5): a map is the surface height at each 16 px joint (px above GROUND_Y), a flag a column and
+// the deck's base line a joint (0: no deck). logicW3UseMap(0, 0, 0): the built-in pilot map (world3_map.h, no deck).
+void logicW3UseMap(const uint8_t *pHeight, const uint8_t *pFlags, const uint8_t *pCeil);
+uint8_t logicW3Joint(uint16_t uwJoint);                // the map's height at a joint
+int16_t logicW3SurfaceY(int16_t x);                    // the surface's y at x (the line between its joints)
+int16_t logicW3FloorAt(int16_t x);                     // the highest surface under the skids, as a y
+uint8_t logicW3IsPad(int16_t x);                       // x is over a pad bed
+int16_t logicW3CeilAt(int16_t x);                      // the highest y the skids can reach at x
+uint8_t logicW3WallAt(int16_t xEdge, int16_t y, int8_t bDir);   // the body's leading edge at xEdge, skids at y, heading bDir: in a wall?
+uint8_t logicW3GapOk(const uint8_t *pHeight, const uint8_t *pFlags, const uint8_t *pCeil);   // SPEC 13.2 (0, 0, 0: the built-in map)
 
 // Radar: 0..RADAR_W-1 from a world x
 #define RADAR_W 192

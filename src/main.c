@@ -117,6 +117,9 @@ static inline void cwFastPtrs(tAgkCopWriter *pW, UBYTE ubPlane, ULONG ulAddr) {
 #define FLOOR_END (FLOOR_Y + FLOOR_LINES)    // 199
 #define PLAY_HILLS_ROW (FLOOR_END - HILLS_Y)  // 2
 _Static_assert(MTN_Y + ART_MOUNTAINS_H == FLOOR_Y, "the mountains band (with the far strip) ends where the floor starts");
+// T3: logic.c's band table (logicBands) is these constants for worlds 1 and 2 (the copper builder reads the table in play)
+_Static_assert(CLOUDS_Y == 72 && ART_CLOUDS_H == 40 && MTN_Y == 120 && ART_MOUNTAINS_H == 60 && FLOOR_Y == 180 && FLOOR_LINES == 19 &&
+	FLOOR_END == 199 && GROUND_BAND_Y == 224 && ART_GROUND_H == 32 && ART_HILLS_H - PLAY_HILLS_ROW == 25, "logic.c's band table, world 1");
 // The floor's art: disk/plainfloor.bin (art/tools/make_plain.py), 640 px rows,
 // 3 interleaved planes, loaded during the splash (titleLoad) like the logo:
 // in the program it would push AROS's first picture past the boot window
@@ -553,7 +556,8 @@ static tCopSlots cwBand(tAgkCopWriter *pW, UWORD uwGameY, const tBitMap *pBm) {
 // of this line's fetch: where the next row starts, so all three PF2 planes
 // move with one MOVE). floorSet() fills in the scroll each frame. Then the
 // hills, from their row 2.
-__attribute__((noinline, optimize("Os"))) static void cwFloor(tAgkCopWriter *pW, UBYTE ubBfr, UBYTE ubMission) {
+__attribute__((noinline, optimize("Os"))) static void cwFloor(tAgkCopWriter *pW, UBYTE ubBfr, UBYTE ubMission, const tBandLayout *pLay) {
+	const UWORD uwFloorY = pLay->b[BK_FLOOR].y, uwLines = pLay->b[BK_FLOOR].rows;
 	// (raw MOVEs by register offset: small code, the A500's slow RAM is full)
 	// Line FLOOR_Y - 1, the far strip's last row (bare): the land palette at its
 	// start, before its fetch (after the sky's COLOR00 there). At the end of the
@@ -562,22 +566,22 @@ __attribute__((noinline, optimize("Os"))) static void cwFloor(tAgkCopWriter *pW,
 	// $30 6-plane fetch, where the copper gets a MOVE per 8 colour clocks (review
 	// A2; the kit's perspectivefloor, d4ba718). A red COLOR00 probe at the end of
 	// line FLOOR_Y's block started at full-frame x 140 (OCS) / 237 (AGA)
-	agkCopWait(pW, FLOOR_Y - 1, 0);
+	agkCopWait(pW, uwFloorY - 1, 0);
 	s_pPalSlot[ubBfr][2] = pW->uwPos;
 	for(UBYTE i = 1; i < 8; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * (8 + i)), g_pMissionLandPal[ubMission][i]);
 	// its end: PF2 at floor row 0 (six MOVEs, done before line FLOOR_Y's block)
-	agkCopWait(pW, FLOOR_Y - 1, SWITCH_WAIT_X);
+	agkCopWait(pW, uwFloorY - 1, SWITCH_WAIT_X);
 	s_pFloorPtr[ubBfr] = pW->uwPos;
 	for(UBYTE p = 0; p < 3; ++p) cwPtr8(pW, (UBYTE)(1 + 2 * p), (ULONG)s_pPlainFloor->Planes[p]);
-	for(UBYTE j = 0; j < FLOOR_LINES; ++j) {
-		agkCopWait(pW, FLOOR_Y + j, 0);
+	for(UBYTE j = 0; j < uwLines; ++j) {
+		agkCopWait(pW, uwFloorY + j, 0);
 		if(s_isAga) cwSky24(pW, s_pFloorBg[ubMission][j], s_pFloorBgLo[ubMission][j]);
 		else cwReg(pW, REG_COLOR00, s_pFloorBg[ubMission][j]);
 		if(!j) s_pFloorCon1[ubBfr] = pW->uwPos;
 		cwReg(pW, REG_BPLCON1, 0);
 		cwReg(pW, REG_BPL2MOD, (UWORD)(s_pPlainFloor->BytesPerRow - FETCH_BYTES));
 	}
-	s_sHillSlots[0][ubBfr] = cwBand(pW, FLOOR_END, &s_sHillsPlay);
+	s_sHillSlots[0][ubBfr] = cwBand(pW, pLay->b[BK_HILLS].y, &s_sHillsPlay);
 }
 
 // Each frame the camera moves: every floor line's BPLCON1 and modulo, straight
@@ -605,15 +609,16 @@ __attribute__((noinline, optimize("Os"))) static void floorSet(tCopCmd *pList, U
 // shows there, and COLOR00 came first), then at $D8 PF2 to the terrain strip
 // (cwBand: 6 pointer MOVEs, BPLCON1, BPL2MOD, done before line 208's fetch).
 // COLOR00 stays the gradient's last colour, C, under the strip: no MOVE.
-__attribute__((noinline, optimize("Os"))) static void cwSea(tAgkCopWriter *pW, UBYTE ubBfr, UBYTE ubMission) {
-	agkCopWait(pW, SEA_Y - 1, 0);
+__attribute__((noinline, optimize("Os"))) static void cwSea(tAgkCopWriter *pW, UBYTE ubBfr, UBYTE ubMission, const tBandLayout *pLay) {
+	const UWORD uwSeaY = pLay->b[BK_FLOOR].y, uwLines = pLay->b[BK_FLOOR].rows, uwStripY = pLay->b[BK_GROUND].y;
+	agkCopWait(pW, uwSeaY - 1, 0);
 	s_pPalSlot[ubBfr][2] = pW->uwPos;
 	for(UBYTE i = 1; i < 8; ++i) cwReg(pW, (UWORD)(REG_COLOR00 + 2 * (8 + i)), g_pW2SeaPal[ubMission][i]);
-	agkCopWait(pW, SEA_Y - 1, SWITCH_WAIT_X);
+	agkCopWait(pW, uwSeaY - 1, SWITCH_WAIT_X);
 	s_pFloorPtr[ubBfr] = pW->uwPos;
 	for(UBYTE p = 0; p < 3; ++p) cwPtr8(pW, (UBYTE)(1 + 2 * p), (ULONG)s_sW2Sea.Planes[p]);
-	for(UBYTE j = 0; j < SEA_LINES; ++j) {
-		agkCopWait(pW, SEA_Y + j, 0);
+	for(UBYTE j = 0; j < uwLines; ++j) {
+		agkCopWait(pW, uwSeaY + j, 0);
 		if(s_isAga) cwSky24(pW, s_pW2SeaBg[ubMission][j], s_pW2SeaBgLo[ubMission][j]);
 		else cwReg(pW, REG_COLOR00, s_pW2SeaBg[ubMission][j]);
 		if(!j) s_pFloorCon1[ubBfr] = pW->uwPos;
@@ -628,7 +633,7 @@ __attribute__((noinline, optimize("Os"))) static void cwSea(tAgkCopWriter *pW, U
 #ifdef W2_COP_PROBE
 	cwReg(pW, REG_COLOR00, 0x0F0);
 #endif
-	s_sStripSlots[ubBfr] = cwBand(pW, STRIP_Y, &s_sStrip);
+	s_sStripSlots[ubBfr] = cwBand(pW, uwStripY, &s_sStrip);
 #ifdef W2_COP_PROBE
 	cwReg(pW, REG_COLOR00, 0x00F);
 #endif
@@ -967,9 +972,11 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 	ULONG pBlank[3] = {(ULONG)s_pBlankRow, (ULONG)s_pBlankRow, (ULONG)s_pBlankRow};
 	const tBitMap *pFb = s_pFb[ubBfr];
 	ULONG ulFbRow = (ULONG)(PLAY_TOP * FB_ROW_BYTES + FB_FETCH_OFFS);
-	ULONG ulFbCloudRow = (ULONG)(CLOUDS_Y * FB_ROW_BYTES + FB_FETCH_OFFS);
+	ULONG ulFbCloudRow = (ULONG)(logicBands(isTitle ? 0 : s_ubWorld)->b[BK_CLOUDS].y * FB_ROW_BYTES + FB_FETCH_OFFS);
 	ULONG ulFbTitleRow = (ULONG)((TITLE_LOGO_END + 3) * FB_ROW_BYTES + FB_FETCH_OFFS);
 	tCopSlots *pCld = &s_sCloudSlots[ubBfr];
+	const tBandLayout *pLay = logicBands(isTitle ? 0 : s_ubWorld);   // (T3: the play list's bands; the title has its own layout)
+	const UWORD uwCldY = pLay->b[BK_CLOUDS].y, uwCldEnd = (UWORD)(uwCldY + pLay->b[BK_CLOUDS].rows), uwFarY = pLay->b[BK_FAR].y;
 	// the world's tables (world 2: STYLE-world2's sky, palettes and bands; the title is world 1's)
 	UBYTE isW2 = !isTitle && s_ubWorld;
 	const UWORD *pSkyCol = isW2 ? s_pW2Sky[ubMission] : s_pSky[ubMission];
@@ -1052,12 +1059,12 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 		// of the picture), so a world's three missions share one list layout and
 		// a new one only patches the colours (copperMission); the switch to dual
 		// playfield
-		for(UWORD y = PLAY_TOP; y < FLOOR_Y; ++y) {
+		for(UWORD y = PLAY_TOP; y < pLay->skyEnd; ++y) {
 			agkCopWait(&sW, y, 0);
 			s_pSkySlot[ubBfr][y - PLAY_TOP] = sW.uwPos;
 			if(s_isAga) cwSky24(&sW, pSkyCol[y - PLAY_TOP], pSkyColLo[y - PLAY_TOP]);
 			else agkCopMove(&sW, &g_pCustom->color[0], pSkyCol[y - PLAY_TOP]);
-			if(y == CLOUDS_Y - 3) {
+			if(y == uwCldY - 3) {
 				// BPL4-6 aren't fetched yet: load them early (cloud planes 2-3,
 				// PF1's third plane at the clouds' first line)
 				agkCopWait(&sW, y, SWITCH_WAIT_X);
@@ -1067,7 +1074,7 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 				agkCopPtrs(&sW, 5, (ULONG)s_pCloudsBm->Planes[2]);
 				agkCopPtrs(&sW, 4, (ULONG)pFb->Planes[2] + ulFbCloudRow);
 			}
-			if(y == CLOUDS_Y - 1) {
+			if(y == uwCldY - 1) {
 				// 6 planes, dual playfield: BPL2 -> the clouds, BPL3 -> PF1's
 				// second plane (it was its third)
 				agkCopWait(&sW, y, SWITCH_WAIT_X);
@@ -1079,19 +1086,19 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 				agkCopMove(&sW, &g_pCustom->bplcon1, 0);
 				agkCopMove(&sW, &g_pCustom->bpl2mod, s_pCloudsBm->BytesPerRow - FETCH_BYTES);
 			}
-			if(y == CLOUDS_END - 1) {
+			if(y == uwCldEnd - 1) {
 				// clouds -> blank PF2 rows: the mountain palette loads unseen
 				agkCopWait(&sW, y, SWITCH_WAIT_X);
 				cwPlanePtrs(&sW, 1, pBlank);
 				agkCopMove(&sW, &g_pCustom->bpl2mod, (UWORD)-FETCH_BYTES);
 			}
-			if(y == CLOUDS_END + 1) {
+			if(y == uwCldEnd + 1) {
 				agkCopWait(&sW, y, SWITCH_WAIT_X);
 				s_pPalSlot[ubBfr][1] = sW.uwPos;
 				cwPf2Palette(&sW, pFarPal);
 			}
-			if(y == MTN_Y - 1) {
-				s_sMtnSlots[0][ubBfr] = cwBand(&sW, MTN_Y, s_pFarBm);
+			if(y == uwFarY - 1) {
+				s_sMtnSlots[0][ubBfr] = cwBand(&sW, uwFarY, s_pFarBm);
 			}
 		}
 	}
@@ -1105,9 +1112,9 @@ static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE 
 		cwPf2Palette(&sW, g_pMissionLandPal[ubMission]);
 		s_sHillSlots[1][ubBfr] = cwBand(&sW, HILLS_Y, s_pHills);
 	}
-	else if(isW2) cwSea(&sW, ubBfr, ubMission);   // the sea, then the strip to the bottom
-	else cwFloor(&sW, ubBfr, ubMission);
-	if(!isW2) s_sGndSlots[isTitle][ubBfr] = cwBand(&sW, GROUND_BAND_Y, s_pGround);
+	else if(isW2) cwSea(&sW, ubBfr, ubMission, pLay);   // the sea, then the strip to the bottom
+	else cwFloor(&sW, ubBfr, ubMission, pLay);
+	if(!isW2) s_sGndSlots[isTitle][ubBfr] = cwBand(&sW, pLay->b[BK_GROUND].y, s_pGround);
 
 	if(isTitle) {
 		s_uwTitleCopUsed = sW.uwPos;
