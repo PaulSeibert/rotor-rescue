@@ -1,0 +1,52 @@
+# World 2's animated sea (SPEC 11, "Sea animation"; Paul, 2026-11-24: "the sea layer could use some
+# animation to show movement in the water, more interesting and 3D"). Ctrl+L, W, 4 starts mission 4
+# (Reef Run) on the base pad; the chopper stays landed, so the camera is still and ONLY the swell and
+# the glints' shimmer move the sea (lines 180-207).
+# The phase is the game frame counter / 4 mod 32 (a cycle of 128 frames) and the pens' shimmer a cycle
+# of 256, so the sea at frame F + 256 is the sea at F, and at F + 64 it is another picture:
+#   a = frame 288, b = 352 (+64), c = 544 (a + 256: the same), d = 608 (b + 256: the same).
+# Pixels were picked from the four profiles' shots (the sea's pens are the same on all of them; only the
+# OCS and AGA gradients behind differ, which is why every check is on a pen's colour):
+# - far line 181 (row 1, a pen 4 crest, 0x39C): the shimmer lightens it by two steps at b (0x5BE) and
+#   back at c;
+# - near line 198 (row 18, pen 2, 0x057, never shimmers): the swell moves the water 2-3 px, so the pixel
+#   at (130, 198) is a shadow at a and c (not at b), and (173, 198) at b and d (not at a).
+# A still sea (the old build) fails these (tests/w2sea.agk was shown red on main's build, see the SPEC).
+# The unit tests (testSeaPhase, testSeaDrift, testSeaPens, testSeaCopper) hold the maths; tests/world2.agk
+# holds the scroll in flight.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x04
+wait-serial "AGK world 2 loaded" 400
+key 0x63
+key 0x28
+wait 5
+key 0x02
+wait 30
+press fire 2
+wait 60
+wait-serial "AGK frame=288" 300
+screenshot a
+wait-serial "AGK frame=352" 300
+screenshot b
+wait-serial "AGK frame=544" 300
+screenshot c
+wait-serial "AGK frame=608" 300
+screenshot d
+expect-color a 115 181 0x39C
+expect-color b 115 181 0x5BE
+expect-color c 115 181 0x39C
+expect-color d 115 181 0x5BE
+expect-color a 130 198 0x057
+expect-color c 130 198 0x057
+expect-color b 173 198 0x057
+expect-color d 173 198 0x057
+expect-serial "AGK start world=2 mission=4"
+expect-no-serial "ERR|missing"
+expect-no-dropped-frames
+expect-max-load 85
+expect-min-chip-free 96

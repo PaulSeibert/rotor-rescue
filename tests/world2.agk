@@ -9,6 +9,7 @@
 #   by contract);
 # - the terrain strip (208-255) at 1:1, streamed a 16 px column at a time;
 # - line 180 shows the haze H (row 0 empty), the sky's last colour.
+# (The sea's swell is held at frame 0 for the flight: its own check is tests/w2sea.agk.)
 # The same flight is the world's frame budget: no dropped frames, worst <= 85 %.
 wait-serial "AGK t0" 1000
 key 0x63
@@ -25,6 +26,12 @@ key 0x63
 key 0x28
 wait 5
 key 0x02
+wait 30
+# (the sea's swell held still, Ctrl+L, S: this test measures the camera's scroll of every layer, the swell is tests/w2sea.agk's)
+key 0x63
+key 0x28
+wait 5
+key 0x21
 wait 30
 press fire 2
 wait 60
