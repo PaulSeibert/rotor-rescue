@@ -38,12 +38,24 @@ kind = "bob"
 source = "world2/gunboat.txt"
 kind = "bob"
 
-[w2_destroyer_hull]                  # 2 frame(s) 154 x 44
-source = "world2/destroyer_hull.txt"
-kind = "bob"
-
 [w2_destroyer_turret]                  # 8 frame(s) 32 x 19
 source = "world2/destroyer_turret.txt"
+kind = "bob"
+
+[w2_destroyer_hull_e]                  # 2 frame(s) 154 x 44: 0 = the hull as played (the forward AA mount cleared), 1 = listing (slice E, one facing: bow left)
+source = "world2/hull_list.txt"
+kind = "bob"
+
+[w2_aa_gun]                  # 3 frame(s) 12 x 12: idle, tell, puff (slice E)
+source = "world2/aa_gun.txt"
+kind = "bob"
+
+[w2_turret_hit]                  # 2 frame(s) 32 x 19: smoking, dead (slice E)
+source = "world2/turret_hit.txt"
+kind = "bob"
+
+[w2_barrage]                  # 3 frame(s) 24 x 12: the barrage's ranging marker (slice E)
+source = "world2/barrage_tell.txt"
 kind = "bob"
 
 [w2_barracks]                  # 4 frame(s) 51 x 31
