@@ -1186,6 +1186,15 @@ static void testFloorCopper(void) {
 // camera, so line 180 moves at 1/4 and line 207 at 109/112; each row loops in
 // its own 4 (28 + 3 j) px; logicSeaScroll's copper values equal the exact
 // reference at every camera of the period (and past it), OCS and AGA
+// Row j's left edge in quarters with the swell's drift at ubPhase, wrapped into its loop
+static uint16_t seaRefX4(int16_t c, uint8_t j, uint8_t ubPhase) {
+	int32_t loop = 16 * (28 + 3 * j);
+	int32_t x = (int32_t)logicSeaX4(c, j) + logicSeaDrift(ubPhase, j);
+	if(x < 0) x += loop;
+	else if(x >= loop) x -= loop;
+	return (uint16_t)x;
+}
+
 static void testSeaCopper(void) {
 	enum { STRIDE = 7, ROW = 288, BASE = ROW - 42 };
 	uint16_t pOut[SEA_LINES * STRIDE];
@@ -1198,14 +1207,17 @@ static void testSeaCopper(void) {
 	for(uint8_t isAga = 0; isAga < 2; ++isAga) {
 		uint16_t uwMask = isAga ? 0xFFFF : 0xFFFC;
 		for(int16_t c = 0; c < W2_W - SCREEN_W; c = (int16_t)(c + (c < SEA_PERIOD ? 1 : 13))) {
+			uint8_t ubPh = (uint8_t)((c * 7) & (SEA_PHASES - 1));   // every phase meets the cameras
 			for(uint16_t i = 0; i < SEA_LINES * STRIDE; ++i) pOut[i] = 0xDEAD;
-			int16_t wOff0 = logicSeaScroll(c, uwMask, BASE, pOut, STRIDE);
+			uint16_t pBase[SEA_LINES];
+			int16_t wOff0 = logicSeaScrollSwell(c, ubPh, uwMask, BASE, pOut, STRIDE, pBase);
 			int16_t pOff[SEA_LINES];
 			for(uint8_t j = 0; j < SEA_LINES; ++j) {
-				uint16_t x4 = (uint16_t)(logicSeaX4(c, j) & uwMask);
+				uint16_t x4 = (uint16_t)(seaRefX4(c, j, ubPh) & uwMask);
 				pOff[j] = logicScrollByteOffset4(x4);
 				CHECK(pOut[j * STRIDE] == logicScrollCon1Pf2Aga(x4));
 				CHECK(pOut[j * STRIDE + 1] == 0xDEAD && pOut[j * STRIDE + 3] == 0xDEAD);
+				if(j >= SEA_SWELL_FROM - 1) CHECK(pBase[j] == logicSeaX4(c, j));   // (the undrifted edge logicSeaSwell starts from)
 				// the fetch (21 words from the row's offset) stays inside a 768 px row
 				CHECK(pOff[j] >= -2 && pOff[j] + 42 <= 96);
 			}
@@ -1213,6 +1225,141 @@ static void testSeaCopper(void) {
 			for(uint8_t j = 0; j + 1 < SEA_LINES; ++j) CHECK(pOut[j * STRIDE + 2] == (uint16_t)(BASE + pOff[j + 1] - pOff[j]));
 			CHECK(pOut[(SEA_LINES - 1) * STRIDE + 2] == 0xDEAD);   // the last line's modulo: the list's own
 		}
+	}
+}
+
+static double sinRef(double x) {   // (the host unit build links no libm)
+	const double PI = 3.14159265358979323846;
+	while(x > PI) x -= 2 * PI;
+	while(x < -PI) x += 2 * PI;
+	double t = x, s = x;
+	for(int n = 1; n < 14; ++n) { t *= -x * x / ((2 * n) * (2 * n + 1)); s += t; }
+	return s;
+}
+
+// The sea's swell (SPEC 11, "Sea animation"): the phase is the frame counter / 4 mod
+// 32, so a cycle is 128 frames and the 16-bit counter wraps without a jump
+static void testSeaPhase(void) {
+	CHECK(logicSeaPhase(0) == 0 && logicSeaPhase(3) == 0 && logicSeaPhase(4) == 1);
+	CHECK(logicSeaPhase(127) == SEA_PHASES - 1 && logicSeaPhase(128) == 0);
+	for(uint32_t f = 0; f < 65536; f += 37) CHECK(logicSeaPhase((uint16_t)f) == logicSeaPhase((uint16_t)(f + 128)));
+	// the counter's wrap (65535 -> 0) is one step on, like any other
+	CHECK(logicSeaPhase(65535) == SEA_PHASES - 1 && logicSeaPhase((uint16_t)(65535 + 1)) == 0);
+	for(uint32_t f = 0; f < 65536; ++f)
+		CHECK(logicSeaPhase((uint16_t)(f + 1)) == logicSeaPhase((uint16_t)f) || logicSeaPhase((uint16_t)(f + 1)) == (logicSeaPhase((uint16_t)f) + 1) % SEA_PHASES);
+}
+
+// The per-line drift table: the far water (lines 1-11) and the bare rows still, the amplitude
+// the camera's 1/z ratio times a ramp over lines 12-17 (the near water swings most),
+// neighbours never more than 4 quarters apart (the water shears, it does not tear), and the
+// swell runs toward the player (the same wave one phase on, one line nearer)
+static double seaAmp(uint8_t j) {
+	if(j < SEA_SWELL_FROM) return 0;
+	double ramp = (j - SEA_SWELL_FROM + 1) / 6.0;
+	return (28.0 + 3.0 * j) / 7.0 * (ramp > 1 ? 1 : ramp);
+}
+
+static void testSeaDrift(void) {
+	for(uint8_t p = 0; p < SEA_PHASES; ++p) {
+		CHECK(logicSeaDrift(p, 0) == 0 && logicSeaDrift(p, SEA_LINES - 1) == 0);   // the bare rows
+		for(uint8_t j = 1; j < SEA_SWELL_FROM; ++j) CHECK(logicSeaDrift(p, j) == 0);   // the far water is calm
+		for(uint8_t j = SEA_SWELL_FROM; j < SEA_LINES - 1; ++j) {
+			double a = seaAmp(j);
+			double ref = a * sinRef(2 * 3.14159265358979323846 * ((int)p - (int)j) / SEA_PHASES);
+			CHECK(absi(logicSeaDrift(p, j) - (int)(ref < 0 ? ref - 0.5 : ref + 0.5)) <= 1);
+			CHECK(absi(logicSeaDrift(p, j)) <= (int)(a + 1));
+			if(j + 1 < SEA_LINES - 1) CHECK(absi(logicSeaDrift(p, j) - logicSeaDrift(p, (uint8_t)(j + 1))) <= 4);
+			// the wave one phase on and one line nearer is the same wave, a little taller
+			if(j + 1 < SEA_LINES - 1) {
+				double a1 = seaAmp((uint8_t)(j + 1));
+				double want = ref * a1 / a;
+				CHECK(absi((int)(logicSeaDrift((uint8_t)((p + 1) & (SEA_PHASES - 1)), (uint8_t)(j + 1)) - want + (want < 0 ? -0.5 : 0.5))) <= 2);
+			}
+		}
+	}
+	int mxNear = 0, mxMid = 0;
+	for(uint8_t j = SEA_SWELL_FROM; j < SEA_LINES - 1; ++j) {
+		int mx = 0;
+		for(uint8_t p = 0; p < SEA_PHASES; ++p) mx = absi(logicSeaDrift(p, j)) > mx ? absi(logicSeaDrift(p, j)) : mx;
+		CHECK(mx >= (int)seaAmp(j) - 1);            // it reaches its amplitude
+		if(j == SEA_SWELL_FROM + 1) mxMid = mx;
+		if(j == SEA_LINES - 2) mxNear = mx;
+	}
+	CHECK(mxNear >= 14 && mxNear > 3 * mxMid);     // the near water swings 3.5 px, several times the water behind it
+	// the table is indexed by the phase mod 32
+	for(uint8_t j = 0; j < SEA_LINES; ++j) CHECK(logicSeaDrift(SEA_PHASES, j) == logicSeaDrift(0, j));
+}
+
+// The camera alone (a mission's first pictures, SEA_NO_SWELL): the scroll as it was before the swell,
+// every line at its exact undrifted edge
+static void testSeaCameraAlone(void) {
+	enum { STRIDE = 7, ROW = 288, BASE = ROW - 42 };
+	for(uint8_t isAga = 0; isAga < 2; ++isAga) {
+		uint16_t uwMask = isAga ? 0xFFFF : 0xFFFC;
+		for(int16_t c = 0; c < 2 * SEA_PERIOD; c = (int16_t)(c + 3)) {
+			uint16_t pOut[SEA_LINES * STRIDE];
+			for(uint16_t i = 0; i < SEA_LINES * STRIDE; ++i) pOut[i] = 0xDEAD;
+			int16_t wOff0 = logicSeaScroll(c, uwMask, BASE, pOut, STRIDE);
+			int16_t pOff[SEA_LINES];
+			for(uint8_t j = 0; j < SEA_LINES; ++j) {
+				uint16_t x4 = (uint16_t)(logicSeaX4(c, j) & uwMask);
+				pOff[j] = logicScrollByteOffset4(x4);
+				CHECK(pOut[j * STRIDE] == logicScrollCon1Pf2Aga(x4));
+			}
+			CHECK(wOff0 == pOff[0]);
+			for(uint8_t j = 0; j + 1 < SEA_LINES; ++j) CHECK(pOut[j * STRIDE + 2] == (uint16_t)(BASE + pOff[j + 1] - pOff[j]));
+		}
+	}
+}
+
+// logicSeaSwell (a hovering chopper's picture) writes what logicSeaScroll would: the list as the
+// scroll wrote it at one phase, then the swell at the next, equals the scroll at the next
+static void testSeaSwell(void) {
+	enum { STRIDE = 7, ROW = 288, BASE = ROW - 42 };
+	for(uint8_t isAga = 0; isAga < 2; ++isAga) {
+		uint16_t uwMask = isAga ? 0xFFFF : 0xFFFC;
+		for(int16_t c = 0; c < 2 * SEA_PERIOD; c = (int16_t)(c + 5)) {
+			for(uint8_t p = 0; p < SEA_PHASES; p = (uint8_t)(p + 3)) {
+				uint16_t pA[SEA_LINES * STRIDE], pB[SEA_LINES * STRIDE], pBase[SEA_LINES];
+				for(uint16_t i = 0; i < SEA_LINES * STRIDE; ++i) pA[i] = pB[i] = 0xDEAD;
+				uint8_t p1 = (uint8_t)((p + 1 + c) & (SEA_PHASES - 1));
+				logicSeaScrollSwell(c, p, uwMask, BASE, pA, STRIDE, pBase);
+				logicSeaSwell(p1, uwMask, BASE, pBase, pA, STRIDE);
+				logicSeaScrollSwell(c, p1, uwMask, BASE, pB, STRIDE, pBase);
+				for(uint16_t i = 0; i < SEA_LINES * STRIDE; ++i) CHECK(pA[i] == pB[i]);
+			}
+		}
+	}
+}
+
+// logicSeaPen: pens 4-7 lighten 0-2 steps a channel, one cycle of 256 frames, each
+// pen 64 frames after the one before; pens 1-3 and the last frame's wrap are still
+static void testSeaPens(void) {
+	for(uint16_t f = 0; f < 600; f += 5) {
+		for(uint8_t k = 1; k <= 3; ++k) CHECK(logicSeaPen(0x17A, k, f) == 0x17A);
+	}
+	int lo4 = 9, hi4 = -1;
+	for(uint32_t f = 0; f < 65536; ++f) {
+		for(uint8_t k = 4; k <= 7; ++k) {
+			uint16_t c = logicSeaPen(0x000, k, (uint16_t)f);
+			int lv = c & 15;
+			CHECK(c == (uint16_t)(lv * 0x111) && lv >= 0 && lv <= 2);       // 0-2 steps, all channels alike
+			CHECK(logicSeaPen(0x000, k, (uint16_t)(f + 256)) == c);          // a cycle of 256 (wraps at 65536)
+			if(k > 4) CHECK(logicSeaPen(0x000, k, (uint16_t)(f + 64)) == logicSeaPen(0x000, (uint8_t)(k - 1), (uint16_t)f));
+			if(k == 4) { if(lv < lo4) lo4 = lv; if(lv > hi4) hi4 = lv; }
+		}
+		if(f > 600) f += 6;
+	}
+	CHECK(lo4 == 0 && hi4 == 2);                       // it reaches both ends
+	// the steps are slow and smooth: one level at a time, never a jump
+	for(uint16_t f = 0; f < 600; ++f)
+		CHECK(absi((logicSeaPen(0x000, 5, (uint16_t)(f + 1)) & 15) - (logicSeaPen(0x000, 5, f) & 15)) <= 1);
+	// clamped to 15 a channel, and never darker than the mission's pen
+	for(uint16_t f = 0; f < 256; ++f) {
+		CHECK(logicSeaPen(0xFFF, 7, f) == 0xFFF);
+		CHECK(logicSeaPen(0xEEF, 6, f) >= 0xEEF || (logicSeaPen(0xEEF, 6, f) & 0xF) >= 0xE);
+		uint16_t c = logicSeaPen(0x6BD, 4, f);
+		CHECK((c & 15) >= 0xD && (c & 15) <= 0xF && ((c >> 4) & 15) >= 0xB && ((c >> 8) & 15) >= 6);
 	}
 }
 
@@ -3826,6 +3973,11 @@ int main(void) {
 	testFloorSpeeds();
 	testFloorCopper();
 	testSeaCopper();
+	testSeaPhase();
+	testSeaDrift();
+	testSeaSwell();
+	testSeaCameraAlone();
+	testSeaPens();
 	testGrad24();
 	testWorld2Start();
 	testTerrainFloor();

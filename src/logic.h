@@ -602,8 +602,37 @@ uint32_t logicFloorGround24(uint8_t ubMission, uint8_t j);   // the same in 24 b
 #define SEA_PERIOD 448
 #define STRIP_Y (SEA_Y + SEA_LINES)   // 208: the terrain strip, 48 rows, 1:1
 #define STRIP_ROWS (SCREEN_H - STRIP_Y)
-int16_t logicSeaScroll(int16_t wCam, uint16_t uwX4Mask, uint16_t uwModBase, uint16_t *pOut, uint8_t ubStride);
-uint16_t logicSeaX4(int16_t wCam, uint8_t j);   // (host reference) row j's left edge, 1/4 px
+// The animated sea (SPEC 11, "Sea animation"): a swell runs toward the player, a
+// per-line horizontal drift of the water, deterministic from the game frame counter
+// alone. Phase = SEA_PHASES steps of 2^SEA_PHASE_SHIFT frames (a cycle of 128 frames,
+// a power of two so the 16-bit counter wraps seamlessly); line j drifts
+// A_j sin(2 pi (phase - j) / 32) quarter pixels, A_j = (28 + 3 j) / 7 (the camera's own
+// 1/z ratio: the near water swings most, 3.8 px at line 26) times a ramp: lines 1-11, the
+// far water, are still (it is calm at a distance, and each line moved costs a copper
+// write), line 12 moves 1/6 as far, line 17 and nearer all of it; rows 0 and 27 (bare)
+// none. ubPhase is logicSeaPhase(frame).
+#define SEA_PHASES 32
+#define SEA_PHASE_SHIFT 2
+uint8_t logicSeaPhase(uint16_t uwFrame);
+int8_t logicSeaDrift(uint8_t ubPhase, uint8_t ubLine);   // quarter pixels, signed
+// The sea's glints shimmer: pens 4-7 of the sea palette lighten 0-2 steps a channel on a
+// triangle ramp, a step every 2^SEA_PEN_SHIFT frames (a cycle of 256), each pen a
+// quarter of the cycle after the one before (a swell of light through the depth).
+// uwBase is the mission's pen colour (0xRGB), ubPen 1-7; pens 1-3 never change.
+#define SEA_PEN_SHIFT 3
+uint16_t logicSeaPen(uint16_t uwBase, uint8_t ubPen, uint16_t uwFrame);
+// ...as its two halves: the pen's level (0-2) at a frame, and a colour lightened by a level;
+// the game builds its table of the three colours a pen has (startup) and looks the level up
+uint8_t logicSeaPenLevel(uint8_t ubPen, uint16_t uwFrame);
+uint16_t logicSeaLighten(uint16_t uwBase, uint8_t ubLevel);
+// pBase (SEA_LINES words) takes the undrifted left edge of line SEA_SWELL_FROM - 1 and nearer, for logicSeaSwell: the swell
+// alone, same camera, lines SEA_SWELL_FROM and nearer (the far water is still)
+#define SEA_SWELL_FROM 12
+#define SEA_NO_SWELL 0xFF   // the game's phase for 'no swell' (a mission's first pictures hold it: they are the frame budget's worst)
+int16_t logicSeaScroll(int16_t wCam, uint16_t uwX4Mask, uint16_t uwModBase, uint16_t *pOut, uint8_t ubStride);   // the camera alone
+int16_t logicSeaScrollSwell(int16_t wCam, uint8_t ubPhase, uint16_t uwX4Mask, uint16_t uwModBase, uint16_t *pOut, uint8_t ubStride, uint16_t *pBase);   // ...and the swell
+void logicSeaSwell(uint8_t ubPhase, uint16_t uwX4Mask, uint16_t uwModBase, const uint16_t *pBase, uint16_t *pOut, uint8_t ubStride);
+uint16_t logicSeaX4(int16_t wCam, uint8_t j);   // (host reference) row j's left edge, 1/4 px, no drift
 // A line-dithered COLOR00 gradient from uwA (line 0) to uwB (line ubLines - 1),
 // as the sky's (startup), and its 24-bit form (0xRRGGBB) for AGA
 void logicGradFill(uint16_t uwA, uint16_t uwB, uint8_t ubLines, uint16_t *pOut);
