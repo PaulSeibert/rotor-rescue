@@ -21,6 +21,8 @@ key 0x28
 wait 5
 key 0x27
 wait-serial "state=1 mission=2" 800
+# (the mission 6 card is preceded by the blank pictures of the mission set's load: wait them out)
+wait 30
 screenshot card6
 wait 150
 screenshot play6

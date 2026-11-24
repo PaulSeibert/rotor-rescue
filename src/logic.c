@@ -19,7 +19,7 @@ const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_W2_BARRACKS] = 51, [BOB_PATROL] = 43, [BOB_GUNBOAT] = 61, [BOB_PAD48] = 48,
 	[BOB_PAD64] = 64, [BOB_PAD80] = 80, [BOB_PAD96] = 96, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 32,
 	[BOB_RADAR] = 33, [BOB_SOCK] = 10, [BOB_DECK] = 124, [BOB_ROPE] = 8, [BOB_HOOK] = 8, [BOB_CLIMB] = 16, [BOB_FRTR] = 128, [BOB_SPRAY] = 24,
-	[BOB_DHULL0] = 48, [BOB_DHULL1] = 48, [BOB_DHULL2] = 48, [BOB_DHULL3] = 10, [BOB_TURRET] = 32, [BOB_THIT] = 32, [BOB_AAGUN] = 12,
+	[BOB_DHULL] = 154, [BOB_DHULL0] = 48, [BOB_DHULL1] = 48, [BOB_DHULL2] = 48, [BOB_DHULL3] = 10, [BOB_TURRET] = 32, [BOB_THIT] = 32, [BOB_AAGUN] = 12,
 	[BOB_BARRAGE] = 24, [BOB_CAP] = 34,
 };
 const uint8_t g_pBobH[BOB_TYPES] = {
@@ -30,7 +30,7 @@ const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_W2_BARRACKS] = 31, [BOB_PATROL] = 17, [BOB_GUNBOAT] = 30, [BOB_PAD48] = PAD_ROWS,
 	[BOB_PAD64] = PAD_ROWS, [BOB_PAD80] = PAD_ROWS, [BOB_PAD96] = PAD_ROWS, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 12,
 	[BOB_RADAR] = 39, [BOB_SOCK] = 20, [BOB_DECK] = 30, [BOB_ROPE] = 40, [BOB_HOOK] = 12, [BOB_CLIMB] = 12, [BOB_FRTR] = 36, [BOB_SPRAY] = 12,
-	[BOB_DHULL0] = 44, [BOB_DHULL1] = 44, [BOB_DHULL2] = 44, [BOB_DHULL3] = 44, [BOB_TURRET] = 19, [BOB_THIT] = 19, [BOB_AAGUN] = 12,
+	[BOB_DHULL] = 44, [BOB_DHULL0] = 44, [BOB_DHULL1] = 44, [BOB_DHULL2] = 44, [BOB_DHULL3] = 44, [BOB_TURRET] = 19, [BOB_THIT] = 19, [BOB_AAGUN] = 12,
 	[BOB_BARRAGE] = 12, [BOB_CAP] = 10,
 };
 // (world 2's frames are the ones the floppy set carries: art/tools/make_world_disk.py picks
@@ -44,7 +44,7 @@ const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_W2_BARRACKS] = 4, [BOB_PATROL] = 4, [BOB_GUNBOAT] = 6, [BOB_PAD48] = 1,
 	[BOB_PAD64] = 1, [BOB_PAD80] = 1, [BOB_PAD96] = 1, [BOB_PAD_LAMP] = 2, [BOB_SPLASH] = 5, [BOB_W2_JET] = 4,
 	[BOB_RADAR] = 4, [BOB_SOCK] = 2, [BOB_DECK] = 2, [BOB_ROPE] = 3, [BOB_HOOK] = 1, [BOB_CLIMB] = 2, [BOB_FRTR] = 4, [BOB_SPRAY] = 3,
-	[BOB_DHULL0] = 2, [BOB_DHULL1] = 2, [BOB_DHULL2] = 2, [BOB_DHULL3] = 2, [BOB_TURRET] = 4, [BOB_THIT] = 2, [BOB_AAGUN] = 3,
+	[BOB_DHULL] = 2, [BOB_DHULL0] = 2, [BOB_DHULL1] = 2, [BOB_DHULL2] = 2, [BOB_DHULL3] = 2, [BOB_TURRET] = 4, [BOB_THIT] = 2, [BOB_AAGUN] = 3,
 	[BOB_BARRAGE] = 3, [BOB_CAP] = 3,
 };
 
@@ -195,7 +195,7 @@ static void tankKilled(tGame *g) {
 	if(g->tankKills < 255) ++g->tankKills;
 	if(g->tankKills <= TANK_QUOTA) {
 		addScore(g, 50);
-		if(g->tankKills == TANK_QUOTA) g->quotaMsg = QUOTA_MSG_FRAMES;
+		if(g->tankKills == TANK_QUOTA) { g->quotaMsg = QUOTA_MSG_FRAMES; g->quotaKind = 0; }
 	}
 }
 
@@ -360,14 +360,15 @@ COLD void logicChopperRespawn(tGame *g) {
 // keeps its slot whether it is there or not (a lower skill leaves the slot empty).
 COLD static void padsSet(tGame *g);
 COLD static void radarsPlace(tGame *g);
+COLD static void destroyerPlace(tGame *g);
 static uint16_t gustGap(tGame *g);
 typedef struct { int16_t x0, x1; uint8_t kind, minSkill; } tBoatPlace;
 static const tBoatPlace s_pBoatPlace[MISSION_COUNT][BOAT_MAX] = {
 	{{560, 980, BOAT_PATROL, 0}, {1690, 1890, BOAT_GUN, 1}, {2450, 2900, BOAT_GUN, 2}, {3620, 3960, BOAT_PATROL, 0}},
 	{{560, 1000, BOAT_GUN, 1}, {2450, 2680, BOAT_GUN, 1}, {0, 0, BOAT_GUN, 1}, {2680, 2900, BOAT_GUN, 3},
 		{3620, 3960, BOAT_PATROL, 0}},
-	{{540, 1020, BOAT_GUN, 1}, {2440, 2680, BOAT_GUN, 1}, {0, 0, BOAT_GUN, 1}, {2680, 2910, BOAT_GUN, 2},
-		{560, 780, BOAT_GUN, 4}, {3620, 3960, BOAT_PATROL, 0}},
+	{{540, 1020, BOAT_GUN, 1}, {0, 0, BOAT_GUN, 1}, {0, 0, BOAT_GUN, 1}, {0, 0, BOAT_GUN, 2},
+		{560, 780, BOAT_GUN, 4}, {3620, 3960, BOAT_PATROL, 0}},   // (the strait's two slots are the destroyer's, slice E)
 };
 
 COLD static void boatsPlace(tGame *g) {
@@ -448,6 +449,7 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	for(uint8_t i = 0; i < BOOM_MAX; ++i) g->pBooms[i].active = 0;
 	boatsPlace(g);
 	radarsPlace(g);
+	destroyerPlace(g);
 	g->gustTell = g->gustOn = g->gustFx = 0;   // (the wind: its first tell no sooner than GUST_FIRST frames into the mission)
 	if(!g->gustSeed) g->gustSeed = 0xB5E1;
 	g->gustTimer = (uint16_t)(GUST_FIRST + gustGap(g) - GUST_GAP_MIN);
@@ -518,6 +520,15 @@ static const uint8_t s_pW2JetsTrip[3][DIFFICULTY_MAX + 1] = {
 	{5, 1, 3, 5, 6, 6},
 };
 
+// The strait destroyer (SPEC 11, slice E): a turret's wind-up before each shell (the plan's 28 / 24 / 20 / 18 / 16) and its rest between shells
+// (tell included); an AA gun's wind-up to its burst (the plan's ranging puff 26 / 22 / 18 / 15 / 12) and its rest after a burst
+// (the plan's gap 120 / 100 / 85 / 70 / 60); the flak shots that may be live at once
+static const uint8_t s_pDestTell[DIFFICULTY_MAX + 1] = {20, 28, 24, 20, 18, 16};
+static const uint8_t s_pDestGap[DIFFICULTY_MAX + 1] = {120, 170, 140, 120, 100, 85};
+static const uint8_t s_pAaTell[DIFFICULTY_MAX + 1] = {18, 26, 22, 18, 15, 12};
+static const uint8_t s_pAaGap[DIFFICULTY_MAX + 1] = {85, 120, 100, 85, 70, 60};
+static const uint8_t s_pAaLive[DIFFICULTY_MAX + 1] = {1, 1, 1, 1, 2, 2};
+
 // Every per-difficulty table, for the unit test that index 0 (GODMODE) equals
 // index 3 (normal) in each. A new table goes in this list.
 static const tDiffTable s_pDiffTables[] = {
@@ -543,6 +554,11 @@ static const tDiffTable s_pDiffTables[] = {
 	{"w2JetsTripM4", s_pW2JetsTrip[0], sizeof(s_pW2JetsTrip[0][0])},
 	{"w2JetsTripM5", s_pW2JetsTrip[1], sizeof(s_pW2JetsTrip[0][0])},
 	{"w2JetsTripM6", s_pW2JetsTrip[2], sizeof(s_pW2JetsTrip[0][0])},
+	{"destTell", s_pDestTell, sizeof(s_pDestTell[0])},
+	{"destGap", s_pDestGap, sizeof(s_pDestGap[0])},
+	{"aaTell", s_pAaTell, sizeof(s_pAaTell[0])},
+	{"aaGap", s_pAaGap, sizeof(s_pAaGap[0])},
+	{"aaLive", s_pAaLive, sizeof(s_pAaLive[0])},
 };
 
 const tDiffTable *logicDiffTables(uint8_t *pCount) {
@@ -654,6 +670,13 @@ uint8_t logicJetsTripMax(const tGame *g) {
 uint8_t logicJetsMax(const tGame *g) {
 	return g->mission >= MISSION_COUNT - 1 ? s_pJetsMaxM3[g->difficulty] : s_pJetsMax[g->difficulty];
 }
+
+const int16_t g_pTurretDx[DEST_TURRETS] = {-7, 122};
+uint8_t logicDestTell(const tGame *g) { return s_pDestTell[g->difficulty]; }
+uint8_t logicDestGap(const tGame *g) { return s_pDestGap[g->difficulty]; }
+uint8_t logicAaTell(const tGame *g) { return s_pAaTell[g->difficulty]; }
+uint8_t logicAaGap(const tGame *g) { return s_pAaGap[g->difficulty]; }
+uint8_t logicAaLive(const tGame *g) { return s_pAaLive[g->difficulty]; }
 
 const uint8_t g_pFrtrFloor[FRTR_STAGES] = {230, 230, 230, 229};
 // The plan's timer table (CONTENT-PLAN 4.4): 120 / 105 / 90 / 75 / 60 s by skill 1-5, GODMODE as normal
@@ -992,6 +1015,28 @@ __attribute__((noinline)) static void barracksUpdate(tGame *g) {
 
 // Whether a shot, a mine or a ram can hurt the chopper now: not in the two
 // seconds after its first hit (they pass through it)
+// The strait destroyer (mission 6 only; SPEC 11, slice E): two turrets of DEST_HP, four AA guns, the barrage's clock; a quiet start. The zone
+// bonus and the HUD line of a bonus are reset with it (every mission)
+COLD static void destroyerPlace(tGame *g) {
+	g->destOn = g->world && g->mission == 2;
+	for(uint8_t t = 0; t < DEST_TURRETS; ++t) {
+		g->turHp[t] = g->destOn ? DEST_HP : 0;
+		g->turTell[t] = g->turFire[t] = 0;
+		g->turCool[t] = (uint8_t)(60 + 60 * t);
+	}
+	g->destOpen = g->destDown = 0;
+	g->destClock = 0;
+	g->barNext = DEST_BARRAGE_AT;
+	g->barTell = g->barN = 0;
+	for(uint8_t i = 0; i < AA_COUNT; ++i) { g->aaTell[i] = g->aaFlash[i] = 0; g->aaCool[i] = (uint8_t)(60 + 40 * i); }
+	g->aaWait = 0;
+	for(uint8_t k = 0; k < FLAK_MAX; ++k) g->pFlak[k].active = 0;
+	g->zoneDone = 0;
+	g->bonusMsg = 0;
+	g->bonusKind = BONUS_NONE;
+	g->quotaKind = 0;
+}
+
 static inline uint8_t chopperHurtable(const tChopper *c) {
 	return c->alive && !c->invuln;
 }
@@ -1350,6 +1395,20 @@ COLD static void radarHit(tGame *g, uint8_t i, uint8_t ubDmg) {
 	boomAt(g, r->x, FEET_Y - RADAR_H_PX / 2);
 	addScore(g, RADAR_SCORE);
 	g->evRadar = (uint8_t)(i + 1);
+	uint8_t ubLeft = 0;
+	for(uint8_t j = 0; j < g->radarCount; ++j) ubLeft += g->pRadars[j].alive;
+	if(!ubLeft && !g->zoneDone) {   // the last standing site: a zone clear (SPEC 11, slice E)
+		g->zoneDone = 1;
+		addScore(g, ZONE_CLEAR_SCORE);
+		g->bonusKind = BONUS_ZONE;
+		g->bonusMsg = BONUS_MSG_FRAMES + BONUS_DELAY;
+		g->events3 |= EV4_ZONE;
+	}
+}
+
+// (test hook, Ctrl+L then R) every standing site down at once
+COLD void logicKillRadars(tGame *g) {
+	for(uint8_t i = 0; i < g->radarCount; ++i) radarHit(g, i, RADAR_HP);
 }
 
 static uint8_t shotHitsTargets(tGame *g, tShot *s) {
@@ -1421,6 +1480,7 @@ static uint8_t shotHitsTargets(tGame *g, tShot *s) {
 	return 0;
 }
 
+static void destBomb(tGame *g, int16_t x);
 static void bombExplode(tGame *g, int16_t x) {
 	boomAt(g, x, FEET_Y - 12);
 	for(uint8_t i = 0; i < TANK_MAX; ++i) {
@@ -1440,6 +1500,7 @@ static void bombExplode(tGame *g, int16_t x) {
 	for(uint8_t i = 0; i < g->radarCount; ++i) {
 		if(g->pRadars[i].alive && absw((int16_t)(g->pRadars[i].x - x)) < 30) radarHit(g, i, RADAR_HP);
 	}
+	if(g->destOn) destBomb(g, x);
 	hostagesBlast(g, x, 14);
 }
 
@@ -1817,6 +1878,203 @@ COLD static void boatsUpdate(tGame *g) {
 	}
 }
 
+// ----------------------------------------------------- the strait destroyer ---
+// (SPEC 11, slice E.) Two turrets (shells under the shared ground-threat rules), four AA guns (flak at the air, a ranging puff first), the barrage and
+// the 90 s opening; both turrets down disables the ship: every attack stops. The BOBs are in logicDraw (destDraw).
+
+static const int8_t s_pAaMount[AA_COUNT][2] = {{27, 12}, {42, 17}, {75, 6}, {99, 4}};   // art/world2/E-ENTRIES.md: the BOBs' top-left on the hull
+
+// A gun's ranging puff: where the chopper is now, for its last ubLife frames; the gun's muzzle flash
+static void aaPuff(tGame *g, uint8_t i, uint8_t ubLife) {
+	for(uint8_t k = 0; k < FLAK_MAX; ++k) {
+		tFlak *f = &g->pFlak[k];
+		if(f->active) continue;
+		f->active = 1;
+		f->x = g->chop.x;
+		f->y = (int16_t)(g->chop.y - 7);
+		f->life = ubLife;
+		break;
+	}
+	g->aaFlash[i] = AA_FLASH;
+}
+
+// A turret takes ubDmg: smoking at DEST_OPEN_HP, dead at 0 (it pays); both dead: the ship is disabled (+100, 400 in all), nothing attacks any more
+COLD static void destDisable(tGame *g) {
+	g->destDown = 1;
+	addScore(g, DEST_DISABLED_SCORE);
+	g->bonusKind = BONUS_DEST;
+	g->bonusMsg = BONUS_MSG_FRAMES + BONUS_DELAY;
+	g->events3 |= EV4_DESTDOWN;
+	g->barTell = g->barN = 0;
+	for(uint8_t i = 0; i < AA_COUNT; ++i) g->aaTell[i] = g->aaFlash[i] = 0;
+	for(uint8_t k = 0; k < FLAK_MAX; ++k) g->pFlak[k].active = 0;
+}   // (the last turret's own boom is the ship's: no second one on the same picture)
+
+COLD static void turretHit(tGame *g, uint8_t t, uint8_t ubDmg) {
+	if(!g->turHp[t]) return;
+	g->turHp[t] = ubDmg >= g->turHp[t] ? 0 : (uint8_t)(g->turHp[t] - ubDmg);
+	if(g->turHp[t]) return;
+	g->turTell[t] = g->turFire[t] = 0;
+	boomAt(g, (int16_t)(DEST_X + g_pTurretDx[t] + 16), DEST_TOP + 20);
+	addScore(g, DEST_TURRET_SCORE);
+	g->events3 |= EV4_TURDOWN;
+	if(!g->turHp[0] && !g->turHp[1]) destDisable(g);
+}
+
+// A bomb exploding within 30 px of a turret's housing takes 3 of its HP
+static void destBomb(tGame *g, int16_t x) {
+	if(g->destDown) return;
+	for(uint8_t t = 0; t < DEST_TURRETS; ++t) {
+		if(g->turHp[t] && absw((int16_t)(x - logicTurretX(t))) < 30) turretHit(g, t, 3);
+	}
+}
+
+// Whether a turret may take the chopper as its target now: the gunboat's rules (boatTarget) from the turret's housing
+COLD static uint8_t turretTarget(const tGame *g, uint8_t t) {
+	const tChopper *c = &g->chop;
+	if(!c->alive || c->y <= 150) return 0;
+	int16_t wX = logicTurretX(t);
+	int16_t ad = absw((int16_t)(c->x - wX));
+	if(ad >= BOAT_RANGE || ad < BOAT_MIN_RANGE) return 0;
+	if(wX - 30 < g->cam || wX + 30 > g->cam + SCREEN_W) return 0;
+	if(c->landed) {
+		uint16_t uwDwell = logicGroundDwell(g);
+		return uwDwell != GROUND_NEVER && g->landFrames >= uwDwell;
+	}
+	return !g->airGrace;
+}
+
+// An AA gun's target: the chopper in the air (the skids above AA_FLOOR_Y, not landed, not just off the ground), within AA_RANGE and not
+// closer than AA_MIN_DIST (a chopper right over a gun is safe from it), the gun on screen
+COLD static uint8_t aaTarget(const tGame *g, uint8_t i) {
+	const tChopper *c = &g->chop;
+	if(!c->alive || c->landed || g->airGrace || c->y >= AA_FLOOR_Y) return 0;
+	int16_t wGx = (int16_t)(DEST_X + s_pAaMount[i][0] + 6), wGy = (int16_t)(DEST_TOP + s_pAaMount[i][1] + 6);
+	int16_t adx = absw((int16_t)(c->x - wGx)), ady = absw((int16_t)(c->y - 7 - wGy));
+	if(adx >= AA_RANGE || ady >= AA_RANGE || (adx < AA_MIN_DIST && ady < AA_MIN_DIST)) return 0;
+	return wGx - 6 >= g->cam && wGx + 6 <= g->cam + SCREEN_W;
+}
+
+COLD static void destroyerUpdate(tGame *g) {
+	tChopper *c = &g->chop;
+	// the chopper's cannon against the turrets (the AA guns and the hull are not targets: shots pass)
+	for(uint8_t i = 0; i < SHOT_MAX; ++i) {
+		tShot *s = &g->pShots[i];
+		if(!s->active || s->kind != SHOT_CANNON || g->destDown) continue;
+		for(uint8_t t = 0; t < DEST_TURRETS; ++t) {
+			if(g->turHp[t] && boxHit((int16_t)(s->x - 3), (int16_t)(s->y - 1), 6, 3, (int16_t)(DEST_X + g_pTurretDx[t] + 6), DEST_TOP + 15, 26, 16)) {
+				s->active = 0;
+				turretHit(g, t, 1);
+				break;
+			}
+		}
+	}
+	if(g->destDown) return;
+	// the clock: frames spent alive near the ship, in play (not on the card, not while the chopper is down)
+	uint8_t isNear = c->alive && absw((int16_t)(c->x - (DEST_X + DEST_W / 2))) < DEST_ENGAGE;
+	if(isNear && g->state == GS_PLAY && g->destClock < 65535) ++g->destClock;
+	if(!g->destOpen && g->destClock >= DEST_OPEN_AT) {   // 90 s: the turrets overheat and stay open
+		g->destOpen = 1;
+		for(uint8_t t = 0; t < DEST_TURRETS; ++t) if(g->turHp[t] > DEST_OPEN_HP) g->turHp[t] = DEST_OPEN_HP;
+		g->events3 |= EV4_DESTOPEN;
+	}
+	// the barrage: a tell with three ranging markers on the water around the chopper, then they burst
+	if(g->barTell) {
+		// the tell, then the salvo: marker k bursts BARRAGE_STAGGER * k frames after the first (barTell is BARRAGE_SALVO - STAGGER * k)
+		--g->barTell;
+		for(uint8_t k = 0; k < g->barN; ++k) {
+			if(g->barTell != BARRAGE_SALVO - BARRAGE_STAGGER * k) continue;
+			g->events3 |= EV4_BARFIRE;
+			boomAt(g, g->barX[k], FEET_Y - 4);
+			if(chopperHurtable(c) && !c->landed && c->y > BARRAGE_LOW_Y &&
+				boxHit((int16_t)(c->x - 13), (int16_t)(c->y - 13), 26, 13, (int16_t)(g->barX[k] - BARRAGE_HALF), BARRAGE_LOW_Y, 2 * BARRAGE_HALF, (int16_t)(BOAT_BOTTOM_Y - BARRAGE_LOW_Y))) {
+				chopperDestroy(g);
+			}
+		}
+		if(!g->barTell) g->barN = 0;
+		goto turrets;
+	}
+	else if(g->destClock >= g->barNext && isNear && !c->landed && !g->airGrace) {
+		uint8_t n = 0;
+		for(int8_t k = -1; k <= 1; ++k) {
+			int16_t wX = (int16_t)(c->x + k * BARRAGE_SPREAD);
+			if(logicOnWater(wX)) g->barX[n++] = wX;
+		}
+		if(n) {
+			g->barN = n;
+			g->barTell = BARRAGE_TELL_FRAMES + BARRAGE_SALVO;
+			g->barNext = (uint16_t)(g->destClock + DEST_BARRAGE_EVERY);
+			g->atkWait = BOAT_ATTACK_GAP;   // (it takes the attack token: a turret does not start a tell in the same moment)
+			g->atkLast = ATK_BARRAGE;
+			g->events3 |= EV4_BARTELL;
+		}
+	}
+turrets:
+	// the turrets
+	for(uint8_t t = 0; t < DEST_TURRETS; ++t) {
+		if(!g->turHp[t]) continue;
+		if(g->turFire[t]) --g->turFire[t];
+		if(g->turTell[t]) {
+			// the wind-up: braced, barrel up, flashing; then the shell, unless the chopper got away meanwhile
+			if(--g->turTell[t]) continue;
+			tShot *s = turretTarget(g, t) ? eshotNew(g) : 0;
+			if(s) {
+				uint8_t ubMask = s_pAimMask[g->difficulty];
+				int16_t wMx = (int16_t)(DEST_X + g_pTurretDx[t]), wMy = DEST_TOP + 23;
+				int16_t tx = (int16_t)(c->x + (c->vx >> 1) - wMx + (int16_t)(logicRandom(g) & ubMask) - (ubMask >> 1) - 1);
+				int16_t ty = (int16_t)(c->y - 8 - wMy);
+				s->active = 1;
+				s->kind = ESHOT_SHELL;
+				s->x = wMx;
+				s->y = wMy;
+				s->fx = s->fy = 0;
+				aim(tx, ty, &s->vx, &s->vy);
+				s->life = SHELL_LIFE;
+				g->turFire[t] = 8;
+				g->events2 |= EV2_BOATFIRE;
+				g->events3 |= EV4_TURFIRE;
+			}
+			g->turCool[t] = (uint8_t)(logicDestGap(g) - logicDestTell(g) + (logicRandom(g) & 31));
+			continue;
+		}
+		if(g->turCool[t]) { --g->turCool[t]; continue; }
+		if(turretTarget(g, t) && (!g->atkWait || g->atkLast == ATK_TURRET + t)) {
+			g->turTell[t] = logicDestTell(g);
+			g->atkWait = BOAT_ATTACK_GAP;
+			g->atkLast = (uint8_t)(ATK_TURRET + t);
+			g->events3 |= EV4_TURTELL;
+		}
+	}
+	// flak: a ranging puff on the aim point, then the burst
+	for(uint8_t k = 0; k < FLAK_MAX; ++k) {
+		tFlak *f = &g->pFlak[k];
+		if(!f->active || --f->life) continue;
+		f->active = 0;
+		boomAt(g, f->x, f->y);
+		g->events3 |= EV4_AABURST;
+		if(chopperHurtable(c) && boxHit((int16_t)(c->x - 13), (int16_t)(c->y - 13), 26, 13, (int16_t)(f->x - FLAK_RADIUS), (int16_t)(f->y - FLAK_RADIUS), 2 * FLAK_RADIUS, 2 * FLAK_RADIUS)) chopperDestroy(g);
+	}
+	if(g->aaWait) --g->aaWait;
+	uint8_t ubTell = logicAaTell(g), ubPuff = ubTell < AA_PUFF_MAX ? ubTell : AA_PUFF_MAX;
+	uint8_t ubLive = 0;
+	for(uint8_t i = 0; i < AA_COUNT; ++i) ubLive += g->aaTell[i] != 0;
+	for(uint8_t i = 0; i < AA_COUNT; ++i) {
+		if(g->aaFlash[i]) --g->aaFlash[i];
+		if(g->aaTell[i]) {
+			if(--g->aaTell[i] == ubPuff) aaPuff(g, i, ubPuff);
+			if(!g->aaTell[i]) g->aaCool[i] = (uint8_t)(logicAaGap(g) + (logicRandom(g) & 15));
+			continue;
+		}
+		if(g->aaCool[i]) { --g->aaCool[i]; continue; }
+		if(g->aaWait || ubLive >= logicAaLive(g) || !aaTarget(g, i)) continue;
+		g->aaTell[i] = ubTell;
+		g->aaWait = AA_PAIR_GAP;
+		++ubLive;
+		g->events3 |= EV4_AATELL;
+		if(ubTell <= ubPuff) aaPuff(g, i, ubPuff);
+	}
+}
+
 __attribute__((noinline)) static void minesUpdate(tGame *g) {
 	tChopper *c = &g->chop;
 	for(uint8_t i = 0; i < MINE_MAX; ++i) {
@@ -2006,6 +2264,15 @@ static void smokeUpdate(tGame *g) {
 	}
 }
 
+// Slice E's per-frame work in one call (world 2 only): the destroyer (mission 6), and the HUD's ZONE CLR / DEST DWN line running down
+__attribute__((noinline)) static void destTick(tGame *g) {
+	if(g->destOn) destroyerUpdate(g);
+	if(g->bonusMsg) {   // a bonus: its HUD line (the quota line's slot) starts BONUS_DELAY frames after the event, and runs BONUS_MSG_FRAMES
+		if(--g->bonusMsg == BONUS_MSG_FRAMES) { g->quotaMsg = BONUS_MSG_FRAMES; g->quotaKind = g->bonusKind; }
+		else if(!g->bonusMsg) g->bonusKind = BONUS_NONE;
+	}
+}
+
 static void worldUpdate(tGame *g) {
 	smokeUpdate(g);
 	if(g->quotaMsg) --g->quotaMsg;
@@ -2021,6 +2288,7 @@ static void worldUpdate(tGame *g) {
 		g->chop.landed |= ubWinch;
 		jetsUpdate(g);
 		boatsUpdate(g);
+		destTick(g);
 		g->chop.landed ^= ubWinch;
 		if(g->deckOn) winchUpdate(g);
 		windUpdate(g);
@@ -2445,6 +2713,66 @@ COLD static uint8_t padsDraw(const tGame *g, tDraw *pOut, uint8_t n) {
 	return n;
 }
 
+// The storm's whitecaps (mission 6): foam on open water at fixed x, two at most on screen, behind the boats
+static const int16_t s_pCapX[] = {640, 840, 1010, 3680, 3860};   // centres, all over water, 180 px or more apart in each gap; none in the destroyer's strait (the hull, the turrets and the guns are all the blitter has the time for there)
+#define CAP_Y 236
+COLD static uint8_t capsDraw(const tGame *g, tDraw *pOut, uint8_t n) {
+	int16_t cam = g->cam;
+	uint8_t k = 0;
+	for(uint8_t i = 0; i < sizeof(s_pCapX) / sizeof(s_pCapX[0]) && k < 2; ++i) {
+		int16_t sx = (int16_t)(s_pCapX[i] - 17 - cam);
+		if(sx <= -34 || sx >= SCREEN_W) continue;
+		static const uint8_t s_pCapAnim[4] = {0, 1, 2, 1};   // (a swell: 16 frames a step, each cap a step apart; no division)
+		n = drawAddS(pOut, n, sx, CAP_Y, BOB_CAP, s_pCapAnim[((g->frame >> 4) + i) & 3]);
+		++k;
+	}
+	return n;
+}
+
+// The destroyer's hull, whole or in four pieces (the list frame once it is disabled), drawn before anything that could be under it: plain copies (no mask) onto the empty buffer
+COLD static uint8_t destHullDraw(const tGame *g, tDraw *pOut, uint8_t n) {
+	static const uint8_t s_pPieceX[4] = {0, 48, 96, 144};
+	int16_t cam = g->cam;
+	int16_t sx = (int16_t)(DEST_X - cam);
+	uint8_t f = g->destDown ? HULL_LIST : HULL_OK;
+	if(sx >= DEST_WHOLE_MIN && sx <= DEST_WHOLE_MAX) return drawAddS(pOut, n, sx, DEST_TOP, BOB_DHULL, f);
+	for(int8_t k = 3; k >= 0; --k) n = drawAddS(pOut, n, (int16_t)(sx + s_pPieceX[k]), DEST_TOP, (uint8_t)(BOB_DHULL0 + k), f);   // (right to left: each piece's extra shift word is the next piece's first, complete)
+	return n;
+}
+
+// The destroyer: its turrets (idle, the tell's blink, the shot, smoking, dead), the
+// four AA guns (idle, tell, muzzle flash), the barrage's markers and the flak's ranging puffs. Drawn after the boats and before the chopper
+static const int8_t s_pListTur[DEST_TURRETS] = {3, -1};
+static const int8_t s_pListAa[AA_COUNT] = {3, 2, 1, 0};
+COLD static uint8_t destDraw(const tGame *g, tDraw *pOut, uint8_t n) {
+	int16_t cam = g->cam;
+	if(DEST_X + DEST_W + 8 > cam && DEST_X - 8 < cam + SCREEN_W) {
+		uint8_t ubList = g->destDown;
+		for(uint8_t t = 0; t < DEST_TURRETS; ++t) {
+			int16_t sx = (int16_t)(DEST_X + g_pTurretDx[t] - cam), sy = (int16_t)(DEST_TOP + 11 + (ubList ? s_pListTur[t] : 0));
+			if(!g->turHp[t]) n = drawAddS(pOut, n, sx, sy, BOB_THIT, THIT_DEAD);
+			else if(g->turFire[t]) n = drawAddS(pOut, n, sx, sy, BOB_TURRET, TURRET_FIRE);
+			else if(g->turTell[t]) n = drawAddS(pOut, n, sx, sy, BOB_TURRET, (g->turTell[t] & 4) ? TURRET_TELL2 : TURRET_TELL1);
+			else if(g->turHp[t] <= DEST_OPEN_HP) n = drawAddS(pOut, n, sx, sy, BOB_THIT, THIT_SMOKING);
+			else n = drawAddS(pOut, n, sx, sy, BOB_TURRET, TURRET_IDLE);
+		}
+		for(uint8_t i = 0; i < AA_COUNT; ++i) {
+			uint8_t f = g->aaFlash[i] ? AA_PUFF : g->aaTell[i] ? AA_TELL : AA_IDLE;
+			n = drawAddS(pOut, n, (int16_t)(DEST_X + s_pAaMount[i][0] - cam), (int16_t)(DEST_TOP + s_pAaMount[i][1] + (ubList ? s_pListAa[i] : 0)), BOB_AAGUN, f);
+		}
+	}
+	if(g->barTell) {
+		uint8_t ubF = g->barTell > BARRAGE_SALVO + 20 ? 0 : g->barTell > BARRAGE_SALVO + 10 ? 1 : 2;   // tell frames 0-9, 10-19, 20-29
+		for(uint8_t k = 0; k < g->barN; ++k) {
+			if(g->barTell > BARRAGE_SALVO - BARRAGE_STAGGER * k) n = drawAddS(pOut, n, (int16_t)(g->barX[k] - 12 - cam), BARRAGE_TOP, BOB_BARRAGE, ubF);   // (a marker is gone once it has burst)
+		}
+	}
+	for(uint8_t k = 0; k < FLAK_MAX; ++k) {
+		if(g->pFlak[k].active) n = drawAddS(pOut, n, (int16_t)(g->pFlak[k].x - 8 - cam), (int16_t)(g->pFlak[k].y - 4), BOB_SMOKE, SMOKE_BIG);
+	}
+	return n;
+}
+
 // World 2's sea: the boats and the splash
 COLD static uint8_t seaDraw(const tGame *g, tDraw *pOut, uint8_t n) {
 	int16_t cam = g->cam;
@@ -2462,6 +2790,21 @@ COLD static uint8_t seaDraw(const tGame *g, tDraw *pOut, uint8_t n) {
 	if(g->splashTimer) {
 		n = drawAddS(pOut, n, (int16_t)(g->splashX - 12 - cam), FEET_Y - 18, BOB_SPLASH, (uint8_t)((SPLASH_FRAMES - g->splashTimer) / 4));
 	}
+	return n;
+}
+
+// World 2's drawing in two calls, so world 1's path through logicDraw stays what it was: the destroyer's hull (plain copies, before anything that
+// could be under them), the pads and the ship; and later the whitecaps, the boats and the rest of the destroyer
+COLD static uint8_t drawW2Land(const tGame *g, tDraw *pOut, uint8_t n) {
+	if(g->destOn) n = destHullDraw(g, pOut, n);
+	n = padsDraw(g, pOut, n);
+	if(g->deckOn) n = deckDraw(g, pOut, n);
+	return n;
+}
+COLD static uint8_t drawW2Sea(const tGame *g, tDraw *pOut, uint8_t n) {
+	if(g->destOn) n = capsDraw(g, pOut, n);
+	n = seaDraw(g, pOut, n);
+	if(g->destOn) n = destDraw(g, pOut, n);
 	return n;
 }
 
@@ -2484,10 +2827,7 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		}
 		else n = drawAdd(pOut, n, (int16_t)(pB->x - 24 - cam), FEET_Y - 28, BOB_BARRACKS, f);
 	}
-	if(g->world) {
-		n = padsDraw(g, pOut, n);
-		if(g->deckOn) n = deckDraw(g, pOut, n);
-	}
+	if(g->world) n = drawW2Land(g, pOut, n);
 	if(g->world && g->mission && g->state != GS_INTRO) {   // (missions 5-6: a windsock beside each pad, limp, whipping in a tell, full in a gust; not on the card: its first picture is the heaviest of the game)
 		uint8_t ubSock = g->gustOn ? SOCK_FULL : g->gustTell ? (uint8_t)((g->frame >> 2) & 1) : SOCK_LIMP;
 		for(uint8_t i = 0; i < W2_ISLANDS; ++i) n = drawAddS(pOut, n, (int16_t)(g_pIslands[i].padX + SOCK_DX - 5 - cam), FEET_Y - 19, BOB_SOCK, ubSock);
@@ -2522,7 +2862,7 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		else continue;
 		n = drawAdd(pOut, n, (int16_t)(h->x - 8 - cam), FEET_Y - 12, BOB_HOSTAGE, f);
 	}
-	if(g->world) n = seaDraw(g, pOut, n);
+	if(g->world) n = drawW2Sea(g, pOut, n);
 	// air
 	for(uint8_t i = 0; i < JET_MAX; ++i) {
 		const tJet *j = &g->pJets[i];

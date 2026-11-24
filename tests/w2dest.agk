@@ -1,0 +1,68 @@
+# World 2's strait destroyer (SPEC 11, "World 2, slice 2", slice E). Ctrl+L, W, 6 starts mission 6, Typhoon Strait; skill 1 is pinned after the
+# world has loaded (the longest tells, no wind and no early jets: the same fight every time), ghost on (a hit is shown and shrugged off).
+# Ctrl+L, D puts the chopper low over the water 94 px east of the aft turret: the turret turns, its barrel rises and flashes (a tell of 28
+# frames on skill 1), then the shell. A climb brings the AA guns in (flak: the barrel up, a ranging puff, the burst); then low again, the cannon
+# takes the aft turret (6 hits), a move west the forward one: both dead and the hull lists, "DEST DWN" in the HUD, 400 points.
+# The unit tests (testW2Destroyer*, testW2Turret*, testW2Aa*) hold the rules.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x06
+wait-serial "AGK world 2 loaded" 1500
+key 0x63
+key 0x28
+wait 5
+key 0x01
+wait 30
+key 0x63
+key 0x28
+wait 5
+key 0x24
+wait 30
+screenshot card
+press fire 2
+wait 60
+key 0x63
+key 0x28
+wait 5
+key 0x22
+wait 10
+screenshot approach
+wait-serial "AGK destroyer tell" 400
+wait 14
+screenshot tell
+wait-serial "AGK destroyer fire" 100
+wait 3
+screenshot shot
+# climb into the guns' reach: the flak
+press up 25
+wait-serial "AGK flak tell" 400
+wait 10
+screenshot flaktell
+wait-serial "AGK flak burst" 100
+wait 3
+screenshot burst
+# low again, and the cannon: the aft turret
+press down 40
+wait 20
+press fire 90
+wait-serial "AGK turret down=1" 200
+wait 20
+screenshot smoking
+# the forward turret: west, then the cannon
+press left 10
+wait 30
+press fire 90
+wait-serial "AGK turret down=2" 300
+wait-serial "AGK destroyer down" 20
+wait 25
+screenshot listing
+wait 100
+expect-serial "AGK destroyer tell[\s\S]*AGK destroyer fire[\s\S]*AGK flak tell[\s\S]*AGK flak burst[\s\S]*AGK turret down=1[\s\S]*AGK turret down=2[\s\S]*AGK destroyer down"
+expect-no-serial "AGK ERR|missing"
+expect-no-dropped-frames
+expect-max-load 98
+expect-min-chip-free 96

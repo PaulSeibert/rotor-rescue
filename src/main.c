@@ -421,6 +421,39 @@ __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 		s_ubSkillKeyWait = 0;
 		return;
 	}
+	if(keyUse(KEY_D)) {
+		// to the strait destroyer (tests/w2dest.agk, the playtest list): low over the water 94 px east of its aft turret, in the air, facing left
+		if(s_sGame.destOn) {
+			s_sGame.chop.x = 2800; s_sGame.chop.y = 228; s_sGame.chop.vx = s_sGame.chop.vy = 0; s_sGame.chop.landed = 0;
+			s_sGame.landFrames = 0; s_sGame.airGrace = 0;
+			s_sGame.chop.face = s_sGame.chop.faceTarget = FACE_LEFT;
+			logicCameraSnap(&s_sGame);
+		}
+		s_ubSkillKeyWait = 0;
+		return;
+	}
+	if(keyUse(KEY_B)) {
+		// the destroyer's clock 2 s from its barrage; Ctrl+L, Y: 2 s from the turrets opening (tests/w2dest.agk)
+		if(s_sGame.destOn && s_sGame.destClock < s_sGame.barNext - 100) s_sGame.destClock = (UWORD)(s_sGame.barNext - 100);
+		s_ubSkillKeyWait = 0;
+		agkState("dest clock", s_sGame.destClock);
+		agkEnd();
+		return;
+	}
+	if(keyUse(KEY_Y)) {
+		if(s_sGame.destOn && s_sGame.destClock < DEST_OPEN_AT - 100) s_sGame.destClock = DEST_OPEN_AT - 100;
+		s_ubSkillKeyWait = 0;
+		agkState("dest clock", s_sGame.destClock);
+		agkEnd();
+		return;
+	}
+	if(keyUse(KEY_R)) {
+		// every radar site down at once: the zone bonus and its HUD line (tests/w2dest.agk)
+		logicKillRadars(&s_sGame);
+		if(s_sGame.events3 & EV4_ZONE) agkPrint("AGK zone clear\n");   // (the next logicUpdate clears the events before the usual report)
+		s_ubSkillKeyWait = 0;
+		return;
+	}
 	if(keyUse(KEY_H)) {
 		// the hall of fame read from the disk again, as at boot (tests)
 		s_ubSkillKeyWait = 0;
@@ -1408,12 +1441,14 @@ static UBYTE s_pMsgAnyFix[2];
 static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
-#define TPL_MAX 100   // the shared BOBs' 28 frames + world 2's 29 and the common slice 2 set's 12 (world 1's own: 23) + the biggest mission part's 30 (mission 6: the freighter and the destroyer); one more than the last template made
+#define TPL_MAX 104   // the shared BOBs' 28 frames + world 2's 29 and the common slice 2 set's 12 (world 1's own: 23) + the biggest mission part's 32 (mission 6: the freighter and the destroyer, the hull whole and in pieces); one more than the last template made
 static tAgkBlitArea s_pErase[2][DRAW_MAX];
 static UBYTE s_pErased[2];
 static UBYTE s_ubLastDrawn;          // objects in the last picture (the HUD types less after a busy one)
 static tBitMap *s_pBobBm[BOB_TYPES], *s_pBobMask[BOB_TYPES];
 static UBYTE s_pTplFirst[BOB_TYPES];
+// the destroyer's hull is one BOB while it lies between these (logic.h): where objectsQueue draws a BOB whole inside its margins
+_Static_assert(FB_W - 16 - 154 - FB_X0 == DEST_WHOLE_MAX && -FB_X0 == DEST_WHOLE_MIN, "logic.h: the whole hull's range");
 static tAgkBlit s_pTpl[TPL_MAX][2];
 // Per BOB type, for objectsQueue's loop (src/objblits.s reads it: 16 bytes)
 typedef struct {
@@ -1487,6 +1522,8 @@ static UBYTE s_ubBobBms;
 #define BOB_W2M(B, N) bobAdd(B, bobBm(W2M_BASE + WORLD2M_##N##_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
 	bobBm(W2M_BASE + WORLD2M_##N##MASK_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
 	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)
+#define BOB_W2M_NM(B, N) bobAdd(B, bobBm(W2M_BASE + WORLD2M_##N##_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), 0, \
+	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)   // (no mask: a plain copy, bobIsCopy)
 static UBYTE *s_pW2X;                // (chip) world 2's slice 2 common BOBs: allocated when world 2 loads, freed when it is left
 static UBYTE *s_pW2M;                // (chip) the mission's own BOBs: made at its card (missionSetLoad), freed at the next
 static ULONG s_ulW2MBytes;           // its size (0: none made)
@@ -1513,7 +1550,7 @@ static tBitMap *bobBm(ULONG ulOffs, UWORD uwW, UWORD uwRows) {
 // Buildings are drawn first, onto an empty buffer: a plain copy too
 static UBYTE bobIsCopy(UBYTE b) {
 	return b == BOB_SHOT || b == BOB_SHELL || b == BOB_HANGAR || b == BOB_FENCE || b == BOB_BARRACKS || b == BOB_FLAG ||
-		b == BOB_W2_BARRACKS || (b >= BOB_PAD48 && b <= BOB_PAD96);
+		b == BOB_W2_BARRACKS || (b >= BOB_PAD48 && b <= BOB_PAD96) || (b >= BOB_DHULL && b <= BOB_DHULL3);
 }
 
 // A BOB's blit templates (from its frame 0 at template t on) and its tables for objectsQueue
@@ -1640,10 +1677,13 @@ __attribute__((noinline, optimize("Os"))) static void bobsBindMission(UBYTE ubMi
 	else {
 		BOB_W2M(BOB_FRTR, FRTR);
 		BOB_W2M(BOB_SPRAY, SPRAY);
-		BOB_W2M(BOB_DHULL0, DHULL0);
-		BOB_W2M(BOB_DHULL1, DHULL1);
-		BOB_W2M(BOB_DHULL2, DHULL2);
-		BOB_W2M(BOB_DHULL3, DHULL3);
+		BOB_W2M_NM(BOB_DHULL, DHULL);
+		for(UBYTE k = 0; k < 4; ++k) {   // the four pieces: views of the hull's columns (the same bitmap, 3 words a piece, the last one 1)
+			tBitMap *pV = &s_pBobBmStore[s_ubBobBms++];
+			*pV = *s_pBobBm[BOB_DHULL];
+			for(UBYTE p = 0; p < 3; ++p) pV->Planes[p] += 6 * k;
+			bobAdd((UBYTE)(BOB_DHULL0 + k), pV, 0, g_pBobW[BOB_DHULL0 + k], g_pBobH[BOB_DHULL0 + k], g_pBobFrames[BOB_DHULL0 + k]);
+		}
 		BOB_W2M(BOB_TURRET, TURRET);
 		BOB_W2M(BOB_THIT, THIT);
 		BOB_W2M(BOB_AAGUN, AAGUN);
@@ -1775,7 +1815,7 @@ __attribute__((noinline)) static void erasesQueue(UBYTE ubBfr) {
 __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 	tBitMap *pFb = s_pFb[ubBfr];
 	// (the picture the world changes in: the new world's BOBs are loaded at the start of the next)
-	UBYTE n = s_sGame.world == s_ubWorld && (!s_ubWorld || s_ubMPart == s_sGame.mission) ? logicDraw(&s_sGame, s_pDraw) : 0;
+	UBYTE n = s_sGame.world == s_ubWorld ? logicDraw(&s_sGame, s_pDraw) : 0;
 	tAgkBlitArea *pErase = s_pErase[ubBfr];
 	UBYTE ubDrawn = 0;
 	const tDraw *pD = s_pDraw;
@@ -2038,13 +2078,16 @@ __attribute__((noinline, noclone)) static void hudUpdate(UBYTE ubBfr) {
 	UBYTE ubBudget = s_ubLastDrawn >= HUD_BUSY_BOBS ? HUD_TYPE_BUSY : HUD_TYPE_PER_FRAME;
 	// the left slot: the choppers left; for a while after the last scoring tank
 	// kill of a mission, the quota (later tanks pay nothing)
-	UBYTE ubLeft = (UBYTE)(g->lives | (g->quotaMsg ? 0x10 : 0));
+	// (or a bonus: ZONE CLR when the last radar site fell, DEST DWN when the strait destroyer was disabled)
+	UBYTE ubLeft = (UBYTE)(g->lives | (g->quotaMsg ? 0x10 : 0));   // (the quota line's slot also says ZONE CLR and DEST DWN: quotaKind picks the text when it starts)
 	if(ubLeft != pLives[ubBfr]) {
 		pLives[ubBfr] = ubLeft;
-		const char *szL = g->quotaMsg ? "QUOTA 10" : "HELI 3  ";
+		static const char *const s_pQuotaText[3] = {"QUOTA 10", "ZONE CLR", "DEST DWN"};
+		UBYTE isMsg = g->quotaMsg;
+		const char *szL = g->quotaMsg ? s_pQuotaText[g->quotaKind] : "HELI 3  ";
 		char *pL = s_pHudSlotLine[ubBfr][0];
 		for(UBYTE i = 0; i < HUD_SLOT_LEN; ++i) pL[i] = szL[i];
-		if(!g->quotaMsg) pL[5] = (char)('0' + g->lives);
+		if(!isMsg) pL[5] = (char)('0' + g->lives);
 		s_pHudSlotPending[ubBfr][0] = 1;
 	}
 	// the right slot: the skill; DAMAGED while the chopper is damaged (until the pad mends it)
@@ -3474,6 +3517,18 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 		if(g->events3 & EV3_GUSTTELL) agkPrint("AGK gust tell\n");
 		if(g->events3 & EV3_GUST) agkPrint("AGK gust start\n");
 	}
+	if(g->events3) {   // (the strait destroyer and the zone bonus: SPEC 11, slice E)
+		if(g->events3 & EV4_TURTELL) agkPrint("AGK destroyer tell\n");
+		if(g->events3 & EV4_TURFIRE) agkPrint("AGK destroyer fire\n");
+		if(g->events3 & EV4_TURDOWN) { agkState("turret down", (LONG)((!g->turHp[0]) + (!g->turHp[1]))); agkEnd(); }
+		if(g->events3 & EV4_DESTDOWN) agkPrint("AGK destroyer down\n");
+		if(g->events3 & EV4_DESTOPEN) agkPrint("AGK destroyer open\n");
+		if(g->events3 & EV4_BARTELL) agkPrint("AGK barrage tell\n");
+		if(g->events3 & EV4_BARFIRE) agkPrint("AGK barrage fire\n");
+		if(g->events3 & EV4_AATELL) agkPrint("AGK flak tell\n");
+		if(g->events3 & EV4_AABURST) agkPrint("AGK flak burst\n");
+		if(g->events3 & EV4_ZONE) agkPrint("AGK zone clear\n");
+	}
 	if(g->events2 & EV2_BOATTELL) agkPrint("AGK boat tell\n");
 	if(g->events2 & EV2_BOATFIRE) agkPrint("AGK boat fire\n");
 	if(g->events2 & EV2_SPLASH) agkPrint("AGK splash\n");
@@ -3581,7 +3636,6 @@ void genericProcess(void) {
 #endif
 		worldLoad(s_sGame.world);
 	}
-	else if(s_ubWorld && s_sGame.world == s_ubWorld && s_ubMPart != s_sGame.mission && !s_isSplash) missionSetLoad();
 	// the weather first, in the vertical blank (last frame's positions: a frame
 	// behind the ground, unseen in rain and dust)
 	if(!s_isSplash) weatherUpdate();
@@ -3653,6 +3707,7 @@ void genericProcess(void) {
 	agkBlitqPoll();
 	UBYTE ubStateBefore = s_sGame.state;
 	if(!s_isPaused) logicUpdate(&s_sGame, &sIn);
+	if(s_ubWorld && s_ubMPart != s_sGame.mission && s_sGame.world == s_ubWorld) missionSetLoad();   // (a new mission's own BOBs, before this picture draws them: SPEC 11, slice E)
 	if(s_sGame.state == GS_ENTRY && ubStateBefore != GS_ENTRY) hiKeyFlush();   // (a key held from the game isn't a letter)
 	else if(ubStateBefore == GS_ENTRY && s_sGame.state != GS_ENTRY) hiKeyFlush();   // (an Esc behind another key isn't a quit)
 	msgLayoutClear(ubBfr);

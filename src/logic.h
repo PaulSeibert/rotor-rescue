@@ -97,7 +97,7 @@ enum {
 	BOB_W2_BARRACKS, BOB_PATROL, BOB_GUNBOAT, BOB_PAD48, BOB_PAD64, BOB_PAD80, BOB_PAD96,
 	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET, BOB_RADAR, BOB_SOCK, BOB_ROPE, BOB_HOOK, BOB_CLIMB,   // (slice 2's common set: both missions)
 	BOB_DECK,                                                                                   // (mission 5's part, loaded at its card)
-	BOB_FRTR, BOB_SPRAY, BOB_DHULL0, BOB_DHULL1, BOB_DHULL2, BOB_DHULL3, BOB_TURRET, BOB_THIT, BOB_AAGUN, BOB_BARRAGE, BOB_CAP,   // (mission 6's part)
+	BOB_FRTR, BOB_SPRAY, BOB_DHULL, BOB_DHULL0, BOB_DHULL1, BOB_DHULL2, BOB_DHULL3, BOB_TURRET, BOB_THIT, BOB_AAGUN, BOB_BARRAGE, BOB_CAP,   // (mission 6's part)
 	BOB_TYPES
 };
 #define BOB_M5_FIRST BOB_DECK        // mission 5's own BOBs: BOB_DECK only
@@ -283,6 +283,53 @@ typedef struct { int16_t lo, hi; } tZone;
 #define FRTR_STAGES 4
 #define SINK_BAR_PX 192          // the timer bar's length (HUD row 22-23, from RADAR_X0): the whole timer
 enum { SPRAY_F0, SPRAY_F1, SPRAY_F2 };
+// World 2's strait destroyer (mission 6; SPEC 11, "World 2, slice 2", slice E): a set piece in the sea between the third and the fourth island,
+// one facing (bow left), not moving: two turrets of 6 HP, four AA guns without HP, a barrage at 40 s and its turrets open at 90 s
+#define DEST_X 2560              // the hull's left edge (154 x 44, art/world2/hull_list.txt, cut into 4 BOBs of at most 48 px); its top is DEST_TOP
+#define DEST_W 154
+// The BOB blitter does not clip: a BOB is drawn only whole inside the buffer's margins (48 px left of the screen, 48 px right of it). The whole hull
+// (BOB_DHULL, 154 px) is drawn while its left edge is on the screen between these; beyond them its four 48 px pieces (BOB_DHULL0-3, views of the
+// same bitmap, drawn right to left) are, which appear and vanish off screen. main.c asserts the numbers against its buffer.
+#define DEST_WHOLE_MIN -48
+#define DEST_WHOLE_MAX 214
+#define DEST_TOP 205             // (the last row, 43, is the waterline row BOAT_BOTTOM_Y 248)
+#define DEST_TURRETS 2
+#define DEST_HP 6
+#define DEST_OPEN_HP 2           // a turret at this many HP or fewer smokes; the 90 s opening cuts them to it
+#define DEST_TURRET_SCORE 150
+#define DEST_DISABLED_SCORE 100  // both turrets down: 150 + 150 + 100 = the plan's 400
+#define DEST_ENGAGE 360          // the barrage's clock counts while the chopper is within this of the hull's centre
+#define DEST_BARRAGE_AT 2000     // frames of that clock to the first barrage (40 s) ...
+#define DEST_BARRAGE_EVERY 1500  // ... and the next ones (30 s)
+#define DEST_OPEN_AT 4500        // frames of it to the turrets opening (90 s)
+#define BARRAGE_TELL_FRAMES 30
+#define BARRAGE_MARKERS 3
+#define BARRAGE_STAGGER 4        // the markers burst this many frames apart (a salvo: three explosions at once on one picture cost more than a frame has)
+#define BARRAGE_SALVO (BARRAGE_STAGGER * (BARRAGE_MARKERS - 1))   // frames of the salvo after the tell: barTell counts BARRAGE_TELL_FRAMES + this
+#define BARRAGE_SPREAD 36        // the markers' distance apart (the chopper's x, +- this)
+#define BARRAGE_HALF 14          // a burst's half width, px
+#define BARRAGE_TOP 232          // a marker's top y (the BOB is 24 x 12)
+#define BARRAGE_LOW_Y 150        // a burst reaches a chopper whose skids are below this
+#define AA_COUNT 4
+#define AA_RANGE 180             // less than the cannon's reach (216): a turret can be shot from outside the guns
+#define AA_FLOOR_Y 212           // a gun takes only a chopper above this: more than 24 px above the sea
+#define AA_MIN_DIST 56
+#define AA_PUFF_MAX 14           // the ranging puff shows this many frames before the burst (or the whole tell when it is shorter)
+#define AA_FLASH 5               // the muzzle flash when the puff appears
+#define AA_PAIR_GAP 40           // no two guns start a tell closer than this
+#define FLAK_MAX 2
+#define FLAK_RADIUS 18
+#define ZONE_CLEAR_SCORE 100
+#define BONUS_MSG_FRAMES 150     // the HUD's left slot says ZONE CLR or DEST DWN this long ...
+#define BONUS_DELAY 8            // ... starting this many frames after the event (the picture of a kill is already a heavy one: the score's digits, the boom)
+enum { BONUS_NONE, BONUS_ZONE, BONUS_DEST };
+// BOB_TURRET (the left facing): idle, the tell's two blinking frames, the shot; BOB_THIT: smoking, dead; BOB_AAGUN; BOB_DHULL0-3 frame: as played, listing
+enum { TURRET_IDLE, TURRET_TELL1, TURRET_TELL2, TURRET_FIRE };
+enum { THIT_SMOKING, THIT_DEAD };
+enum { AA_IDLE, AA_TELL, AA_PUFF };
+enum { HULL_OK, HULL_LIST };
+extern const int16_t g_pTurretDx[DEST_TURRETS];   // the turrets' top-left x on the hull: forward -7, aft 122 (y 11)
+typedef struct { int16_t x, y; uint8_t life, active; } tFlak;   // a flak shot's ranging puff: where it will burst, frames to go
 extern const uint8_t g_pFrtrFloor[FRTR_STAGES];   // the skids' floor over the hold by stage (the coaming's top): 230 230 230 229
 #define SOCK_DX 60               // a windsock stands this far right of each island's pad centre
 
@@ -381,7 +428,7 @@ typedef struct {
 	uint8_t gustTell, gustOn;   // frames left of the tell, of the push (never both)
 	uint8_t gustFx;      // the push's sub-pixel accumulator (1/16)
 	uint16_t gustSeed;   // its own random sequence: the game's LFSR is not disturbed
-	uint8_t events3;     // EV3_*
+	uint16_t events3;    // EV3_* and EV4_* (one word: clearing it each frame costs what the byte did)
 	uint8_t deckOn;      // mission 5: the ship deck stands
 	uint8_t deckLeft;    // people still on it
 	uint8_t deckTimer;   // frames of the current person's climb (kept when the chopper drifts out)
@@ -408,6 +455,25 @@ typedef struct {
 	uint16_t events;
 	uint8_t events2;     // more event bits (EV2_*)
 	uint8_t evBarracks;  // which barracks opened (index + 1)
+	// the strait destroyer (mission 6, slice E)
+	uint8_t destOn;      // mission 6: it lies in the strait
+	uint8_t turHp[DEST_TURRETS];     // forward, aft: 6 .. 0
+	uint8_t turTell[DEST_TURRETS];   // frames left of the wind-up before a shell (0: none)
+	uint8_t turFire[DEST_TURRETS];   // frames of muzzle flash
+	uint8_t turCool[DEST_TURRETS];   // frames to the next tell
+	uint8_t destOpen;    // the 90 s opening happened
+	uint8_t destDown;    // both turrets are dead: the ship is disabled, listing, silent
+	uint16_t destClock;  // frames the chopper has spent alive within DEST_ENGAGE
+	uint16_t barNext;    // the clock value at which the next barrage starts
+	uint8_t barTell;     // frames left of the barrage's tell (0: none)
+	int16_t barX[BARRAGE_MARKERS];   // the markers' centres
+	uint8_t barN;        // markers placed (the others were over land)
+	uint8_t aaTell[AA_COUNT], aaCool[AA_COUNT], aaFlash[AA_COUNT];   // a gun's frames left: the tell, the rest, the muzzle flash
+	uint8_t aaWait;      // frames until another gun may start a tell
+	tFlak pFlak[FLAK_MAX];
+	uint8_t zoneDone;    // the radar zone bonus was paid this mission
+	uint8_t quotaKind;   // what the HUD's quota line says while quotaMsg runs: 0 QUOTA 10, BONUS_ZONE, BONUS_DEST
+	uint8_t bonusMsg, bonusKind;     // the HUD line for a bonus: frames left, BONUS_*
 } tGame;
 
 // events bits
@@ -434,6 +500,17 @@ typedef struct {
 #define EV3_WINCHBOARD 0x08   // a person came aboard up the rope
 #define EV3_SINKSTAGE 0x10    // the freighter reached the next stage
 #define EV3_SUNK     0x20     // it sank
+
+#define EV4_TURTELL 0x0040   // a turret started its wind-up
+#define EV4_TURFIRE 0x0080   // a turret fired
+#define EV4_TURDOWN 0x0100   // a turret was destroyed
+#define EV4_DESTDOWN 0x0200   // both are: the ship is disabled
+#define EV4_DESTOPEN 0x0400   // the 90 s opening
+#define EV4_BARTELL 0x0800   // a barrage's tell began
+#define EV4_BARFIRE 0x1000   // its markers burst
+#define EV4_AATELL 0x2000   // a gun started its tell
+#define EV4_AABURST 0x4000   // a flak shot burst
+#define EV4_ZONE 0x8000   // the last radar site fell: the zone bonus
 
 #define EV2_JETTELL  0x01     // a jet started its flash (a missile or bomb follows)
 #define EV2_JETFIRE  0x02     // a jet launched one
@@ -562,6 +639,8 @@ uint8_t logicPatrolTell(const tGame *g);
 #define BOAT_MIN_RANGE 56    // and no shot from closer than this
 #define BOAT_ATTACK_GAP 150  // 3 s between one boat's tell starting and the next boat's
 #define ATK_JET 0xFE         // atkLast when a jet started the attack (world 2: jets and boats take turns)
+#define ATK_TURRET 0xF0      // atkLast when a destroyer's turret did (+ its index), and ATK_BARRAGE for its barrage
+#define ATK_BARRAGE 0xF2
 #define BOAT_BOTTOM_Y 248    // the waterline: a boat's last row
 #define BOAT_MUZZLE_Y 224    // where a gunboat's shell leaves
 #define SPLASH_FRAMES 20     // the splash's life (5 frames of 4)
@@ -583,6 +662,16 @@ uint16_t logicGroundDwell(const tGame *g);
 // How many jets may be out at once: 1 on skill 1-2, and on 3 until mission 3; 2 above
 uint8_t logicJetsMax(const tGame *g);
 uint8_t logicJetsTripMax(const tGame *g);   // most jets that may appear in one trip (base to base)
+// The strait destroyer's tables by skill (SPEC 11, slice E): the turret's tell 28 / 24 / 20 / 18 / 16 and the rest between its shells (tell included);
+// a gun's tell 26 / 22 / 18 / 15 / 12 and its rest after a burst 120 / 100 / 85 / 70 / 60, and the flak shots live at once
+uint8_t logicDestTell(const tGame *g);
+uint8_t logicDestGap(const tGame *g);
+uint8_t logicAaTell(const tGame *g);
+uint8_t logicAaGap(const tGame *g);
+uint8_t logicAaLive(const tGame *g);
+void logicKillRadars(tGame *g);   // (the test hook Ctrl+L, R) every standing radar site down at once: the zone bonus
+// A turret's housing centre (its hit box and its target point), world x
+static inline int16_t logicTurretX(uint8_t i) { return (int16_t)(DEST_X + g_pTurretDx[i] + 24); }
 // The radar sites' jet zones (SPEC 11, "World 2, slice 2"): may a jet START with the chopper at x? 1 in world 1 and in a
 // mission with no radar sites (mission 4); otherwise only inside the zone of a live site
 uint8_t logicJetZone(const tGame *g, int16_t x);

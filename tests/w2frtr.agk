@@ -11,7 +11,7 @@ wait 5
 key 0x11
 wait 5
 key 0x06
-wait-serial "AGK world 2 loaded" 400
+wait-serial "AGK world 2 loaded" 1500
 key 0x63
 key 0x28
 wait 5
@@ -49,6 +49,6 @@ screenshot sunk
 expect-serial "AGK winch board=1[\s\S]*AGK sink stage=3[\s\S]*AGK sunk lost=1[0-5]"
 expect-no-serial "AGK ERR|missing"
 expect-no-dropped-frames
-# (the sinking picture is the heaviest: the boom, the deaths, the HUD digits, the bar gone)
-expect-max-load 95
+# (the sinking picture is the heaviest: the boom, the deaths, the HUD digits, the bar gone; and the flight out crosses the destroyer's strait, slice E: 98)
+expect-max-load 98
 expect-min-chip-free 96

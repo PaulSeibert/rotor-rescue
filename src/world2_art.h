@@ -126,22 +126,10 @@
 #define ART_SPRAY_H 12
 #define ART_SPRAY_FRAMES 3
 #define ART_SPRAY_BITMAP_W 32
-#define ART_DHULL0_W 48
-#define ART_DHULL0_H 44
-#define ART_DHULL0_FRAMES 2
-#define ART_DHULL0_BITMAP_W 48
-#define ART_DHULL1_W 48
-#define ART_DHULL1_H 44
-#define ART_DHULL1_FRAMES 2
-#define ART_DHULL1_BITMAP_W 48
-#define ART_DHULL2_W 48
-#define ART_DHULL2_H 44
-#define ART_DHULL2_FRAMES 2
-#define ART_DHULL2_BITMAP_W 48
-#define ART_DHULL3_W 10
-#define ART_DHULL3_H 44
-#define ART_DHULL3_FRAMES 2
-#define ART_DHULL3_BITMAP_W 16
+#define ART_DHULL_W 154
+#define ART_DHULL_H 44
+#define ART_DHULL_FRAMES 2
+#define ART_DHULL_BITMAP_W 176
 #define ART_TURRET_W 32
 #define ART_TURRET_H 19
 #define ART_TURRET_FRAMES 4
@@ -180,25 +168,18 @@
 #define WORLD2M_FRTRMASK_OFFS 6912   // (in mission 6's block)
 #define WORLD2M_SPRAY_OFFS 13824   // (in mission 6's block)
 #define WORLD2M_SPRAYMASK_OFFS 14256   // (in mission 6's block)
-#define WORLD2M_DHULL0_OFFS 14688   // (in mission 6's block)
-#define WORLD2M_DHULL0MASK_OFFS 16272   // (in mission 6's block)
-#define WORLD2M_DHULL1_OFFS 17856   // (in mission 6's block)
-#define WORLD2M_DHULL1MASK_OFFS 19440   // (in mission 6's block)
-#define WORLD2M_DHULL2_OFFS 21024   // (in mission 6's block)
-#define WORLD2M_DHULL2MASK_OFFS 22608   // (in mission 6's block)
-#define WORLD2M_DHULL3_OFFS 24192   // (in mission 6's block)
-#define WORLD2M_DHULL3MASK_OFFS 24720   // (in mission 6's block)
-#define WORLD2M_TURRET_OFFS 25248   // (in mission 6's block)
-#define WORLD2M_TURRETMASK_OFFS 26160   // (in mission 6's block)
-#define WORLD2M_THIT_OFFS 27072   // (in mission 6's block)
-#define WORLD2M_THITMASK_OFFS 27528   // (in mission 6's block)
-#define WORLD2M_AAGUN_OFFS 27984   // (in mission 6's block)
-#define WORLD2M_AAGUNMASK_OFFS 28200   // (in mission 6's block)
-#define WORLD2M_BARRAGE_OFFS 28416   // (in mission 6's block)
-#define WORLD2M_BARRAGEMASK_OFFS 28848   // (in mission 6's block)
-#define WORLD2M_CAP_OFFS 29280   // (in mission 6's block)
-#define WORLD2M_CAPMASK_OFFS 29824   // (in mission 6's block)
-#define WORLD2M6_BYTES 30368
+#define WORLD2M_DHULL_OFFS 14688   // (in mission 6's block)
+#define WORLD2M_TURRET_OFFS 20496   // (in mission 6's block)
+#define WORLD2M_TURRETMASK_OFFS 21408   // (in mission 6's block)
+#define WORLD2M_THIT_OFFS 22320   // (in mission 6's block)
+#define WORLD2M_THITMASK_OFFS 22776   // (in mission 6's block)
+#define WORLD2M_AAGUN_OFFS 23232   // (in mission 6's block)
+#define WORLD2M_AAGUNMASK_OFFS 23448   // (in mission 6's block)
+#define WORLD2M_BARRAGE_OFFS 23664   // (in mission 6's block)
+#define WORLD2M_BARRAGEMASK_OFFS 24096   // (in mission 6's block)
+#define WORLD2M_CAP_OFFS 24528   // (in mission 6's block)
+#define WORLD2M_CAPMASK_OFFS 25072   // (in mission 6's block)
+#define WORLD2M6_BYTES 25616
 
 // Per mission (4, 5, 6): PF2 pens 1-7 (index 0 unused), dark to light; the sky gradient
 // top to H (lines 24-179), the sea's H to C (180-207), C under the strip; AGA: 24 bits

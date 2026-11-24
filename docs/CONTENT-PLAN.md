@@ -267,6 +267,8 @@ Today's tank is 22 / 18 / 16 / 14 / 12 and the jet 24 / 20 / 16 / 14 / 12 [S].
 | **Gunship** (W4 M12 finale) | the boss | 24 (cannon), bomb 4; core exposed below 50% | cruises and strafes along the roof line; reachable at all times | a 5-shot arc, a rocket volley (marked lobs), calls the AA | big flash on the nose; rocket marker | 30 / 26 / 22 / 18 / 16 | 1000 | weak point opens at 30-45 s; fully open by 90 s |
 | **Fire** (W4, W2 M6) | a timer on a rescue | n/a | grows through 4 stages | none | visible flames, a bar on the HUD | n/a | n/a | rescue faster; the timer is at least 90 s on normal |
 
+**Destroyer, built 2026-11-24 (SPEC v1.24, slice E):** station-keeping in mission 6's strait (x 2560-2713, one facing, bow left); turrets 6 HP (cannon 1, bomb 3), shells under R1-R3 with the tell 28 / 24 / 20 / 18 / 16, 150 each; four AA guns with no HP, air only (skids above y 212, within 180 px, a ranging puff then the burst, tell 26 / 22 / 18 / 15 / 12); both turrets down: the hull lists, +100 (400 in all), every attack stops; anti-stall: a 30-frame-tell barrage at 40 s of the chopper near the ship and every 30 s after, the turrets open (2 HP) at 90 s. Zone bonus: +100 when the last radar site of a mission falls (the HUD says ZONE CLR). The strait's two gunboat slots in mission 6 are the destroyer's.
+
 Timers on rescue sites: at most two a mission, never in World 1; generous (90 s on normal; 120 / 105 / 90 / 75 / 60 by
 skill); shown on the preview card and on the HUD. Losing a site only loses the people still there.
 
