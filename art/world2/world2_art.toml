@@ -38,12 +38,24 @@ kind = "bob"
 source = "world2/gunboat.txt"
 kind = "bob"
 
-[w2_destroyer_hull]                  # 2 frame(s) 154 x 44
-source = "world2/destroyer_hull.txt"
-kind = "bob"
-
 [w2_destroyer_turret]                  # 8 frame(s) 32 x 19
 source = "world2/destroyer_turret.txt"
+kind = "bob"
+
+[w2_destroyer_hull_e]                  # 2 frame(s) 154 x 44: 0 = the hull as played (the forward AA mount cleared), 1 = listing (slice E, one facing: bow left)
+source = "world2/hull_list.txt"
+kind = "bob"
+
+[w2_aa_gun]                  # 3 frame(s) 12 x 12: idle, tell, puff (slice E)
+source = "world2/aa_gun.txt"
+kind = "bob"
+
+[w2_turret_hit]                  # 2 frame(s) 32 x 19: smoking, dead (slice E)
+source = "world2/turret_hit.txt"
+kind = "bob"
+
+[w2_barrage]                  # 3 frame(s) 24 x 12: the barrage's ranging marker (slice E)
+source = "world2/barrage_tell.txt"
 kind = "bob"
 
 [w2_barracks]                  # 4 frame(s) 51 x 31
@@ -97,3 +109,27 @@ kind = "bob"
 # right-facing, forward turret: x 129, y 11
 # Pad: assemble from 8 px units on a 46-row canvas: cap (rows 0-45), then slab units at row 30 (cap, chevron or plain units
 # pointing in, the 16 px centre H, units, cap): 48, 64, 80 or 96 px; lit and dark phases blink.
+
+[w2_deck]                  # 2 frame(s) 124 x 30: the moored cargo ship (slice C, mission 5): 0 idle, 1 bow wake; one facing, bow left
+source = "world2/deck_ship.txt"
+kind = "bob"
+
+[w2_rope]                  # 3 frame(s) 8 x 40: the winch rope hanging, the rope ladder swaying left, swaying right
+source = "world2/winch_rope.txt"
+kind = "bob"
+
+[w2_hook]                  # 1 frame(s) 8 x 12: the short rope and hook of the first moment of a winch
+source = "world2/winch_hook.txt"
+kind = "bob"
+
+[w2_man_climb]             # 2 frame(s) 16 x 12: a person climbing, arms up (MAN_CLIMB0 / MAN_CLIMB1), the hostage art's drawing and pens
+source = "world2/man_climb.txt"
+kind = "bob"
+
+[w2_freighter]             # 4 frame(s) 128 x 36: the bulk freighter, sinking stages 0-3; one facing, bow left, pivot (63.5, 33)
+source = "world2/freighter.txt"
+kind = "bob"
+
+[w2_spray]                 # 3 frame(s) 24 x 12: foam / steam along the waterline for stages 1-3
+source = "world2/sink_spray.txt"
+kind = "bob"

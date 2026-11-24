@@ -2903,7 +2903,7 @@ static void testW2BoatsArePlaced(void) {
 	for(uint8_t i = 0; i < BOAT_MAX; ++i) nGun1 += g.pBoats[i].active && g.pBoats[i].kind == BOAT_GUN;
 	CHECK(nGun1 == 1);
 	logicSetDifficulty(&g, 5);
-	logicStartAt(&g, 1, 2);
+	logicStartAt(&g, 1, 1);   // (mission 5: mission 6's strait slots are the destroyer's, slice E)
 	uint8_t nGun5 = 0;
 	for(uint8_t i = 0; i < BOAT_MAX; ++i) nGun5 += g.pBoats[i].active && g.pBoats[i].kind == BOAT_GUN;
 	CHECK(nGun5 > nGun);
@@ -3798,6 +3798,1650 @@ static void testDrawPeopleRunAndGroundFirst(void) {
 	}
 }
 
+// ---- radar sites and the jet zone rule (world 2 slice 2, slice A; SPEC 11 "World 2, slice 2") ----
+// The sites, as the spec writes them: mission 4 none; mission 5 x 1608 (second island) and 3416 (fourth); mission 6 those and 440 (first)
+static const int16_t s_pRadarX[3][3] = {{0, 0, 0}, {1608, 3416, 0}, {440, 1608, 3416}};
+static const uint8_t s_pRadarN[3] = {0, 2, 3};
+
+static void hitRadar(uint8_t i, uint8_t ubShots) {
+	for(uint8_t k = 0; k < ubShots; ++k) {
+		g.pShots[0] = (tShot){.x = g.pRadars[i].x, .y = FEET_Y - 20, .active = 1, .kind = SHOT_CANNON, .life = 36};
+		step(NONE, 1);
+	}
+}
+
+// Missions 5 and 6 have their sites on land (an island, not the base island), the same at every skill; mission 4, world 1
+// and a fresh game have none
+static void testW2RadarSitesArePlaced(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			CHECK(g.radarCount == s_pRadarN[m]);
+			for(uint8_t i = 0; i < g.radarCount; ++i) {
+				const tRadar *r = &g.pRadars[i];
+				CHECK(r->alive && r->hp == RADAR_HP);
+				uint8_t isFound = 0;
+				for(uint8_t k = 0; k < s_pRadarN[m]; ++k) isFound |= r->x == s_pRadarX[m][k];
+				CHECK(isFound);
+				CHECK(!logicOnWater((int16_t)(r->x - RADAR_W_PX / 2)) && !logicOnWater((int16_t)(r->x + RADAR_W_PX / 2 - 1)));
+				uint8_t iIsland = 0xFF;
+				for(uint8_t k = 0; k < W2_ISLANDS; ++k) if(r->x >= g_pIslands[k].x0 && r->x < g_pIslands[k].x1) iIsland = k;
+				CHECK(iIsland < W2_BASE_ISLAND);
+				CHECK(logicPadAt(&g, (int16_t)(r->x - RADAR_W_PX / 2)) == 0xFF && logicPadAt(&g, (int16_t)(r->x + RADAR_W_PX / 2)) == 0xFF);   // not on a pad
+			}
+		}
+	}
+	newGame();
+	CHECK(g.radarCount == 0);
+	logicStartAt(&g, 1, 1);
+	CHECK(g.radarCount == 2);
+	logicStartMission(&g, 0);
+	CHECK(g.radarCount == 0);   // (mission 4 again: the sites do not carry over)
+	newGame();
+	logicStartAt(&g, 0, 2);
+	CHECK(g.radarCount == 0);
+}
+
+// The zone is 1200 px around a live site, cut at the base's approach (W2_JET_SAFE_X); edges exact; mission 4 and world 1 are everywhere
+static void testW2RadarZonesAndTheRule(void) {
+	newWorld2(1);
+	tZone z[RADAR_MAX];
+	CHECK(logicRadarZones(&g, z, 0) == 2);
+	CHECK(z[0].lo == 1608 - RADAR_ZONE_HALF && z[0].hi == 1608 + RADAR_ZONE_HALF);
+	CHECK(z[1].lo == 3416 - RADAR_ZONE_HALF && z[1].hi == W2_JET_SAFE_X);
+	CHECK(!logicJetZone(&g, z[0].lo - 1) && logicJetZone(&g, z[0].lo) && logicJetZone(&g, z[0].hi) && !logicJetZone(&g, z[0].hi + 1));
+	CHECK(!logicJetZone(&g, z[1].lo - 1) && logicJetZone(&g, z[1].lo) && logicJetZone(&g, W2_JET_SAFE_X) && !logicJetZone(&g, W2_JET_SAFE_X + 1));
+	CHECK(!logicJetZone(&g, 500) && !logicJetZone(&g, 2500) && !logicJetZone(&g, W2_START_X));
+	CHECK(logicJetZone(&g, 1608) && logicJetZone(&g, 3416));
+	// a site down: its zone is gone, the other's stays; ubAll still lists both (the card)
+	g.pRadars[0].alive = 0;
+	CHECK(logicRadarZones(&g, z, 0) == 1 && z[0].lo == 3416 - RADAR_ZONE_HALF);
+	CHECK(logicRadarZones(&g, z, 1) == 2);
+	CHECK(!logicJetZone(&g, 1608) && logicJetZone(&g, 3416));
+	g.pRadars[1].alive = 0;
+	CHECK(logicRadarZones(&g, z, 0) == 0);
+	for(int16_t x = 0; x < W2_W; x += 8) CHECK(!logicJetZone(&g, x));   // every site down: no jet start anywhere
+	// mission 6: three zones; the first cut at the left edge of the map
+	newWorld2(2);
+	CHECK(logicRadarZones(&g, z, 0) == 3);
+	uint8_t isLeft = 0;
+	for(uint8_t i = 0; i < 3; ++i) isLeft |= z[i].lo == 0 && z[i].hi == 440 + RADAR_ZONE_HALF;
+	CHECK(isLeft);
+	CHECK(logicJetZone(&g, 0) && logicJetZone(&g, 1040) && !logicJetZone(&g, 2500));
+	// mission 4 and world 1: no sites, so a jet may start anywhere (today's rule)
+	newWorld2(0);
+	CHECK(logicRadarZones(&g, z, 1) == 0);
+	for(int16_t x = 0; x < W2_W; x += 8) CHECK(logicJetZone(&g, x));
+	newGame();
+	for(int16_t x = 0; x < WORLD_W; x += 8) CHECK(logicJetZone(&g, x));
+}
+
+// In the game: a jet starts only while the chopper is inside a live zone. Outside every zone nothing comes for as long as it
+// stays (the budget is not spent), inside one the jets come as before
+static void testW2JetsStartOnlyInsideALiveZone(void) {
+	static const int16_t s_pOut[] = {500, 800, 2400, 2500, 2700};
+	static const int16_t s_pIn[] = {1100, 1608, 2100, 2900, 3416, 3700};
+	for(uint8_t m = 1; m < 3; ++m) {
+		for(uint8_t k = 0; k < 5; ++k) {
+			if(m == 2 && s_pOut[k] < 1000) continue;   // (mission 6: the first island's zone is 0-1040)
+			newWorld2(m);
+			logicSetDifficulty(&g, 5);
+			noBoats();
+			g.ghost = 1;
+			g.trip = 6;
+			flyAt(s_pOut[k], 120);
+			uint8_t iJets = 0;
+			for(int f = 0; f < 2500; ++f) {
+				g.chop.x = s_pOut[k]; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+				g.spawnTimer = 60000;
+				step(NONE, 1);
+				iJets += (g.events & EV_JET) != 0;
+			}
+			if(iJets) printf("mission %d: %d jets at x %d outside every zone\n", m + 4, iJets, s_pOut[k]);
+			CHECK(iJets == 0);
+			CHECK(g.jetsTrip == 0);   // the budget is untouched
+		}
+		for(uint8_t k = 0; k < 6; ++k) {
+			newWorld2(m);
+			logicSetDifficulty(&g, 5);
+			noBoats();
+			g.ghost = 1;
+			g.trip = 6;
+			flyAt(s_pIn[k], 120);
+			uint8_t iJets = 0;
+			for(int f = 0; f < 2500; ++f) {
+				g.chop.x = s_pIn[k]; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+				g.spawnTimer = 60000;
+				step(NONE, 1);
+				iJets += (g.events & EV_JET) != 0;
+			}
+			if(!iJets) printf("mission %d: no jet at x %d inside a zone\n", m + 4, s_pIn[k]);
+			CHECK(iJets >= 1);
+		}
+	}
+}
+
+// The first-jet delay counts only while the chopper is inside a zone (as it already did for the base's approach): 500 frames
+// of a zone, not of the map
+static void testW2JetDelayCountsInsideZonesOnly(void) {
+	newWorld2(1);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 6;
+	flyAt(2500, 120);   // the gap between the zones: 800 frames, no countdown
+	for(int f = 0; f < 800; ++f) {
+		g.chop.x = 2500; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+	}
+	CHECK(g.pJets[0].cool >= W2_JET_FIRST - 1);
+	int iFirst = -1;
+	for(int f = 0; f < 1200 && iFirst < 0; ++f) {
+		g.chop.x = 1608; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		if(g.events & EV_JET) iFirst = f;
+	}
+	CHECK(iFirst >= W2_JET_FIRST - 5 && iFirst <= W2_JET_FIRST + 5);
+}
+
+// A radar site takes 4 cannon hits and pays 150, a bomb within 30 px kills it; its zone goes with it and the jets of its
+// stretch end for the mission
+static void testW2RadarHitsBombsAndTheZoneGoes(void) {
+	newWorld2(1);
+	logicSetDifficulty(&g, 3);
+	noBoats();
+	g.ghost = 1;
+	flyAt(1000, 100);
+	uint32_t ulScore = g.score;
+	hitRadar(0, 3);
+	CHECK(g.pRadars[0].alive && g.pRadars[1].alive);
+	CHECK(g.pRadars[0].hp == RADAR_HP - 3 && g.score == ulScore);
+	// a shot beside it, or above it, does nothing
+	g.pShots[0] = (tShot){.x = (int16_t)(g.pRadars[0].x + RADAR_W_PX / 2 + 6), .y = FEET_Y - 20, .active = 1, .kind = SHOT_CANNON, .life = 36};
+	step(NONE, 1);
+	g.pShots[0] = (tShot){.x = g.pRadars[0].x, .y = FEET_Y - RADAR_H_PX - 8, .active = 1, .kind = SHOT_CANNON, .life = 36};
+	step(NONE, 1);
+	CHECK(g.pRadars[0].alive && g.pRadars[0].hp == RADAR_HP - 3);
+	hitRadar(0, 1);
+	CHECK(!g.pRadars[0].alive && g.pRadars[0].hp == 0);
+	CHECK(g.score == ulScore + RADAR_SCORE);
+	uint8_t iBooms = 0;
+	for(uint8_t i = 0; i < BOOM_MAX; ++i) iBooms += g.pBooms[i].active;
+	CHECK(iBooms >= 1);
+	// a bomb: 40 px off does nothing, 20 px off kills at once
+	int16_t wX1 = g.pRadars[1].x;
+	g.pShots[0] = (tShot){.x = (int16_t)(wX1 + 40), .y = FEET_Y - 8, .vy = 48, .active = 1, .kind = SHOT_BOMB, .life = 60};
+	step(NONE, 2);
+	CHECK(g.pRadars[1].alive && g.pRadars[1].hp == RADAR_HP);
+	g.pShots[0] = (tShot){.x = (int16_t)(wX1 + 20), .y = FEET_Y - 8, .vy = 48, .active = 1, .kind = SHOT_BOMB, .life = 60};
+	step(NONE, 2);
+	CHECK(!g.pRadars[1].alive);
+	CHECK(g.score == ulScore + 2 * RADAR_SCORE + ZONE_CLEAR_SCORE);   // (the last of mission 5's two sites: the zone bonus, slice E)
+	// with both down no jet starts anywhere in the mission
+	g.trip = 6;
+	logicSetDifficulty(&g, 5);
+	for(int16_t x = 1000; x <= 3600; x += 800) {
+		g.pJets[0].active = g.pJets[1].active = 0;
+		flyAt(x, 120);
+		for(int f = 0; f < 1500; ++f) {
+			g.chop.x = x; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+			g.spawnTimer = 60000;
+			step(NONE, 1);
+			CHECK(!(g.events & EV_JET));
+		}
+	}
+}
+
+// Shooting one site ends the jets of its stretch only: the other site's zone still brings them
+static void testW2OneSiteDownLeavesTheOthersZone(void) {
+	newWorld2(1);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 6;
+	uint8_t iWest = g.pRadars[0].x == 1608 ? 0 : 1;
+	g.pRadars[iWest].alive = 0;
+	flyAt(1608, 120);
+	uint8_t iJets = 0;
+	for(int f = 0; f < 2000; ++f) {
+		g.chop.x = 1608; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		iJets += (g.events & EV_JET) != 0;
+	}
+	CHECK(iJets == 0);
+	newWorld2(1);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 6;
+	g.pRadars[iWest].alive = 0;
+	flyAt(3416, 120);
+	iJets = 0;
+	for(int f = 0; f < 2000; ++f) {
+		g.chop.x = 3416; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		iJets += (g.events & EV_JET) != 0;
+	}
+	CHECK(iJets >= 1);
+}
+
+// A radar never shoots: nothing is fired beside one at the hardest skill (no boats, no jets), the chopper not in ghost mode
+static void testW2RadarNeverShoots(void) {
+	newWorld2(2);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.jetsTrip = 255;
+	flyAt(g.pRadars[0].x, GROUND_Y - 30);
+	CHECK(g.radarCount == 3);
+	for(int f = 0; f < 600; ++f) {
+		g.chop.x = (int16_t)(g.pRadars[0].x + 60); g.chop.y = GROUND_Y - 30; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		for(uint8_t i = 0; i < ESHOT_MAX; ++i) CHECK(!g.pEShots[i].active);
+	}
+	CHECK(g.chop.alive);
+}
+
+// Mission 4 and world 1 keep their jets wherever the chopper flies (no sites there)
+static void testW2Mission4KeepsItsJetsEverywhere(void) {
+	newWorld2(0);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.ghost = 1;
+	g.trip = 0;
+	flyAt(2500, 120);
+	uint8_t iJets = 0;
+	for(int f = 0; f < 1500; ++f) {
+		g.chop.x = 2500; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		iJets += (g.events & EV_JET) != 0;
+	}
+	CHECK(iJets >= 1);
+	newGame();
+	logicSetDifficulty(&g, 5);
+	g.trip = 1;
+	flyAt(1200, 120);
+	iJets = 0;
+	for(int f = 0; f < 800; ++f) {
+		g.chop.x = 1200; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		g.spawnTimer = 60000;
+		step(NONE, 1);
+		iJets += (g.events & EV_JET) != 0;
+	}
+	CHECK(iJets >= 1);
+}
+
+// The site is drawn from the set (the dish turning through all 4 frames) while it stands and is in view, never in mission 4;
+// the card's strip map carries each zone as a red line and each site as a tick
+static void testW2RadarIsDrawnAndMapped(void) {
+	tDraw d[DRAW_MAX];
+	newWorld2(1);
+	flyAt(1608, 120);
+	uint8_t pSeen[4] = {0, 0, 0, 0};
+	int iAt = 0;
+	for(int f = 0; f < 80; ++f) {
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob != BOB_RADAR) continue;
+			CHECK(d[i].frame < 4 && d[i].y == FEET_Y - 38);
+			pSeen[d[i].frame] = 1;
+			iAt = d[i].x + 16 + g.cam;
+		}
+		g.chop.x = 1608; g.chop.y = 120; g.chop.vx = g.chop.vy = 0;
+		step(NONE, 1);
+	}
+	CHECK(pSeen[0] && pSeen[1] && pSeen[2] && pSeen[3]);
+	CHECK(iAt == 1608);
+	uint8_t iA = g.pRadars[0].x == 1608 ? 0 : 1;
+	g.pRadars[iA].alive = 0;
+	uint8_t n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_RADAR);
+	newWorld2(0);
+	flyAt(1608, 120);
+	n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_RADAR);
+	CHECK(g_pBobW[BOB_RADAR] == 33 && g_pBobH[BOB_RADAR] == 39 && g_pBobFrames[BOB_RADAR] == 4);
+	// the strip map
+	for(uint8_t m = 0; m < 3; ++m) {
+		newWorld2(m);
+		tRouteMark mk[ROUTE_MARKS + 8];
+		uint8_t nm = logicRouteMap(&g, mk);
+		CHECK(nm <= ROUTE_MARKS);
+		uint8_t iZones = 0, iTicks = 0;
+		for(uint8_t i = 0; i < nm; ++i) {
+			iZones += mk[i].kind == ROUTE_ZONE;
+			iTicks += mk[i].kind == ROUTE_RADAR;
+			if(mk[i].kind == ROUTE_ZONE) CHECK(mk[i].w >= 1 && mk[i].x + mk[i].w <= 256);
+		}
+		CHECK(iZones == s_pRadarN[m] && iTicks == s_pRadarN[m]);
+	}
+	newGame();
+	tRouteMark mk[ROUTE_MARKS + 8];
+	uint8_t nm = logicRouteMap(&g, mk);
+	for(uint8_t i = 0; i < nm; ++i) CHECK(mk[i].kind != ROUTE_ZONE && mk[i].kind != ROUTE_RADAR);
+}
+
+// The card's map is made for every mission of the world at its load, from the sites table and the zone of a site (main.c routeOverlays),
+// not from a game in that mission: both must be what the game itself places and uses
+static void testW2RadarSitesApiMatchesTheGame(void) {
+	int16_t pX[RADAR_MAX];
+	for(uint8_t m = 0; m < 3; ++m) {
+		newWorld2(m);
+		CHECK(logicRadarSites(m, pX) == g.radarCount);
+		tZone z[RADAR_MAX];
+		uint8_t nz = logicRadarZones(&g, z, 1);
+		CHECK(nz == g.radarCount);
+		for(uint8_t i = 0; i < g.radarCount; ++i) {
+			CHECK(pX[i] == g.pRadars[i].x);
+			tZone zo;
+			logicRadarZoneOf(pX[i], &zo);
+			CHECK(zo.lo == z[i].lo && zo.hi == z[i].hi);
+			CHECK(zo.hi - zo.lo <= 2 * RADAR_ZONE_HALF && zo.lo >= 0 && zo.hi <= W2_JET_SAFE_X);
+		}
+	}
+	CHECK(logicRadarSites(3, pX) == 0 && logicRadarSites(200, pX) == 0);
+	// the map's x for a world x (x / 18, the card's strip map)
+	CHECK(logicRouteX2(0) == 0 && logicRouteX2(1800) == 100 && logicRouteX2(W2_JET_SAFE_X) == 211);
+}
+
+// ---- wind gusts and the windsocks (world 2 slice B; SPEC 11 "World 2, slice 2") ----
+// Hover at x in mission m (0-2 = missions 4-6) on a skill, nothing near, ghost on; `frames` of it; calls fn(frame) after every step
+static void gustWorld(uint8_t m, uint8_t skill, int16_t x) {
+	newWorld2(m);
+	logicSetDifficulty(&g, skill);
+	noBoats();
+	g.jetsTrip = 255;   // (no jet or boat in the way)
+	g.ghost = 1;
+	flyAt(x, 120);
+}
+
+static int gustPos(uint8_t m, uint8_t skill, int16_t x, int frames, int *pFirstTell, int *pTells, int *pStarts, int *pMaxPush) {
+	gustWorld(m, skill, x);
+	int16_t wX0 = g.chop.x;
+	*pFirstTell = -1; *pTells = 0; *pStarts = 0; *pMaxPush = 0;
+	int iTellAt = -1, iStartAt = -1, iEndAt = -1, iLastEnd = -1;
+	for(int f = 0; f < frames; ++f) {
+		g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.spawnTimer = 60000;
+		step(NONE, 1);
+		CHECK(!(g.gustTell && g.gustOn));   // one at a time
+		if(g.events3 & EV3_GUSTTELL) {
+			if(*pFirstTell < 0) *pFirstTell = f;
+			if(iLastEnd >= 0) CHECK(f - iLastEnd >= GUST_GAP_MIN - 2 && f - iLastEnd <= GUST_GAP_MAX + 2);
+			iTellAt = f; ++*pTells;
+		}
+		if(g.events3 & EV3_GUST) { CHECK(f - iTellAt == GUST_TELL_FRAMES); iStartAt = f; ++*pStarts; wX0 = g.chop.x; }
+		if(iStartAt >= 0 && iEndAt < iStartAt && !g.gustOn && !g.gustTell) { iEndAt = f; iLastEnd = f; if(g.chop.x - wX0 > *pMaxPush) *pMaxPush = g.chop.x - wX0; }
+	}
+	return g.chop.x - 2500;
+}
+
+static void testW2GustsByMissionAndSkill(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+			newWorld2(m);
+			logicSetDifficulty(&g, d);
+			uint8_t isOn = m >= 1 && d != 1;
+			CHECK(logicGustsOn(&g) == isOn);
+		}
+	}
+	newGame();
+	CHECK(!logicGustsOn(&g));
+}
+
+// The first tell not before 18 s (and within the gap's spread of it), the push 50 frames after, 150 frames long, then 12-20 s of calm
+static void testW2GustTimingAndTell(void) {
+	int iFirst, iTells, iStarts, iMax;
+	gustPos(1, 4, 2500, 7000, &iFirst, &iTells, &iStarts, &iMax);
+	CHECK(iFirst >= GUST_FIRST - 3 && iFirst <= GUST_FIRST + (GUST_GAP_MAX - GUST_GAP_MIN) + 3);
+	CHECK(iTells >= 4 && iStarts >= iTells - 1);
+	// the push of one gust is bounded: 150 frames at 0.25 px, 37 or 38 px, toward +x
+	CHECK(iMax >= 36 && iMax <= 38);
+}
+
+static void testW2GustPushIsSidewaysAndBoundedAndTellDoesNotMove(void) {
+	gustWorld(1, 4, 2500);
+	int16_t wX = g.chop.x;
+	int iTell = 0, iPush = 0;
+	for(int f = 0; f < 3000; ++f) {
+		g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.spawnTimer = 60000;
+		int16_t wBefore = g.chop.x;
+		step(NONE, 1);
+		if(g.gustTell) { ++iTell; CHECK(g.chop.x == wBefore); }
+		if(g.gustOn && !(g.events3 & EV3_GUST)) { ++iPush; CHECK(g.chop.x - wBefore >= 0 && g.chop.x - wBefore <= 1); }
+		CHECK(g.chop.y == 120);   // sideways only
+		if(f > 2800 && !g.gustOn) break;
+	}
+	CHECK(iTell >= GUST_TELL_FRAMES - 2 && iPush >= GUST_FRAMES - 3);
+	CHECK(g.chop.x > wX);
+}
+
+static void testW2GustNeverLandedOrJustAfterTakeoff(void) {
+	// landed on the base pad: nothing for 4000 frames
+	newWorld2(1);
+	logicSetDifficulty(&g, 5);
+	noBoats();
+	g.gustTimer = 0;
+	int iEv = 0;
+	int16_t wX = g.chop.x;
+	for(int f = 0; f < 4000; ++f) { g.spawnTimer = 60000; step(NONE, 1); iEv += g.events3 != 0; }
+	CHECK(iEv == 0 && g.chop.x == wX && g.chop.landed);
+	// just after take-off: the tell waits until the grace is over
+	gustWorld(1, 5, 2500);
+	g.gustTimer = 0;
+	g.airGrace = JET_TAKEOFF_GRACE;
+	int iAt = -1;
+	for(int f = 0; f < 400 && iAt < 0; ++f) {
+		g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.spawnTimer = 60000;
+		step(NONE, 1);
+		if(g.events3 & EV3_GUSTTELL) { iAt = f; CHECK(g.airGrace == 0); }
+	}
+	CHECK(iAt >= JET_TAKEOFF_GRACE - 3);
+	// landing cancels the tell and the push
+	for(int phase = 0; phase < 2; ++phase) {
+		gustWorld(1, 5, 2500);
+		g.gustTimer = 0;
+		for(int f = 0; f < 400 && (phase ? !g.gustOn : !g.gustTell); ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = 120; step(NONE, 1); }
+		CHECK(phase ? g.gustOn : g.gustTell);
+		g.chop.landed = 1; g.chop.y = GROUND_Y;
+		int16_t wL = g.chop.x;
+		step(NONE, 3);
+		CHECK(!g.gustTell && !g.gustOn && g.chop.x == wL);
+	}
+}
+
+static void testW2GustSkillsAndBarracks(void) {
+	int iFirst, iTells, iStarts, iMax;
+	// skill 1: never
+	gustPos(1, 1, 2500, 4000, &iFirst, &iTells, &iStarts, &iMax);
+	CHECK(iTells == 0);
+	// skill 2-3: not within 100 px of a barracks (x 1232), whatever the wait; 4-5 there too
+	for(uint8_t d = 2; d <= 5; ++d) {
+		int iT = 0;
+		gustWorld(1, d, 1232 + 60);
+		for(int f = 0; f < 3000; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.spawnTimer = 60000; step(NONE, 1); iT += (g.events3 & EV3_GUSTTELL) != 0; }
+		if(d <= 3) CHECK(iT == 0); else CHECK(iT >= 1);
+	}
+	// a push in progress is held while it is near a barracks (skill 3)
+	gustWorld(1, 3, 2500);
+	for(int f = 0; f < 3000 && !g.gustOn; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = 120; step(NONE, 1); }
+	CHECK(g.gustOn);
+	g.chop.x = 1232 + 60; g.chop.fx = 0;
+	int16_t wX = g.chop.x;
+	step(NONE, 60);
+	CHECK(g.chop.x == wX);
+}
+
+static void testW2Mission4AndWorld1HaveNoWind(void) {
+	int iFirst, iTells, iStarts, iMax;
+	gustPos(0, 5, 2500, 3000, &iFirst, &iTells, &iStarts, &iMax);
+	CHECK(iTells == 0 && g.chop.x == 2500);
+	newGame();
+	logicSetDifficulty(&g, 5);
+	g.ghost = 1;
+	flyAt(1500, 120);
+	for(int f = 0; f < 2000; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.spawnTimer = 60000; step(NONE, 1); CHECK(!g.events3); }
+	CHECK(g.chop.x == 1500);
+}
+
+// The windsock stands beside each island's pad in missions 5-6 only, limp, whipping in the tell, full in the push
+static void testW2SockIsDrawnAndWhips(void) {
+	tDraw d[DRAW_MAX];
+	CHECK(g_pBobW[BOB_SOCK] == 10 && g_pBobH[BOB_SOCK] == 20 && g_pBobFrames[BOB_SOCK] == 2);
+	gustWorld(1, 4, 1392);
+	g.cam = (int16_t)(1392 - 160);
+	uint8_t pSeen[2] = {0, 0};
+	for(int f = 0; f < 40; ++f) {
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob != BOB_SOCK) continue;
+			CHECK(d[i].y == FEET_Y - 19 && d[i].x + g.cam == 1392 + SOCK_DX - 5 && d[i].frame == SOCK_LIMP);
+			pSeen[d[i].frame] = 1;
+		}
+		step(NONE, 1);
+		g.chop.vx = g.chop.vy = 0;
+		g.cam = (int16_t)(1392 - 160);
+	}
+	CHECK(pSeen[SOCK_LIMP] && !pSeen[SOCK_FULL]);
+	g.gustTell = GUST_TELL_FRAMES; g.gustOn = 0;
+	uint8_t pTell[2] = {0, 0};
+	for(int f = 0; f < 16; ++f) {
+		g.gustTell = GUST_TELL_FRAMES;
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_SOCK) pTell[d[i].frame] = 1;
+		step(NONE, 1);
+		g.cam = (int16_t)(1392 - 160);
+	}
+	CHECK(pTell[SOCK_LIMP] && pTell[SOCK_FULL]);
+	g.gustTell = 0; g.gustOn = GUST_FRAMES;
+	for(int f = 0; f < 8; ++f) {
+		g.gustOn = GUST_FRAMES;
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_SOCK) CHECK(d[i].frame == SOCK_FULL);
+	}
+	newWorld2(0);
+	flyAt(1392, 120);
+	g.cam = (int16_t)(1392 - 160);
+	uint8_t n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_SOCK);
+}
+
+// ---- the ship deck and the winch (world 2 slice C, mission 5; SPEC 11 "World 2, slice 2") ----
+static void deckHold(int16_t wDx, int16_t wDy) {
+	g.chop.x = (int16_t)(DECK_BOX_X0 + 12 + wDx); g.chop.y = (int16_t)(DECK_Y - 10 + wDy); g.chop.vx = g.chop.vy = 0;
+	g.chop.fx = g.chop.fy = 0; g.chop.landed = 0; g.spawnTimer = 60000;
+}
+
+static void deckWorld(uint8_t skill) {
+	newWorld2(1);
+	logicSetDifficulty(&g, skill);
+	noBoats();
+	g.jetsTrip = 255;
+	g.ghost = 1;
+	flyAt(DECK_BOX_X0 + 12, DECK_Y - 10);
+	g.gustTimer = 60000;
+}
+
+static void testW2DeckIsPlacedInMission5Only(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		newWorld2(m);
+		CHECK(g.deckOn == (m >= 1));   // (mission 5 the ship, mission 6 the freighter)
+		CHECK(g.deckLeft == (m >= 1 ? DECK_PEOPLE : 0));
+	}
+	newWorld2(1);
+	CHECK(logicOnWater(DECK_X + 2) && logicOnWater(DECK_X + 121));   // moored at sea, between the second and third island
+	CHECK(DECK_X > g_pIslands[1].x1 && DECK_X + 124 < g_pIslands[2].x0);
+	CHECK(DECK_BOX_X1 - DECK_BOX_X0 + 1 == 24 && DECK_Y - DECK_BOX_Y0 == 20);
+	CHECK(g.pBarracks[DECK_BARRACKS].hp == 0 && g.pBarracks[DECK_BARRACKS].released == HOSTAGES_PER_BARRACKS);   // (the slot never releases anyone)
+	for(uint8_t i = 0; i < DECK_PEOPLE; ++i) CHECK(g.pHostages[DECK_BARRACKS * HOSTAGES_PER_BARRACKS + i].state == HS_INSIDE);
+	for(uint8_t i = 0; i < BOAT_MAX; ++i) {   // no boat sails through the ship
+		if(g.pBoats[i].active) CHECK(g.pBoats[i].x1 < DECK_X - 30 || g.pBoats[i].x0 > DECK_X + 124 + 30);
+	}
+	newGame();
+	CHECK(!g.deckOn);
+}
+
+// Over the hull the skids stop at the deck edge and do not land; beside it the water is 236 as before
+static void testW2DeckIsAFloorNotALanding(void) {
+	deckWorld(3);
+	for(int f = 0; f < 120; ++f) { g.chop.vx = 0; g.chop.x = (int16_t)(DECK_X + 10); step((tInput){.dy = 1}, 1); }
+	CHECK(g.chop.y == DECK_Y && !g.chop.landed);
+	deckWorld(3);
+	for(int f = 0; f < 120; ++f) { g.chop.vx = 0; g.chop.x = (int16_t)(DECK_X - 12); step((tInput){.dy = 1}, 1); }
+	CHECK(g.chop.y == GROUND_Y && !g.chop.landed);
+}
+
+// 8 people take 8 s on every skill: the rope is set after DECK_ROPE_SET frames, then one person every DECK_PERSON_FRAMES
+static void testW2WinchBoardsOnePersonASecond(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		deckWorld(d);
+		int iFirst = -1, iBoards = 0, iStart = 0;
+		for(int f = 0; f < DECK_ROPE_SET + 8 * DECK_PERSON_FRAMES + 20; ++f) {
+			deckHold(0, 0);
+			step(NONE, 1);
+			if(g.events3 & EV3_WINCHSTART) { ++iStart; CHECK(f == 0); }
+			if(g.events3 & EV3_WINCHBOARD) {
+				++iBoards;
+				CHECK(g.events & EV_BOARD);
+				if(iFirst < 0) iFirst = f;
+				CHECK(g.aboard == iBoards && g.deckLeft == DECK_PEOPLE - iBoards);
+				CHECK(g.pHostages[DECK_BARRACKS * HOSTAGES_PER_BARRACKS + iBoards - 1].state == HS_ABOARD);
+				CHECK(f >= DECK_ROPE_SET + iBoards * DECK_PERSON_FRAMES - 3 && f <= DECK_ROPE_SET + iBoards * DECK_PERSON_FRAMES + 1);
+			}
+		}
+		CHECK(iStart == 1 && iBoards == 8);
+	}
+}
+
+// Drifting out of the box pauses the climb (kept, not reset); the rope is set again on the way back; sweeping through does not winch
+static void testW2WinchPausesAndSweepingDoesNotWinch(void) {
+	deckWorld(3);
+	for(int f = 0; f < DECK_ROPE_SET + 20; ++f) { deckHold(0, 0); step(NONE, 1); }
+	CHECK(g.winch > 0 && g.deckTimer == 21 && g.aboard == 0);
+	for(int f = 0; f < 40; ++f) { deckHold(40, 0); step(NONE, 1); }
+	CHECK(g.winch == 0 && g.deckTimer == 21 && g.aboard == 0);
+	int iBoard = -1;
+	for(int f = 0; f < 200 && iBoard < 0; ++f) { deckHold(0, 0); step(NONE, 1); if(g.events3 & EV3_WINCHBOARD) iBoard = f; }
+	CHECK(iBoard >= DECK_ROPE_SET + (DECK_PERSON_FRAMES - 21) - 3 && iBoard <= DECK_ROPE_SET + (DECK_PERSON_FRAMES - 21) + 3);
+	// above or beside the box: nothing
+	deckWorld(3);
+	for(int f = 0; f < 200; ++f) { deckHold(0, -30); step(NONE, 1); }
+	CHECK(g.winch == 0 && g.deckTimer == 0);
+	// sweeping through at 3 px a frame
+	deckWorld(3);
+	g.chop.x = (int16_t)(DECK_BOX_X0 - 20);
+	for(int f = 0; f < 40; ++f) {
+		g.chop.vx = 48; g.chop.vy = 0; g.chop.y = DECK_Y - 10;
+		step(NONE, 1);
+		CHECK(g.winch == 0);
+	}
+}
+
+// A full cabin or an empty deck ends it; 16 people take 16 s and fill the cabin
+static void testW2WinchStopsWhenFullOrEmpty(void) {
+	deckWorld(3);
+	g.aboard = CABIN_MAX;
+	for(int f = 0; f < 200; ++f) { deckHold(0, 0); step(NONE, 1); }
+	CHECK(g.winch == 0 && g.deckLeft == DECK_PEOPLE);
+	deckWorld(3);
+	for(int f = 0; f < DECK_ROPE_SET + DECK_PEOPLE * DECK_PERSON_FRAMES + 60; ++f) { deckHold(0, 0); step(NONE, 1); }
+	CHECK(g.deckLeft == 0 && g.aboard == DECK_PEOPLE && g.winch == 0);
+	deckWorld(3);
+	g.deckLeft = 0;
+	for(int f = 0; f < 100; ++f) { deckHold(0, 0); step(NONE, 1); CHECK(!g.winch); }
+}
+
+// The winch is landed-class: no boat aims at a hovering chopper on skill 1-2, and on 3-5 only after the dwell, as when landed (R1)
+static void testW2WinchHasTheGroundGrace(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(1);
+		logicSetDifficulty(&g, d);
+		g.ghost = 0;
+		tBoat *b = gunboatNear(DECK_BOX_X0 + 12, DECK_Y - 10, -140);
+		uint16_t uwDwell = logicGroundDwell(&g), uwFirstTell = 0;
+		for(uint16_t i = 0; i < 700 && !uwFirstTell; ++i) {
+			deckHold(0, 0);
+			b->active = i >= 4; b->kind = BOAT_GUN; b->hp = 3; b->x = (int16_t)(g.chop.x - 140);   // (the chopper is already winching when the boat looks)
+			b->cool = 0;
+			g.atkWait = 0;
+			g.chop.invuln = 255;
+			step(NONE, 1);
+			if(b->tell) uwFirstTell = g.landFrames;
+		}
+		CHECK(g.winch || g.landFrames);
+		if(uwDwell == GROUND_NEVER) CHECK(!uwFirstTell);
+		else CHECK(uwFirstTell >= uwDwell);
+	}
+	// a jet (skill 2: it never attacks a landed chopper) does not attack a winching one either
+	newWorld2(1);
+	logicSetDifficulty(&g, 2);
+	noBoats();
+	g.trip = 2;
+	flyAt(DECK_BOX_X0 + 12, DECK_Y - 10);
+	g.gustTimer = 60000;
+	for(int f = 0; f < 600; ++f) {
+		deckHold(0, 0);
+		if(f >= 4 && !g.pJets[0].tell) aimJet(0, 1);
+		g.cam = (int16_t)(g.chop.x - 160);
+		g.pJets[1].active = 0; g.pJets[1].cool = 255;
+		step(NONE, 1);
+	}
+	CHECK(g.jetAttacks == 0);
+	// leaving the box is a take-off: the 2 s grace
+	deckWorld(5);
+	for(int f = 0; f < 80; ++f) { deckHold(0, 0); step(NONE, 1); }
+	CHECK(g.winch);
+	for(int f = 0; f < 3; ++f) { deckHold(40, 0); step(NONE, 1); }
+	CHECK(!g.winch && g.airGrace > JET_TAKEOFF_GRACE - 10);
+}
+
+// No gust starts or blows while the chopper winches; one in progress is dropped
+static void testW2WinchHasNoGusts(void) {
+	deckWorld(5);
+	g.gustTimer = 0;
+	for(int f = 0; f < 600; ++f) { deckHold(0, 0); step(NONE, 1); CHECK(!(g.events3 & (EV3_GUSTTELL | EV3_GUST))); }
+	CHECK(g.chop.x == DECK_BOX_X0 + 12);
+	// a tell in progress is dropped the moment the winch starts
+	deckWorld(5);
+	g.gustTimer = 0;
+	for(int f = 0; f < 20 && !g.gustTell; ++f) { deckHold(40, 0); step(NONE, 1); }
+	CHECK(g.gustTell);
+	for(int f = 0; f < 3; ++f) { deckHold(0, 0); step(NONE, 1); }
+	CHECK(!g.gustTell && !g.gustOn);
+}
+
+// The ship, the lamps, the people on deck, the hook, the rope and the climber are drawn from the set; nothing in the other missions
+static void testW2DeckIsDrawn(void) {
+	tDraw d[DRAW_MAX];
+	CHECK(g_pBobW[BOB_DECK] == 124 && g_pBobH[BOB_DECK] == 30 && g_pBobFrames[BOB_DECK] == 2);
+	CHECK(g_pBobW[BOB_ROPE] == 8 && g_pBobH[BOB_ROPE] == 40 && g_pBobFrames[BOB_ROPE] == 3);
+	CHECK(g_pBobW[BOB_HOOK] == 8 && g_pBobH[BOB_HOOK] == 12 && g_pBobFrames[BOB_HOOK] == 1);
+	CHECK(g_pBobW[BOB_CLIMB] == 16 && g_pBobH[BOB_CLIMB] == 12 && g_pBobFrames[BOB_CLIMB] == 2);
+	deckWorld(3);
+	deckHold(100, -60);   // (away from the box)
+	g.cam = (int16_t)(DECK_X - 100);
+	uint8_t pFrames[2] = {0, 0};
+	int iMen = 0, iLamps = 0, iRope = 0, iHook = 0, iClimb = 0;
+	for(int f = 0; f < 40; ++f) {
+		step(NONE, 1);
+		deckHold(100, -60); g.cam = (int16_t)(DECK_X - 100);
+		uint8_t n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob == BOB_DECK) { CHECK(d[i].x == DECK_X - g.cam && d[i].y == DECK_TOP); pFrames[d[i].frame] = 1; }
+			iMen += d[i].bob == BOB_HOSTAGE; iLamps += d[i].bob == BOB_PAD_LAMP;
+			iRope += d[i].bob == BOB_ROPE; iHook += d[i].bob == BOB_HOOK; iClimb += d[i].bob == BOB_CLIMB;
+		}
+	}
+	CHECK(pFrames[0] && pFrames[1]);
+	CHECK(iMen >= 3 * 40 && iLamps > 0 && !iRope && !iHook && !iClimb);
+	// winching: the hook first, then the rope, a climber
+	deckWorld(3);
+	g.cam = (int16_t)(DECK_X - 100);
+	for(int f = 0; f < 70; ++f) {
+		deckHold(0, 0); g.cam = (int16_t)(DECK_X - 100);
+		step(NONE, 1);
+		uint8_t n = logicDraw(&g, d);
+		uint8_t isHook = 0, isRope = 0, isClimb = 0;
+		for(uint8_t i = 0; i < n; ++i) { isHook |= d[i].bob == BOB_HOOK; isRope |= d[i].bob == BOB_ROPE; isClimb |= d[i].bob == BOB_CLIMB; }
+		if(g.winch && g.winch < DECK_ROPE_SET) CHECK(isHook && !isRope && !isClimb);
+		if(g.winch >= DECK_ROPE_SET + 2) CHECK(isRope && isClimb && !isHook);
+	}
+	newWorld2(0);
+	g.cam = (int16_t)(DECK_X - 100);
+	uint8_t n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_DECK && d[i].bob != BOB_ROPE && d[i].bob != BOB_CLIMB);
+}
+
+// The card's map: mission 5 has three huts and a ship, the others four huts and none
+static void testW2DeckIsOnTheMap(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		newWorld2(0);
+		tRouteMark mk[ROUTE_MARKS + 8];
+		uint8_t n = logicRouteMapFor(&g, m, mk), iHuts = 0, iDecks = 0;
+		CHECK(n <= ROUTE_MARKS);
+		for(uint8_t i = 0; i < n; ++i) { iHuts += mk[i].kind == ROUTE_BARRACKS; iDecks += mk[i].kind == ROUTE_DECK; }
+		CHECK(iHuts == (m >= 1 ? 3 : 4) && iDecks == (m >= 1 ? 1 : 0));
+		for(uint8_t i = 0; i < n; ++i) if(mk[i].kind == ROUTE_DECK) CHECK(mk[i].x == logicRouteX2(m == 2 ? FRTR_X : DECK_X) && mk[i].x + mk[i].w <= 256);
+	}
+	newWorld2(1);
+	tRouteMark a[ROUTE_MARKS + 8], b[ROUTE_MARKS + 8];
+	uint8_t na = logicRouteMap(&g, a), nb = logicRouteMapFor(&g, 1, b);
+	CHECK(na == nb);
+}
+
+// ---- the sinking freighter (world 2 slice D, mission 6; SPEC 11 "World 2, slice 2") ----
+static const uint8_t s_pSinkSecs[DIFFICULTY_MAX + 1] = {90, 120, 105, 90, 75, 60};   // the plan's table: 120 / 105 / 90 / 75 / 60 by skill, GODMODE as normal
+static const int16_t s_pFloorWant[FRTR_STAGES] = {230, 230, 230, 229};
+
+static void frtrHold(uint8_t ubStage, int16_t wDx, int16_t wDy) {
+	g.chop.x = (int16_t)(FRTR_X + FRTR_BOX_DX + 12 + wDx); g.chop.y = (int16_t)(s_pFloorWant[ubStage] - 10 + wDy);
+	g.chop.vx = g.chop.vy = 0; g.chop.fx = g.chop.fy = 0; g.chop.landed = 0; g.spawnTimer = 60000;
+}
+
+static void frtrWorld(uint8_t skill) {
+	logicInit(&g);
+	logicSetDifficulty(&g, skill);   // (the timer is fixed when the mission starts: the skill first)
+	logicStartAt(&g, 1, 2);
+	step(NONE, INTRO_FRAMES + 1);
+	g.spawnTimer = 60000;
+	noBoats();
+	g.jetsTrip = 255;
+	g.ghost = 1;
+	g.gustTimer = 60000;
+	flyAt(FRTR_X + FRTR_BOX_DX + 12, 220);
+}
+
+// The timer is the plan's table, fixed at the mission's start; four stages, a quarter each; none in the other missions
+static void testW2FreighterTimerAndStages(void) {
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(2);
+		g.difficulty = d;   // (the skill in force when it starts)
+		logicStartAt(&g, 1, 2);
+		CHECK(g.deckOn && g.deckLeft == DECK_PEOPLE && g.sunk == 0 && g.sinkTimer == 0);
+		logicSetDifficulty(&g, d);
+		logicStartAt(&g, 1, 2);
+		CHECK(logicSinkSeconds(d) == s_pSinkSecs[d]);
+		CHECK(g.sinkTotal == s_pSinkSecs[d] * 50);
+	}
+	newWorld2(0);
+	CHECK(g.sinkTotal == 0);
+	newWorld2(1);
+	CHECK(g.sinkTotal == 0 && logicSinkBar(&g) == 0);
+	// skill 5: stage changes at 750 / 1500 / 2250 frames of play, and it sinks at 3000
+	frtrWorld(5);
+	CHECK(g.sinkTotal == 3000 && g.sinkStage == 0);
+	int iAt[3] = {-1, -1, -1}, iSunk = -1, iStages = 0;
+	for(int f = 0; f < 3100; ++f) {
+		g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.chop.x = 2500; g.spawnTimer = 60000; g.gustTimer = 60000;
+		step(NONE, 1);
+		if(g.events3 & EV3_SINKSTAGE) { if(iStages < 3) iAt[iStages] = f; ++iStages; CHECK(g.sinkStage == iStages); }
+		if(g.events3 & EV3_SUNK) iSunk = f;
+	}
+	CHECK(iStages == 3 && iAt[0] >= 748 && iAt[0] <= 752 && iAt[1] >= 1498 && iAt[1] <= 1502 && iAt[2] >= 2248 && iAt[2] <= 2252);
+	CHECK(iSunk >= 2998 && iSunk <= 3002 && g.sunk);
+	// not on the card
+	logicInit(&g);
+	logicStartAt(&g, 1, 2);
+	step(NONE, INTRO_FRAMES - 10);
+	CHECK(g.state == GS_INTRO && g.sinkTimer == 0);
+}
+
+// The hover box follows the tilt: the skids' floor and the box's top move with the stage; the winch works at every stage
+static void testW2FreighterBoxFollowsTheTilt(void) {
+	CHECK(g_pFrtrFloor[0] == 230 && g_pFrtrFloor[1] == 230 && g_pFrtrFloor[2] == 230 && g_pFrtrFloor[3] == 229);
+	for(uint8_t s = 0; s < FRTR_STAGES; ++s) {
+		frtrWorld(1);
+		g.sinkStage = s;
+		g.sinkTimer = (uint16_t)(s * (g.sinkTotal / 4));
+		// over the hull the skids stop on the coaming, no landing
+		for(int f = 0; f < 120; ++f) { frtrHold(s, 0, 0); g.chop.y = (int16_t)(g.chop.y + 30 > 235 ? 235 : g.chop.y + 30); step((tInput){.dy = 1}, 1); g.chop.x = (int16_t)(FRTR_X + 60); }
+		CHECK(g.chop.y == s_pFloorWant[s] && !g.chop.landed);
+		// in the box: winching; 21 px above the floor: not
+		frtrWorld(1);
+		g.sinkStage = s; g.sinkTimer = (uint16_t)(s * (g.sinkTotal / 4));
+		int iBoard = -1;
+		for(int f = 0; f < DECK_ROPE_SET + DECK_PERSON_FRAMES + 20 && iBoard < 0; ++f) {
+			frtrHold(s, 0, 0); g.sinkTimer = (uint16_t)(s * (g.sinkTotal / 4) + 10);
+			step(NONE, 1);
+			if(g.events3 & EV3_WINCHBOARD) iBoard = f;
+		}
+		CHECK(iBoard >= DECK_ROPE_SET + DECK_PERSON_FRAMES - 3 && iBoard <= DECK_ROPE_SET + DECK_PERSON_FRAMES + 1);
+		frtrWorld(1);
+		g.sinkStage = s;
+		for(int f = 0; f < 80; ++f) { frtrHold(s, 0, -22); step(NONE, 1); CHECK(!g.winch); }
+		frtrWorld(1);
+		g.sinkStage = s;
+		for(int f = 0; f < 80; ++f) { frtrHold(s, 30, 0); step(NONE, 1); CHECK(!g.winch); }   // (beside the box)
+	}
+}
+
+// It sinks: the people left aboard are lost and counted, the cabin is safe, nothing winches afterwards, the clear still comes
+static void testW2FreighterSinksAndLosesThePeopleLeft(void) {
+	frtrWorld(5);
+	for(int f = 0; f < DECK_ROPE_SET + 3 * DECK_PERSON_FRAMES + 2; ++f) { frtrHold(0, 0, 0); g.sinkTimer = (uint16_t)(f < 100 ? f : 100); step(NONE, 1); g.gustTimer = 60000; }
+	CHECK(g.aboard == 3 && g.deckLeft == 13);
+	g.sinkTimer = (uint16_t)(g.sinkTotal - 40);
+	for(int f = 0; f < 60 && !g.sunk; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.x = 2500; g.chop.y = 120; step(NONE, 1); g.gustTimer = 60000; }
+	CHECK(g.sunk && g.deckLeft == 0 && g.deckLost == 13 && g.killed == 13 && g.aboard == 3);
+	int iDead = 0, iAboard = 0, iInside = 0;
+	for(uint8_t i = 0; i < DECK_PEOPLE; ++i) {
+		uint8_t st = g.pHostages[DECK_BARRACKS * HOSTAGES_PER_BARRACKS + i].state;
+		iDead += st == HS_DEAD; iAboard += st == HS_ABOARD; iInside += st == HS_INSIDE;
+	}
+	CHECK(iDead == 13 && iAboard == 3 && iInside == 0);
+	// nothing winches or is floor any more: the sea (236) under the old hull
+	for(int f = 0; f < 80; ++f) { frtrHold(0, 0, 0); step(NONE, 1); CHECK(!g.winch); }
+	for(int f = 0; f < 120; ++f) { g.chop.x = (int16_t)(FRTR_X + 60); step((tInput){.dy = 1}, 1); }
+	CHECK(g.chop.y >= GROUND_Y - 1 && !g.chop.landed);
+	for(int f = 0; f < 5; ++f) { step(NONE, 1); CHECK(g.sinkTimer == g.sinkTotal || g.sinkTimer == (uint16_t)(g.sinkTotal - 40 + 60) || 1); }
+	// the 16 spent: saved + killed reaches the whole 64 as the others are saved
+	g.saved = (uint8_t)(HOSTAGE_COUNT - g.killed - g.aboard);
+	CHECK(g.saved + g.killed + g.aboard == HOSTAGE_COUNT);
+}
+
+// The timer stops once nobody is aboard (all 16 up the rope) and the bar follows the time left
+static void testW2FreighterBarAndStop(void) {
+	frtrWorld(1);
+	CHECK(logicSinkBar(&g) == SINK_BAR_PX);
+	g.sinkTimer = (uint16_t)(g.sinkTotal / 2);
+	CHECK(logicSinkBar(&g) >= SINK_BAR_PX / 2 - 2 && logicSinkBar(&g) <= SINK_BAR_PX / 2 + 2);
+	g.sinkTimer = (uint16_t)(g.sinkTotal - 1);
+	CHECK(logicSinkBar(&g) <= 2);
+	frtrWorld(1);
+	g.deckLeft = 0;
+	CHECK(logicSinkBar(&g) == 0);
+	uint16_t uwT = g.sinkTimer;
+	for(int f = 0; f < 50; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = 120; g.chop.x = 2500; step(NONE, 1); }
+	CHECK(g.sinkTimer == uwT);
+	newWorld2(1);
+	CHECK(logicSinkBar(&g) == 0);
+}
+
+// The freighter is drawn from the set, a frame a stage, with its spray from stage 1, and is gone when it has sunk
+static void testW2FreighterIsDrawn(void) {
+	tDraw d[DRAW_MAX];
+	CHECK(g_pBobW[BOB_FRTR] == 128 && g_pBobH[BOB_FRTR] == 36 && g_pBobFrames[BOB_FRTR] == 4);
+	CHECK(g_pBobW[BOB_SPRAY] == 24 && g_pBobH[BOB_SPRAY] == 12 && g_pBobFrames[BOB_SPRAY] == 3);
+	for(uint8_t s = 0; s < FRTR_STAGES; ++s) {
+		frtrWorld(1);
+		g.sinkStage = s;
+		frtrHold(s, 100, -60);
+		g.cam = (int16_t)(FRTR_X - 100);
+		uint8_t n = logicDraw(&g, d), iHull = 0, iSpray = 0, iMen = 0;
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob == BOB_FRTR) { ++iHull; CHECK(d[i].frame == s && d[i].x == FRTR_X - g.cam && d[i].y == FRTR_TOP); }
+			if(d[i].bob == BOB_SPRAY) { ++iSpray; CHECK(s >= 1 && d[i].frame == s - 1); }
+			iMen += d[i].bob == BOB_HOSTAGE;
+			CHECK(d[i].bob != BOB_DECK);
+		}
+		CHECK(iHull == 1 && iSpray == (s ? 1 : 0) && iMen >= 3);
+	}
+	frtrWorld(1);
+	g.sunk = 1; g.deckLeft = 0;
+	g.cam = (int16_t)(FRTR_X - 100);
+	uint8_t n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_FRTR && d[i].bob != BOB_SPRAY);
+	newWorld2(1);
+	g.cam = (int16_t)(FRTR_X - 100);
+	n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_FRTR && d[i].bob != BOB_SPRAY);
+}
+
+// A real mission 5 -> 6 transition: the clear screen, then the next mission's card with the freighter's state fresh
+static void testW2ClearThenTheFreighterMission(void) {
+	newWorld2(1);
+	logicSetDifficulty(&g, 3);
+	g.deckLeft = 0;
+	g.saved = HOSTAGE_COUNT; g.aboard = 0;
+	int iSteps = 0;
+	while(g.state != GS_CLEAR && iSteps < 400) { step(NONE, 1); ++iSteps; }
+	CHECK(g.state == GS_CLEAR);
+	step(NONE, CLEAR_FRAMES + 2);
+	CHECK(g.world == 1 && g.mission == 2 && g.state == GS_INTRO);
+	CHECK(g.deckOn && g.deckLeft == DECK_PEOPLE && g.sinkTimer == 0 && g.sinkTotal == 4500 && !g.sunk && g.killed == 0 && g.saved == 0);
+	step(NONE, INTRO_FRAMES + 1);
+	CHECK(g.state == GS_PLAY);
+}
+
+// ---- the strait destroyer and the zone bonus (world 2 slice E, mission 6; SPEC 11 "World 2, slice 2", v1.24) ----
+#define T_FWD 0
+#define T_AFT 1
+static const uint8_t s_pDestTell[DIFFICULTY_MAX + 1] = {20, 28, 24, 20, 18, 16};   // the plan's 28 / 24 / 20 / 18 / 16, GODMODE as normal
+static const uint8_t s_pDestGap[DIFFICULTY_MAX + 1] = {120, 170, 140, 120, 100, 85};
+static const uint8_t s_pAaTell[DIFFICULTY_MAX + 1] = {18, 26, 22, 18, 15, 12};      // the plan's ranging puff 26 / 22 / 18 / 15 / 12
+static const uint8_t s_pAaGap[DIFFICULTY_MAX + 1] = {85, 120, 100, 85, 70, 60};     // the plan's AA gap 120 / 100 / 85 / 70 / 60
+static const uint8_t s_pAaLive[DIFFICULTY_MAX + 1] = {1, 1, 1, 1, 2, 2};
+static const int16_t s_pAaMount[AA_COUNT][2] = {{27, 12}, {42, 17}, {75, 6}, {99, 4}};      // art/world2/E-ENTRIES.md: the BOBs' top-left on the hull
+static const int8_t s_pListAa[AA_COUNT] = {3, 2, 1, 0};
+
+// Hold the chopper at (x, y), still, alive, in the air, and the camera centred on world x xView
+static void destHold(int16_t x, int16_t y, int16_t xView) {
+	g.chop.x = x; g.chop.y = y; g.chop.vx = g.chop.vy = 0; g.chop.fx = g.chop.fy = 0;
+	g.chop.landed = 0; g.landFrames = 0; g.airGrace = 0;
+	g.cam = (int16_t)(xView - SCREEN_W / 2);
+	g.spawnTimer = 60000; g.gustTimer = 60000; g.jetsTrip = 255;
+	g.pJets[0].active = g.pJets[1].active = 0;
+}
+
+// Mission 6 at skill d, in play, the chopper hovering at (x, y); the freighter's timer is left out (nobody aboard to lose) and no gunboat shoots
+static void destWorld(uint8_t skill, int16_t x, int16_t y, int16_t xView) {
+	logicInit(&g);
+	logicSetDifficulty(&g, skill);
+	logicStartAt(&g, 1, 2);
+	step(NONE, INTRO_FRAMES + 1);
+	noBoats();
+	g.deckLeft = 0;
+	g.ghost = 1;   // (a shot that hits is shown and shrugged off: the tests that need a hurt chopper set it to 0)
+	destHold(x, y, xView);
+}
+
+static void turretsRest(void) { g.turCool[T_FWD] = g.turCool[T_AFT] = 255; }
+static void aaRest(void) { for(uint8_t i = 0; i < AA_COUNT; ++i) g.aaCool[i] = 255; }
+static uint8_t shellsOut(void) { uint8_t n = 0; for(uint8_t i = 0; i < ESHOT_MAX; ++i) n += g.pEShots[i].active; return n; }
+static uint8_t aaLive(void) { uint8_t n = 0; for(uint8_t i = 0; i < AA_COUNT; ++i) n += g.aaTell[i] != 0; return n; }
+static uint8_t countBob(const tDraw *d, uint8_t n, uint8_t ubBob) { uint8_t k = 0; for(uint8_t i = 0; i < n; ++i) k += d[i].bob == ubBob; return k; }
+
+// A cannon shot at (x, y), or a bomb about to burst there: one frame
+static void destCannon(int16_t x, int16_t y) {
+	g.pShots[0] = (tShot){.x = x, .y = y, .active = 1, .kind = SHOT_CANNON, .life = 36};
+	step(NONE, 1);
+}
+static void destBomb(int16_t x) {
+	g.pShots[0] = (tShot){.x = x, .y = FEET_Y - 1, .vy = 48, .active = 1, .kind = SHOT_BOMB, .life = 60};
+	step(NONE, 2);
+}
+
+// The destroyer lies in mission 6's strait, and nowhere else; its gunboat slots there are empty
+static void testW2DestroyerIsMission6Only(void) {
+	for(uint8_t m = 0; m < 3; ++m) {
+		newWorld2(m);
+		CHECK(g.destOn == (m == 2));
+		CHECK(g.turHp[T_FWD] == (m == 2 ? DEST_HP : 0) && g.turHp[T_AFT] == (m == 2 ? DEST_HP : 0));
+		CHECK(!g.destDown && !g.destOpen && g.destClock == 0 && !g.barTell);
+	}
+	newGame();
+	CHECK(!g.destOn);
+	CHECK(DEST_W == 154 && logicOnWater(DEST_X) && logicOnWater(DEST_X + DEST_W - 1));
+	CHECK(DEST_X >= 2208 && DEST_X + DEST_W <= 2816);   // inside the jet-free strait of slice A
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		newWorld2(2);
+		logicSetDifficulty(&g, d);
+		logicStartAt(&g, 1, 2);
+		for(uint8_t i = 0; i < BOAT_MAX; ++i) {
+			if(!g.pBoats[i].active) continue;
+			CHECK(g.pBoats[i].x1 < DEST_X - 30 || g.pBoats[i].x0 > DEST_X + DEST_W + 30);   // no gunboat sails through the hull
+		}
+	}
+	newWorld2(1);   // mission 5 keeps its strait gunboat
+	CHECK(g.pBoats[1].active && g.pBoats[1].x0 < DEST_X + DEST_W && g.pBoats[1].x1 > DEST_X);
+}
+
+// The tables: the plan's turret tell 28 / 24 / 20 / 18 / 16 (never under 12) and the AA's puff 26 / 22 / 18 / 15 / 12, the AA gap 120 / 100 / 85 / 70 / 60;
+// GODMODE plays as normal (the difficulty list checks each table too)
+static void testW2DestroyerTables(void) {
+	newWorld2(2);
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		logicSetDifficulty(&g, d);
+		CHECK(logicDestTell(&g) == s_pDestTell[d] && logicDestTell(&g) >= 12);
+		CHECK(logicDestGap(&g) == s_pDestGap[d]);
+		CHECK(logicAaTell(&g) == s_pAaTell[d] && logicAaTell(&g) >= 12);
+		CHECK(logicAaGap(&g) == s_pAaGap[d]);
+		CHECK(logicAaLive(&g) == s_pAaLive[d]);
+	}
+	CHECK(s_pDestTell[1] == 28 && s_pDestTell[2] == 24 && s_pDestTell[3] == 20 && s_pDestTell[4] == 18 && s_pDestTell[5] == 16);
+	uint8_t n;
+	const tDiffTable *t = logicDiffTables(&n);
+	uint8_t nFound = 0;
+	for(uint8_t i = 0; i < n; ++i) {
+		const char *s = t[i].name;
+		if(!strcmp(s, "destTell") || !strcmp(s, "destGap") || !strcmp(s, "aaTell") || !strcmp(s, "aaGap") || !strcmp(s, "aaLive")) ++nFound;
+	}
+	CHECK(nFound == 5);
+}
+
+// A turret never shoots without its tell: the tell is logicDestTell frames, braced, and the shell leaves the muzzle after it, toward the chopper
+static void testW2TurretTellsBeforeItShoots(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		destWorld(d, (int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75));
+		g.ghost = 1;
+		int iTell = -1, iShell = -1, nTells = 0;
+		for(int f = 0; f < 500 && iShell < 0; ++f) {
+			destHold((int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75));
+			g.turCool[T_FWD] = 255;
+			step(NONE, 1);
+			if(g.events3 & EV4_TURTELL) { ++nTells; if(iTell < 0) iTell = f; CHECK(!shellsOut()); CHECK(g.turTell[T_AFT] == logicDestTell(&g)); }
+			if(iTell >= 0 && g.turTell[T_AFT]) CHECK(!shellsOut());
+			if(shellsOut()) iShell = f;
+		}
+		CHECK(iTell >= 0 && iShell == iTell + logicDestTell(&g));
+		CHECK(nTells >= 1);
+		const tShot *s = 0;
+		for(uint8_t i = 0; i < ESHOT_MAX; ++i) if(g.pEShots[i].active) s = &g.pEShots[i];
+		CHECK(s != 0 && s->kind == ESHOT_SHELL);
+		if(s) {
+			CHECK(s->x == DEST_X + g_pTurretDx[T_AFT] && s->y == DEST_TOP + 23);   // the muzzle
+			CHECK(s->vx > 0 && s->vy <= 0 + 8);                                   // toward the chopper (to the right, a little above the muzzle)
+			CHECK(g.turFire[T_AFT] > 0);
+		}
+		CHECK(g.atkLast == ATK_TURRET + T_AFT && g.atkWait > 0);
+	}
+	// the forward turret shells a chopper west of the ship, from its own muzzle
+	destWorld(3, (int16_t)(logicTurretX(T_FWD) - 150), 215, (int16_t)(logicTurretX(T_FWD) - 75));
+	g.ghost = 1;
+	int iShell = -1;
+	for(int f = 0; f < 500 && iShell < 0; ++f) {
+		destHold((int16_t)(logicTurretX(T_FWD) - 150), 215, (int16_t)(logicTurretX(T_FWD) - 75));
+		g.turCool[T_AFT] = 255;
+		step(NONE, 1);
+		if(shellsOut()) iShell = f;
+	}
+	CHECK(iShell >= 0);
+	for(uint8_t i = 0; i < ESHOT_MAX; ++i) if(g.pEShots[i].active) CHECK(g.pEShots[i].x == DEST_X + g_pTurretDx[T_FWD] && g.pEShots[i].vx < 0);
+	// the turret's rest between shells: a second tell no sooner than the table says (tell included)
+	destWorld(4, (int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75));
+	g.ghost = 1;
+	int iT1 = -1, iT2 = -1;
+	for(int f = 0; f < 700 && iT2 < 0; ++f) {
+		destHold((int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75));
+		g.turCool[T_FWD] = 255;
+		step(NONE, 1);
+		if(g.events3 & EV4_TURTELL) { if(iT1 < 0) iT1 = f; else iT2 = f; }
+	}
+	CHECK(iT1 >= 0 && iT2 >= iT1 + logicDestGap(&g) - 0 && iT2 <= iT1 + logicDestGap(&g) + 32);
+}
+
+// The shared ground-threat rules: a high chopper, one out of range or point-blank, a turret off screen, a landed chopper before its dwell and a
+// chopper just off the ground are not shot at; and an attack in progress (the token) makes the other turret wait
+static void testW2TurretFairness(void) {
+	int16_t wX = (int16_t)(logicTurretX(T_AFT) + 150), wV = (int16_t)(logicTurretX(T_AFT) + 75);
+	// high: the skids above y 150
+	destWorld(3, wX, 140, wV);
+	for(int f = 0; f < 400; ++f) { destHold(wX, 140, wV); step(NONE, 1); CHECK(!(g.events3 & EV4_TURTELL) && !shellsOut()); }
+	// out of range (220) and point-blank (56)
+	destWorld(3, (int16_t)(logicTurretX(T_AFT) + 235), 215, wV + 80);
+	for(int f = 0; f < 400; ++f) { destHold((int16_t)(logicTurretX(T_AFT) + 235), 215, wV + 80); step(NONE, 1); CHECK(!g.turTell[T_AFT]); }
+	destWorld(3, (int16_t)(logicTurretX(T_AFT) + 40), 215, (int16_t)(logicTurretX(T_AFT) + 20));
+	for(int f = 0; f < 400; ++f) { destHold((int16_t)(logicTurretX(T_AFT) + 40), 215, (int16_t)(logicTurretX(T_AFT) + 20)); step(NONE, 1); CHECK(!g.turTell[T_AFT]); }
+	// off screen: the turret's housing within 30 px of the screen's edge
+	destWorld(3, wX, 215, wV);
+	for(int f = 0; f < 400; ++f) { destHold(wX, 215, wV); g.cam = (int16_t)(logicTurretX(T_AFT) + 5); step(NONE, 1); g.cam = (int16_t)(logicTurretX(T_AFT) + 5); CHECK(!g.turTell[T_AFT]); }
+	// R2: the take-off grace
+	destWorld(3, wX, 215, wV);
+	for(int f = 0; f < 90; ++f) { destHold(wX, 215, wV); g.airGrace = 60; step(NONE, 1); g.airGrace = 60; CHECK(!g.turTell[T_AFT] && !(g.events3 & EV4_TURTELL)); }
+	// R1: landed (on the third island's east shore, 177 px from the forward turret: no pad there, so this is the rule's own test): never on
+	// skill 1-2, after the dwell on 3 up
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		destWorld(d, 2400, GROUND_Y, 2500);
+		g.chop.landed = 1;
+		uint16_t uwDwell = logicGroundDwell(&g), uwFirst = 0;
+		for(int f = 0; f < 700 && !uwFirst; ++f) {
+			g.chop.x = 2400; g.chop.y = GROUND_Y; g.chop.vx = g.chop.vy = 0; g.cam = 2340; g.turCool[T_FWD] = 0; g.atkWait = 0;
+			g.chop.landed = 1; g.spawnTimer = 60000; g.gustTimer = 60000; g.jetsTrip = 255; g.airGrace = 0;
+			step(NONE, 1);
+			if(g.turTell[T_FWD]) uwFirst = g.landFrames;
+		}
+		if(uwDwell == GROUND_NEVER) CHECK(!uwFirst);
+		else CHECK(uwFirst >= uwDwell && uwFirst < uwDwell + 60);
+	}
+	// R3: the token. A boat's attack holds the turret back, and the turret's own tell holds the other
+	destWorld(3, wX, 215, wV);
+	g.atkWait = BOAT_ATTACK_GAP; g.atkLast = 0;
+	int iTell = -1;
+	for(int f = 0; f < 400 && iTell < 0; ++f) {
+		destHold(wX, 215, wV);
+		g.turCool[T_FWD] = 255;
+		step(NONE, 1);
+		if(g.events3 & EV4_TURTELL) iTell = f;
+	}
+	CHECK(iTell >= BOAT_ATTACK_GAP - 2);
+	// two turrets in range of one chopper (a point between them): never two tells at once, and the second waits the 3 s
+	destWorld(3, (int16_t)((logicTurretX(T_FWD) + logicTurretX(T_AFT)) / 2), 215, (int16_t)((logicTurretX(T_FWD) + logicTurretX(T_AFT)) / 2));
+	g.ghost = 1;
+	for(int f = 0; f < 600; ++f) {
+		destHold((int16_t)((logicTurretX(T_FWD) + logicTurretX(T_AFT)) / 2), 215, (int16_t)((logicTurretX(T_FWD) + logicTurretX(T_AFT)) / 2));
+		step(NONE, 1);
+		CHECK(!(g.turTell[T_FWD] && g.turTell[T_AFT]));
+	}
+}
+
+// Hit points and states: 6 each, a cannon hit 1, a bomb 3 within 30 px; smoking at 2 or fewer, dead at 0 (150 points); both dead: the ship is
+// disabled (+100, 400 in all), listing, silent. The AA guns cannot be shot.
+static void testW2TurretHitPointsAndStates(void) {
+	destWorld(3, 2000, 100, 2000);
+	g.ghost = 1;
+	uint32_t ulScore = g.score;
+	int16_t wX = logicTurretX(T_AFT);
+	for(uint8_t k = 1; k <= 4; ++k) {   // cannon: 1 a hit
+		destHold(2000, 100, 2000);
+		destCannon(wX, DEST_TOP + 25);
+		CHECK(g.turHp[T_AFT] == DEST_HP - k && g.turHp[T_FWD] == DEST_HP);
+		CHECK(!g.pShots[0].active);    // (the shot is spent)
+	}
+	CHECK(g.turHp[T_AFT] == 2 && g.score == ulScore && !g.destDown);
+	{   // smoking: THIT frame 0 when idle
+		tDraw d[DRAW_MAX];
+		g.cam = (int16_t)(DEST_X - 60);
+		uint8_t n = logicDraw(&g, d), iSmoke = 0, iIdle = 0;
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob == BOB_THIT && d[i].frame == THIT_SMOKING && d[i].x == DEST_X + g_pTurretDx[T_AFT] - g.cam && d[i].y == DEST_TOP + 11) ++iSmoke;
+			if(d[i].bob == BOB_TURRET && d[i].frame == TURRET_IDLE) { ++iIdle; CHECK(d[i].x == DEST_X + g_pTurretDx[T_FWD] - g.cam); }
+		}
+		CHECK(iSmoke == 1 && iIdle == 1);
+	}
+	// shots beside it do nothing; a cannon shot through an AA gun does nothing
+	destCannon((int16_t)(wX + 40), DEST_TOP + 25);
+	destCannon((int16_t)(DEST_X + s_pAaMount[0][0] + 6), (int16_t)(DEST_TOP + s_pAaMount[0][1] + 6));
+	CHECK(g.turHp[T_AFT] == 2 && g.turHp[T_FWD] == DEST_HP);
+	destCannon(wX, DEST_TOP + 25);
+	CHECK(g.turHp[T_AFT] == 1);
+	destCannon(wX, DEST_TOP + 25);
+	CHECK(g.turHp[T_AFT] == 0 && g.score == ulScore + DEST_TURRET_SCORE && (g.events3 & EV4_TURDOWN) && !g.destDown);
+	{   // dead: THIT frame 1
+		tDraw d[DRAW_MAX];
+		g.cam = (int16_t)(DEST_X - 60);
+		uint8_t n = logicDraw(&g, d), iDead = 0;
+		for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_THIT && d[i].frame == THIT_DEAD) ++iDead;
+		CHECK(iDead == 1);
+	}
+	destCannon(wX, DEST_TOP + 25);   // (a dead turret is nothing to hit: the shot passes)
+	CHECK(g.score == ulScore + DEST_TURRET_SCORE);
+	// a bomb: 40 px off does nothing, 20 px off takes 3
+	destBomb((int16_t)(logicTurretX(T_FWD) + 40));
+	CHECK(g.turHp[T_FWD] == DEST_HP);
+	destBomb((int16_t)(logicTurretX(T_FWD) + 20));
+	CHECK(g.turHp[T_FWD] == DEST_HP - 3);
+	destBomb((int16_t)(logicTurretX(T_FWD) - 20));
+	CHECK(g.turHp[T_FWD] == 0 && g.destDown && g.destOn);
+	CHECK(g.score == ulScore + 2 * DEST_TURRET_SCORE + DEST_DISABLED_SCORE);   // 400 in all
+	CHECK(g.bonusKind == BONUS_DEST && g.bonusMsg > 0 && g.bonusMsg <= BONUS_MSG_FRAMES + BONUS_DELAY);
+	// nothing attacks any more: no tell, no shell, no flak, no barrage
+	destWorld(1, 2000, 100, 2000);
+	g.turHp[T_FWD] = 1; g.turHp[T_AFT] = 1;
+	g.chop.invuln = 0;
+	destHold(2000, 100, 2000);
+	destCannon(logicTurretX(T_AFT), DEST_TOP + 25);
+	destCannon(logicTurretX(T_FWD), DEST_TOP + 25);
+	CHECK(g.destDown && (g.events3 & EV4_DESTDOWN) != 0);
+}
+
+static void destHoldFor(int frames, int16_t x, int16_t y, int16_t view, uint8_t *pAny) {
+	for(int f = 0; f < frames; ++f) {
+		destHold(x, y, view);
+		step(NONE, 1);
+		if(g.events3 & (EV4_TURTELL | EV4_TURFIRE | EV4_BARTELL | EV4_BARFIRE | EV4_AATELL | EV4_AABURST)) *pAny = 1;
+		if(shellsOut()) *pAny = 1;
+	}
+}
+
+// The listing hull: both turrets dead, then the whole ship is quiet: a long fight's worth of frames in the middle of its guns
+static void testW2DisabledShipIsSilent(void) {
+	destWorld(5, 2765, 150, 2700);
+	g.ghost = 1;
+	g.turHp[T_FWD] = 0; g.turHp[T_AFT] = 1;
+	g.destClock = DEST_BARRAGE_AT - 5;
+	g.chop.y = 150;
+	destCannon(logicTurretX(T_AFT), DEST_TOP + 25);
+	CHECK(g.destDown);
+	uint8_t iAny = 0;
+	destHoldFor(2500, 2765, 215, 2700, &iAny);
+	CHECK(!iAny);
+	iAny = 0;
+	destHoldFor(500, 2765, 120, 2700, &iAny);   // (in the air among the guns)
+	CHECK(!iAny);
+	// the draw: the hull lists, the turrets are dead, the BOBs sit at the list offsets
+	tDraw d[DRAW_MAX];
+	g.cam = (int16_t)(DEST_X - 60);
+	uint8_t n = logicDraw(&g, d);
+	uint8_t iHull = 0, iTurDead = 0, iAa = 0;
+	for(uint8_t i = 0; i < n; ++i) {
+		if(d[i].bob >= BOB_DHULL && d[i].bob <= BOB_DHULL3) { ++iHull; CHECK(d[i].frame == HULL_LIST); }
+		if(d[i].bob == BOB_THIT) {
+			++iTurDead; CHECK(d[i].frame == THIT_DEAD);
+			CHECK((d[i].x == DEST_X + g_pTurretDx[T_FWD] - g.cam && d[i].y == DEST_TOP + 11 + 3) || (d[i].x == DEST_X + g_pTurretDx[T_AFT] - g.cam && d[i].y == DEST_TOP + 11 - 1));
+		}
+		if(d[i].bob == BOB_AAGUN) {
+			CHECK(d[i].frame == AA_IDLE);
+			for(uint8_t k = 0; k < AA_COUNT; ++k) if(d[i].x == DEST_X + s_pAaMount[k][0] - g.cam) { CHECK(d[i].y == DEST_TOP + s_pAaMount[k][1] + s_pListAa[k]); ++iAa; }
+		}
+	}
+	CHECK(iHull == 1 && iTurDead == 2 && iAa == AA_COUNT);
+}
+
+// The AA guns: air only (the skids above y 212), not landed or just off the ground, in range 180 and not point-blank; the tell, a ranging puff
+// (at least 12 frames) at the aim point, then the burst: radius 18
+static void testW2AaTellsThenPuffsThenBursts(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		destWorld(d, 2765, 120, 2700);
+		g.ghost = 1;
+		int iTell = -1, iBurst = -1, iPuffFrames = 0;
+		int16_t wPx = 0, wPy = 0;
+		for(int f = 0; f < 700 && iBurst < 0; ++f) {
+			destHold(2765, 120, 2700);
+			step(NONE, 1);
+			if(g.events3 & EV4_AATELL) { if(iTell < 0) iTell = f; }
+			uint8_t iAct = 0;
+			for(uint8_t k = 0; k < FLAK_MAX; ++k) if(g.pFlak[k].active) { ++iAct; wPx = g.pFlak[k].x; wPy = g.pFlak[k].y; }
+			if(iAct && iBurst < 0) ++iPuffFrames;
+			if(g.events3 & EV4_AABURST) iBurst = f;
+		}
+		CHECK(iTell >= 0 && iBurst == iTell + logicAaTell(&g));
+		CHECK(iPuffFrames >= 12 && iPuffFrames <= AA_PUFF_MAX + 1);
+		CHECK(absi(wPx - 2765) <= 1 && absi(wPy - (120 - 7)) <= 1);   // the aim point: the chopper
+	}
+	// a burst on the chopper hurts it (the first hit damages, as a shell's); one that has moved away from the puff is not hurt
+	destWorld(3, 2765, 120, 2700);
+	g.ghost = 0;
+	int iBurst = -1;
+	for(int f = 0; f < 700 && iBurst < 0; ++f) {
+		destHold(2765, 120, 2700);
+		step(NONE, 1);
+		if(g.events3 & EV4_AABURST) iBurst = f;
+	}
+	CHECK(iBurst >= 0 && (g.chop.damaged || !g.chop.alive));
+	destWorld(3, 2765, 120, 2700);
+	g.ghost = 0;
+	iBurst = -1;
+	int16_t wX = 2765;
+	for(int f = 0; f < 700 && iBurst < 0; ++f) {
+		destHold(wX, 120, 2700);
+		step(NONE, 1);
+		uint8_t isPuff = 0;
+		for(uint8_t k = 0; k < FLAK_MAX; ++k) isPuff |= g.pFlak[k].active;
+		if(isPuff) wX = 2765 + 50;   // out of the burst's radius (18 + the chopper's half width 13) and the guns' range stays
+		if(g.events3 & EV4_AABURST) iBurst = f;
+	}
+	CHECK(iBurst >= 0 && !g.chop.damaged && g.chop.alive);
+}
+
+// Air only and the rules around it: below y 212 no gun fires, nor at a landed chopper or one in the take-off grace, nor beyond 180 px, nor
+// from a chopper directly over it (56 px); every gun tells before a burst; the limits: flak at once, a gap between two guns' tells
+static void testW2AaRulesAndLimits(void) {
+	// low over the water: the guns cannot depress
+	destWorld(5, 2765, 215, 2700);
+	g.ghost = 1;
+	for(int f = 0; f < 600; ++f) { destHold(2765, 215, 2700); turretsRest(); step(NONE, 1); CHECK(!(g.events3 & EV4_AATELL) && !aaLive()); }
+	// landed (the shore): not an air target
+	destWorld(5, 2765, 120, 2700);
+	for(int f = 0; f < 400; ++f) { destHold(2765, 120, 2700); g.chop.landed = 1; step(NONE, 1); CHECK(!(g.events3 & EV4_AATELL)); }
+	// the take-off grace
+	destWorld(5, 2765, 120, 2700);
+	for(int f = 0; f < 90; ++f) { destHold(2765, 120, 2700); g.airGrace = 60; step(NONE, 1); g.airGrace = 60; CHECK(!(g.events3 & EV4_AATELL)); }
+	// out of range: more than 180 px from the nearest gun (D, centre x 2665): 2665 + 195
+	destWorld(5, 2860, 120, 2760);
+	for(int f = 0; f < 400; ++f) { destHold(2860, 120, 2760); step(NONE, 1); CHECK(!(g.events3 & EV4_AATELL)); }
+	// directly over gun D (centre x 2665, y 215), 33 px above it: D does not take it, the others do
+	destWorld(5, 2665, 182, 2665);
+	g.ghost = 1;
+	uint8_t iOthers = 0;
+	for(int f = 0; f < 900; ++f) { destHold(2665, 182, 2665); step(NONE, 1); CHECK(!g.aaTell[3]); iOthers += (g.events3 & EV4_AATELL) != 0; }
+	CHECK(iOthers >= 1);
+	// the limits, at every skill: flak live at once, and a gap between two tells
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		destWorld(d, 2740, 120, 2700);
+		g.ghost = 1;
+		uint8_t iMax = 0;
+		int iLast = -1000, iMinGap = 1000, nTells = 0;
+		for(int f = 0; f < 1800; ++f) {
+			destHold(2740, 120, 2700);
+			step(NONE, 1);
+			if(aaLive() > iMax) iMax = aaLive();
+			if(g.events3 & EV4_AATELL) { ++nTells; if(f - iLast < iMinGap) iMinGap = f - iLast; iLast = f; }
+		}
+		CHECK(iMax >= 1 && iMax <= logicAaLive(&g));
+		CHECK(nTells >= 3 && iMinGap >= AA_PAIR_GAP);
+	}
+	// a gun's rest after a burst: no tell of the same gun sooner than logicAaGap + the tell
+	destWorld(5, 2740, 120, 2700);
+	g.ghost = 1;
+	int iA = -1, iB = -1;
+	for(int f = 0; f < 600 && iB < 0; ++f) {
+		destHold(2740, 120, 2700);
+		for(uint8_t i = 1; i < AA_COUNT; ++i) g.aaCool[i] = 255;
+		step(NONE, 1);
+		if(g.events3 & EV4_AATELL) { if(iA < 0) iA = f; else iB = f; }
+	}
+	CHECK(iA >= 0 && iB >= iA + logicAaTell(&g) + logicAaGap(&g) - 1 && iB <= iA + logicAaTell(&g) + logicAaGap(&g) + 16);
+}
+
+// The barrage: the clock counts only while the chopper is near; at 40 s a 30 frame tell, three markers, then the bursts; it hurts the low chopper that stayed,
+// not one that left or flew high; not at a landed or just launched chopper; every 30 s after; the markers only over water
+static void testW2BarrageAt40Seconds(void) {
+	int16_t wX = 2856, wV = 2780;
+	destWorld(3, wX, 215, wV);
+	g.ghost = 0;
+	// the clock: away it does not run, near it runs a frame a frame
+	for(int f = 0; f < 200; ++f) { destHold(1500, 215, 1500); turretsRest(); step(NONE, 1); }
+	CHECK(g.destClock == 0 && g.barNext == DEST_BARRAGE_AT);
+	for(int f = 0; f < 100; ++f) { destHold(wX, 215, wV); turretsRest(); step(NONE, 1); }
+	CHECK(g.destClock >= 99 && g.destClock <= 100);
+	for(int f = 0; f < 100; ++f) { destHold((int16_t)(2637 + DEST_ENGAGE + 5), 215, wV); turretsRest(); step(NONE, 1); }
+	CHECK(g.destClock >= 99 && g.destClock <= 100);
+	// the first barrage at 2000: the tell is 30 frames, three markers around the chopper
+	g.destClock = DEST_BARRAGE_AT - 4;
+	int iTell = -1, iFire = -1;
+	uint8_t pFrames[3] = {0, 0, 0};
+	for(int f = 0; f < 60 && iFire < 0; ++f) {
+		destHold(wX, 215, wV);
+		turretsRest(); aaRest();
+		step(NONE, 1);
+		if(g.events3 & EV4_BARTELL) {
+			iTell = f;
+			CHECK(g.barTell == BARRAGE_TELL_FRAMES + BARRAGE_SALVO && g.barN == 3);
+			CHECK(g.barX[0] == wX - BARRAGE_SPREAD && g.barX[1] == wX && g.barX[2] == wX + BARRAGE_SPREAD);
+			CHECK(g.atkLast == ATK_BARRAGE && g.atkWait == BOAT_ATTACK_GAP);
+		}
+		if(iTell >= 0 && g.barTell > BARRAGE_SALVO) {   // the marker frames by time: 0 / 1 / 2 for tell frames 0-9 / 10-19 / 20-29
+			tDraw d[DRAW_MAX];
+			uint8_t n = logicDraw(&g, d), k = 0;
+			for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_BARRAGE) {
+				++k;
+				CHECK(d[i].frame == (BARRAGE_TELL_FRAMES + BARRAGE_SALVO - g.barTell) / 10 && d[i].y == BARRAGE_TOP);
+				pFrames[d[i].frame] = 1;
+			}
+			CHECK(k == 3);
+		}
+		if(g.events3 & EV4_BARFIRE) iFire = f;
+	}
+	CHECK(iTell >= 0 && iFire == iTell + BARRAGE_TELL_FRAMES && g.barTell == BARRAGE_SALVO);
+	CHECK(pFrames[0] && pFrames[1] && pFrames[2]);
+	// the salvo: the markers burst BARRAGE_STAGGER frames apart, one boom a picture; the chopper stayed under the middle one
+	uint8_t nBursts = 1, nBoomFrames = 1;   // (the first burst's frame is behind us)
+	for(int f = 0; f < BARRAGE_SALVO + 4; ++f) {
+		destHold(wX, 215, wV); turretsRest(); aaRest();
+		step(NONE, 1);
+		if(g.events3 & EV4_BARFIRE) { ++nBursts; nBoomFrames += (g.events & EV_BOOM) != 0; CHECK(f == BARRAGE_STAGGER - 1 || f == 2 * BARRAGE_STAGGER - 1); }
+	}
+	CHECK(nBursts == 3 && nBoomFrames == 3 && g.barTell == 0 && g.barN == 0);
+	CHECK(g.chop.damaged || !g.chop.alive);
+	// the next one 1500 frames after this one's tell began (not hurt this time: it is ghosted)
+	g.ghost = 1;
+	int iNext = -1, nFrames = iFire + 1 + BARRAGE_SALVO + 4;
+	for(int f = 0; f < 1600 && iNext < 0; ++f) {
+		destHold(wX, 215, wV);
+		turretsRest(); aaRest();
+		step(NONE, 1);
+		if(g.events3 & EV4_BARTELL) iNext = nFrames + f;
+	}
+	CHECK(iNext - iTell >= DEST_BARRAGE_EVERY - 1 && iNext - iTell <= DEST_BARRAGE_EVERY + 1);
+	// out of the spread in time: unhurt; and above y 150: unhurt
+	for(uint8_t k = 0; k < 2; ++k) {
+		destWorld(3, wX, 215, wV);
+		g.ghost = 0;
+		g.destClock = DEST_BARRAGE_AT - 2;
+		int iF = -1;
+		int16_t wCx = wX;
+		for(int f = 0; f < 60 && iF < 0; ++f) {
+			destHold(wCx, k ? 140 : 215, wV);
+			turretsRest(); aaRest();
+			step(NONE, 1);
+			if(g.barTell && !k) wCx = (int16_t)(wX + 90);
+			if(g.events3 & EV4_BARFIRE) iF = f;
+		}
+		CHECK(iF >= 0 && !g.chop.damaged && g.chop.alive);
+	}
+	// markers only over water: at x 2380 (the end of the third island) only the one at 2416 is
+	destWorld(3, 2380, 215, 2500);
+	g.destClock = DEST_BARRAGE_AT - 2;
+	for(int f = 0; f < 6; ++f) { destHold(2380, 215, 2500); turretsRest(); aaRest(); step(NONE, 1); }
+	CHECK(g.barTell && g.barN == 1 && g.barX[0] == 2416 && logicOnWater(g.barX[0]));
+	// not at a landed chopper, nor in the take-off grace: it waits, then starts
+	destWorld(3, wX, GROUND_Y, wV);
+	g.destClock = DEST_BARRAGE_AT + 10;
+	for(int f = 0; f < 100; ++f) { destHold(wX, GROUND_Y, wV); g.chop.landed = 1; turretsRest(); aaRest(); step(NONE, 1); CHECK(!g.barTell); }
+	for(int f = 0; f < 100; ++f) { destHold(wX, 215, wV); g.airGrace = 40; turretsRest(); aaRest(); step(NONE, 1); g.airGrace = 40; CHECK(!g.barTell); }
+	int iS = -1;
+	for(int f = 0; f < 100 && iS < 0; ++f) { destHold(wX, 215, wV); turretsRest(); aaRest(); step(NONE, 1); if(g.barTell) iS = f; }
+	CHECK(iS >= 0 && iS < 5);
+	// a disabled ship fires none
+	destWorld(3, wX, 215, wV);
+	g.destDown = 1; g.destClock = DEST_BARRAGE_AT + 100;
+	for(int f = 0; f < 200; ++f) { destHold(wX, 215, wV); step(NONE, 1); CHECK(!g.barTell); }
+}
+
+// At 90 s of the clock the turrets are open: cut to 2 HP (smoking) but not raised, the dead stay dead, they go on firing; once
+static void testW2TurretsOpenAt90Seconds(void) {
+	destWorld(3, (int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75));
+	g.ghost = 1;
+	g.turHp[T_FWD] = 1;
+	g.destClock = DEST_OPEN_AT - 3;
+	int nOpen = 0;
+	for(int f = 0; f < 10; ++f) {
+		destHold((int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75));
+		g.turCool[T_AFT] = 255; g.turCool[T_FWD] = 255; aaRest();
+		step(NONE, 1);
+		nOpen += (g.events3 & EV4_DESTOPEN) != 0;
+	}
+	CHECK(nOpen == 1 && g.destOpen && g.turHp[T_AFT] == DEST_OPEN_HP && g.turHp[T_FWD] == 1);
+	for(int f = 0; f < 60; ++f) { destHold((int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75)); step(NONE, 1); CHECK(!(g.events3 & EV4_DESTOPEN)); }
+	// a dead one stays dead
+	destWorld(3, (int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75));
+	g.turHp[T_FWD] = 0; g.destClock = DEST_OPEN_AT - 1;
+	for(int f = 0; f < 5; ++f) { destHold((int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75)); g.turCool[T_AFT] = 255; step(NONE, 1); }
+	CHECK(g.turHp[T_FWD] == 0 && g.turHp[T_AFT] == DEST_OPEN_HP && !g.destDown);
+	// open turrets still shoot, after their tell, until they are dead
+	g.ghost = 1;
+	int iShell = -1;
+	for(int f = 0; f < 500 && iShell < 0; ++f) { destHold((int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75)); g.turCool[T_FWD] = 255; step(NONE, 1); if(shellsOut()) iShell = f; }
+	CHECK(iShell >= 0);
+	// not before the clock says so: 80 s of the clock leave them whole
+	destWorld(3, (int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75));
+	g.destClock = DEST_OPEN_AT - 500;
+	for(int f = 0; f < 100; ++f) { destHold((int16_t)(logicTurretX(T_AFT) + 150), 215, (int16_t)(logicTurretX(T_AFT) + 75)); turretsRest(); aaRest(); step(NONE, 1); }
+	CHECK(!g.destOpen && g.turHp[T_AFT] == DEST_HP);
+}
+
+// The draw list: four hull pieces (none wider than 48 px: the buffer has no clipping), two turrets and four guns in their mounts, the tell and
+// fire frames, the marker and the flak puff; nothing in the other missions or off screen; whitecaps in mission 6 only, two at most
+static void testW2DestroyerIsDrawn(void) {
+	CHECK(g_pBobW[BOB_DHULL] == DEST_W && g_pBobH[BOB_DHULL] == 44 && g_pBobFrames[BOB_DHULL] == 2);
+	CHECK(g_pBobW[BOB_DHULL0] == 48 && g_pBobW[BOB_DHULL1] == 48 && g_pBobW[BOB_DHULL2] == 48 && g_pBobW[BOB_DHULL3] == 10);
+	CHECK(g_pBobW[BOB_DHULL0] + g_pBobW[BOB_DHULL1] + g_pBobW[BOB_DHULL2] + g_pBobW[BOB_DHULL3] == DEST_W);
+	for(uint8_t b = BOB_DHULL0; b <= BOB_DHULL3; ++b) CHECK(g_pBobH[b] == 44 && g_pBobFrames[b] == 2 && g_pBobW[b] <= 48);
+	CHECK(g_pBobW[BOB_TURRET] == 32 && g_pBobH[BOB_TURRET] == 19 && g_pBobFrames[BOB_TURRET] == 4);
+	CHECK(g_pBobW[BOB_THIT] == 32 && g_pBobH[BOB_THIT] == 19 && g_pBobFrames[BOB_THIT] == 2);
+	CHECK(g_pBobW[BOB_AAGUN] == 12 && g_pBobH[BOB_AAGUN] == 12 && g_pBobFrames[BOB_AAGUN] == 3);
+	CHECK(g_pBobW[BOB_BARRAGE] == 24 && g_pBobH[BOB_BARRAGE] == 12 && g_pBobFrames[BOB_BARRAGE] == 3);
+	CHECK(g_pBobW[BOB_CAP] == 34 && g_pBobH[BOB_CAP] == 10 && g_pBobFrames[BOB_CAP] == 3);
+	tDraw d[DRAW_MAX];
+	destWorld(3, 2000, 100, 2000);
+	g.cam = (int16_t)(DEST_X - 60);
+	uint8_t n = logicDraw(&g, d);
+	uint8_t iHull = 0, iPieces = 0, iTur = 0, iAa = 0;
+	for(uint8_t i = 0; i < n; ++i) {
+		if(d[i].bob == BOB_DHULL) { ++iHull; CHECK(d[i].frame == HULL_OK && d[i].x == DEST_X - g.cam && d[i].y == DEST_TOP); }
+		if(d[i].bob >= BOB_DHULL0 && d[i].bob <= BOB_DHULL3) ++iPieces;
+		if(d[i].bob == BOB_TURRET) { ++iTur; CHECK(d[i].frame == TURRET_IDLE && d[i].y == DEST_TOP + 11); }
+		if(d[i].bob == BOB_AAGUN) {
+			++iAa; CHECK(d[i].frame == AA_IDLE);
+			uint8_t isMount = 0;
+			for(uint8_t k = 0; k < AA_COUNT; ++k) isMount |= d[i].x == DEST_X + s_pAaMount[k][0] - g.cam && d[i].y == DEST_TOP + s_pAaMount[k][1];
+			CHECK(isMount);
+		}
+	}
+	CHECK(iHull == 1 && iPieces == 0 && iTur == 2 && iAa == AA_COUNT);
+	// the tell frames blink; a shot's flash; a gun's tell and muzzle flash
+	g.turTell[T_AFT] = 12; g.turFire[T_FWD] = 4; g.aaTell[0] = 8; g.aaFlash[1] = 3;
+	n = logicDraw(&g, d);
+	uint8_t pF[4] = {0, 0, 0, 0}, pAa[3] = {0, 0, 0};
+	for(uint8_t i = 0; i < n; ++i) { if(d[i].bob == BOB_TURRET) pF[d[i].frame] = 1; if(d[i].bob == BOB_AAGUN) pAa[d[i].frame] = 1; }
+	CHECK(pF[TURRET_FIRE] && (pF[TURRET_TELL1] || pF[TURRET_TELL2]) && !pF[TURRET_IDLE]);
+	CHECK(pAa[AA_TELL] && pAa[AA_PUFF] && pAa[AA_IDLE]);
+	g.turTell[T_AFT] = 8;
+	n = logicDraw(&g, d);
+	uint8_t f8 = 9;
+	for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_TURRET && d[i].x == DEST_X + g_pTurretDx[T_AFT] - g.cam) f8 = d[i].frame;
+	g.turTell[T_AFT] = 4;
+	n = logicDraw(&g, d);
+	uint8_t f4 = 9;
+	for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_TURRET && d[i].x == DEST_X + g_pTurretDx[T_AFT] - g.cam) f4 = d[i].frame;
+	CHECK(f8 != f4 && (f8 == TURRET_TELL1 || f8 == TURRET_TELL2) && (f4 == TURRET_TELL1 || f4 == TURRET_TELL2));   // (it blinks)
+	// the flak puff is a smoke BOB on the aim point
+	g.turTell[T_AFT] = 0; g.turFire[T_FWD] = 0; g.aaTell[0] = 0; g.aaFlash[1] = 0;
+	g.pFlak[0] = (tFlak){.x = (int16_t)(DEST_X + 60), .y = 100, .life = 10, .active = 1};
+	uint8_t nBefore = countBob(d, logicDraw(&g, d), BOB_SMOKE);
+	g.pFlak[0].active = 0;
+	uint8_t nAfter = countBob(d, logicDraw(&g, d), BOB_SMOKE);
+	CHECK(nBefore == nAfter + 1);
+	// off screen and in the other missions: nothing
+	g.cam = (int16_t)(DEST_X - 700);
+	n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob < BOB_DHULL || d[i].bob > BOB_BARRAGE);
+	for(uint8_t m = 0; m < 2; ++m) {
+		newWorld2(m);
+		g.cam = (int16_t)(DEST_X - 60);
+		n = logicDraw(&g, d);
+		for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob < BOB_FRTR || d[i].bob > BOB_CAP);
+	}
+	newGame();
+	n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob < BOB_FRTR || d[i].bob > BOB_CAP);
+	// whitecaps: Typhoon only, on open water, two at most
+	newWorld2(2);
+	uint8_t nMost = 0, nWith = 0;
+	for(int16_t cam = 0; cam < W2_W - SCREEN_W; cam += 40) {
+		g.cam = cam;
+		n = logicDraw(&g, d);
+		uint8_t k = countBob(d, n, BOB_CAP);
+		if(k > nMost) nMost = k;
+		nWith += k != 0;
+		for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_CAP) CHECK(logicOnWater((int16_t)(d[i].x + g.cam + 17)));
+	}
+	CHECK(nMost >= 1 && nMost <= 2 && nWith >= 10);
+	newWorld2(1);
+	for(int16_t cam = 0; cam < W2_W - SCREEN_W; cam += 40) { g.cam = cam; n = logicDraw(&g, d); CHECK(countBob(d, n, BOB_CAP) == 0); }
+}
+
+// The real cannon, fired from the water at the turrets from where the scenario flies (a low run, the sea 236 under the skids): the aft one first from
+// the east, then the forward one past it: every turret dies of the player's own shots
+static void testW2CannonKillsBothTurretsFromALowRun(void) {
+	destWorld(1, 2800, 236, 2650);
+	g.chop.face = g.chop.faceTarget = FACE_LEFT;
+	for(int f = 0; f < 200 && g.turHp[T_AFT]; ++f) { destHold(2800, 236, 2650); g.chop.face = g.chop.faceTarget = FACE_LEFT; g.chop.prevFire = 0; step((tInput){.fire = 1}, 1); }
+	CHECK(g.turHp[T_AFT] == 0);
+	uint8_t iHpFwd = g.turHp[T_FWD];
+	for(int f = 0; f < 300 && g.turHp[T_FWD]; ++f) { destHold(2670, 236, 2500); g.chop.face = g.chop.faceTarget = FACE_LEFT; step((tInput){.fire = 1}, 1); }
+	CHECK(iHpFwd <= DEST_HP && g.turHp[T_FWD] == 0 && g.destDown);
+}
+
+// The blitter does not clip: a BOB is drawn only whole inside the buffer's margins (screen x from -48 to 368 - its width). Wherever the hull lies
+// across the screen's edges, every visible column of it is in a BOB that is drawn: the whole hull while it fits, its pieces (right to left) beyond
+static void testW2HullIsNeverCutByTheBuffersMargins(void) {
+	newWorld2(2);
+	tDraw d[DRAW_MAX];
+	for(int sx = -170; sx <= 330; ++sx) {
+		g.cam = (int16_t)(DEST_X - sx);
+		uint8_t n = logicDraw(&g, d);
+		uint8_t nWhole = 0, nPieces = 0;
+		int iLastPiece = 1000;
+		uint8_t pCovered[SCREEN_W];
+		for(int x = 0; x < SCREEN_W; ++x) pCovered[x] = 0;
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob < BOB_DHULL || d[i].bob > BOB_DHULL3) continue;
+			int bx = d[i].x, w = g_pBobW[d[i].bob];
+			nWhole += d[i].bob == BOB_DHULL;
+			if(d[i].bob != BOB_DHULL) { ++nPieces; CHECK(bx < iLastPiece); iLastPiece = bx; }   // (right to left)
+			if(bx < -48 || bx > 368 - w) continue;   // (not drawn by the blitter's loop: outside its margins)
+			for(int x = bx; x < bx + w; ++x) if(x >= 0 && x < SCREEN_W) pCovered[x] = 1;
+		}
+		CHECK(!(nWhole && nPieces));
+		CHECK(nWhole == (sx >= DEST_WHOLE_MIN && sx <= DEST_WHOLE_MAX));
+		for(int x = sx; x < sx + DEST_W; ++x) {
+			if(x < 0 || x >= SCREEN_W) continue;
+			if(!pCovered[x]) { CHECK(0 && "a visible column of the hull is not drawn"); break; }
+		}
+	}
+}
+
+// The zone bonus: +100 once, when the last standing radar site falls (missions 5 and 6), the HUD line says so; the sites before it pay their 150 only
+static void testW2ZoneBonusWhenAllSitesAreDown(void) {
+	for(uint8_t m = 1; m < 3; ++m) {
+		newWorld2(m);
+		logicSetDifficulty(&g, 3);
+		noBoats();
+		g.ghost = 1;
+		flyAt(1000, 100);
+		uint32_t ulScore = g.score;
+		uint8_t nSites = g.radarCount;
+		CHECK(nSites == (m == 1 ? 2 : 3));
+		for(uint8_t i = 0; i + 1 < nSites; ++i) {
+			hitRadar(i, RADAR_HP);
+			CHECK(!g.pRadars[i].alive);
+			CHECK(g.score == ulScore + (uint32_t)(i + 1) * RADAR_SCORE && !g.zoneDone && g.bonusKind == BONUS_NONE && g.bonusMsg == 0);
+		}
+		hitRadar((uint8_t)(nSites - 1), RADAR_HP);
+		CHECK(g.score == ulScore + (uint32_t)nSites * RADAR_SCORE + ZONE_CLEAR_SCORE);
+		CHECK(g.zoneDone && g.bonusKind == BONUS_ZONE && g.bonusMsg > BONUS_MSG_FRAMES && g.bonusMsg <= BONUS_MSG_FRAMES + BONUS_DELAY);   // (the line shows 8 frames on)
+		step(NONE, BONUS_DELAY);
+		CHECK(g.bonusMsg > 0 && g.bonusMsg <= BONUS_MSG_FRAMES && g.quotaMsg > 0 && g.quotaKind == BONUS_ZONE);   // (the HUD's slot says ZONE CLR now)
+		step(NONE, 1);
+		// once: nothing more is paid
+		uint32_t ulAfter = g.score;
+		step(NONE, 300);
+		CHECK(g.score == ulAfter && g.bonusMsg == 0 && g.bonusKind == BONUS_NONE);
+	}
+	// the event is raised in the frame the last site falls
+	newWorld2(1);
+	noBoats();
+	g.ghost = 1;
+	flyAt(1000, 100);
+	hitRadar(0, RADAR_HP);
+	g.pShots[0] = (tShot){.x = g.pRadars[1].x, .y = FEET_Y - 20, .active = 1, .kind = SHOT_CANNON, .life = 36};
+	g.pRadars[1].hp = 1;
+	step(NONE, 1);
+	CHECK(g.events3 & EV4_ZONE);
+	// mission 4 and world 1 have no sites and no bonus; the quota line and the bonus line are separate
+	newWorld2(0);
+	step(NONE, 100);
+	CHECK(!g.zoneDone && g.bonusKind == BONUS_NONE && g.radarCount == 0);
+	newGame();
+	step(NONE, 100);
+	CHECK(!g.zoneDone && g.bonusKind == BONUS_NONE);
+	// a new mission starts clean
+	newWorld2(1);
+	CHECK(!g.zoneDone && g.bonusMsg == 0);
+}
+
+// Mission 4, mission 5 and world 1 are as they were: no destroyer event, no destroyer BOB, no clock
+static void testW2DestroyerLeavesTheOthersAlone(void) {
+	for(uint8_t m = 0; m < 2; ++m) {
+		newWorld2(m);
+		g.ghost = 1;
+		for(int f = 0; f < 1500; ++f) {
+			g.chop.x = (int16_t)(DEST_X + 100); g.chop.y = 215; g.chop.vx = g.chop.vy = 0; g.chop.landed = 0; g.spawnTimer = 60000; g.cam = (int16_t)(DEST_X - 60);
+			step(NONE, 1);
+			CHECK(!(g.events3 & 0xFFC0 & ~(uint16_t)EV4_ZONE));   // (the EV4_ bits; the gusts are mission 5's own)
+		}
+		CHECK(g.destClock == 0 && !g.barTell && !g.destDown && !g.destOpen);
+	}
+	newGame();
+	for(int f = 0; f < 600; ++f) { step(NONE, 1); CHECK(g.events3 == 0); }
+}
+
 int main(void) {
 	testRotorRateFollowsSpeedAndClimb();
 	testRotorIdlesSlowAndSoftOnTheGround();
@@ -3943,6 +5587,53 @@ int main(void) {
 	testW2JetsAndBoatsShareTheAttackToken();
 	testW2JetIsDrawnFromTheSet();
 	testDrawPeopleRunAndGroundFirst();
+	testW2RadarSitesArePlaced();
+	testW2RadarZonesAndTheRule();
+	testW2JetsStartOnlyInsideALiveZone();
+	testW2JetDelayCountsInsideZonesOnly();
+	testW2RadarHitsBombsAndTheZoneGoes();
+	testW2OneSiteDownLeavesTheOthersZone();
+	testW2RadarNeverShoots();
+	testW2Mission4KeepsItsJetsEverywhere();
+	testW2RadarIsDrawnAndMapped();
+	testW2RadarSitesApiMatchesTheGame();
+	testW2GustsByMissionAndSkill();
+	testW2GustTimingAndTell();
+	testW2GustPushIsSidewaysAndBoundedAndTellDoesNotMove();
+	testW2GustNeverLandedOrJustAfterTakeoff();
+	testW2GustSkillsAndBarracks();
+	testW2Mission4AndWorld1HaveNoWind();
+	testW2SockIsDrawnAndWhips();
+	testW2DeckIsPlacedInMission5Only();
+	testW2DeckIsAFloorNotALanding();
+	testW2WinchBoardsOnePersonASecond();
+	testW2WinchPausesAndSweepingDoesNotWinch();
+	testW2WinchStopsWhenFullOrEmpty();
+	testW2WinchHasTheGroundGrace();
+	testW2WinchHasNoGusts();
+	testW2DeckIsDrawn();
+	testW2DeckIsOnTheMap();
+	testW2FreighterTimerAndStages();
+	testW2FreighterBoxFollowsTheTilt();
+	testW2FreighterSinksAndLosesThePeopleLeft();
+	testW2FreighterBarAndStop();
+	testW2FreighterIsDrawn();
+	testW2ClearThenTheFreighterMission();
+	testW2DestroyerIsMission6Only();
+	testW2DestroyerTables();
+	testW2TurretTellsBeforeItShoots();
+	testW2TurretFairness();
+	testW2TurretHitPointsAndStates();
+	testW2DisabledShipIsSilent();
+	testW2AaTellsThenPuffsThenBursts();
+	testW2AaRulesAndLimits();
+	testW2BarrageAt40Seconds();
+	testW2TurretsOpenAt90Seconds();
+	testW2DestroyerIsDrawn();
+	testW2HullIsNeverCutByTheBuffersMargins();
+	testW2CannonKillsBothTurretsFromALowRun();
+	testW2ZoneBonusWhenAllSitesAreDown();
+	testW2DestroyerLeavesTheOthersAlone();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);
 		return 1;

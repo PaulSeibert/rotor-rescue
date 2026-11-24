@@ -1,0 +1,65 @@
+# World 2's radar sites and the jet zone rule (SPEC 11, "World 2, slice 2", slice A). Ctrl+L, W, 5 starts mission 5, Trade Winds,
+# at the base pad; the skill is pinned to 5 after the world has loaded (the keys before it never leave world 1).
+# - the card's strip map carries each jet zone as a red line (row 1) and each radar site as a tick;
+# - the HUD radar's ground line is red (0xD42) under each live zone, stone (0x564) elsewhere, and the site is a white dot;
+# - in the strait between the second and fourth island (x 2208-2816) no jet comes however long the chopper stays (ghost: nothing
+#   hurts it); inside the second island's zone a jet is announced;
+# - the radar site on that island falls to the cannon: "AGK radar down", its red bar leaves the HUD radar.
+# The unit tests (tests/unit/test_logic.c, testW2Radar*, testW2JetsStartOnlyInsideALiveZone) hold the rules.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x05
+wait-serial "AGK world 2 loaded" 400
+key 0x63
+key 0x28
+wait 5
+key 0x05
+wait 30
+screenshot card
+expect-color card 130 21 0xD42
+expect-color card 200 21 0xD42
+expect-color card 80 21 0x564
+expect-color card 240 21 0x564
+expect-color card 122 121 0xD42
+expect-color card 32 121 0x111
+key 0x63
+key 0x28
+wait 5
+key 0x24
+wait 30
+press fire 2
+wait 60
+press up 60
+press left 560
+wait 20
+screenshot strait
+wait-serial "mission=1 x=24" 200
+wait 700
+screenshot hover
+press left 150
+wait-serial "jet warn" 400
+screenshot warned
+press left 60
+wait 40
+screenshot site
+# the site stands on the island: its base is stone (0x998) with a cream edge (0xFEC) (a gust has pushed the chopper a few px: slice B)
+expect-color site 80 235 0x998
+expect-color site 82 237 0xFEC
+hold fire
+press down 70
+wait-serial "radar down=" 200
+release
+wait 30
+screenshot down
+expect-color down 130 21 0x564
+expect-color down 200 21 0xD42
+expect-serial "AGK radar down=[01] radar zones=1"
+# nothing was announced while the chopper sat in the strait (a jet warning before the last of its hover lines would be a failure)
+expect-no-serial "jet warn[\s\S]*mission=1 x=2420 "
+expect-no-serial "AGK ERR|missing"
+expect-no-dropped-frames
+expect-min-chip-free 96

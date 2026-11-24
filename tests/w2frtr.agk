@@ -1,0 +1,54 @@
+# World 2's sinking freighter (SPEC 11, "World 2, slice 2", slice D). Ctrl+L, W, 6 starts mission 6, Typhoon Strait, at the base pad; skill 1 is
+# pinned after the world has loaded (the longest timer, 120 s, no wind and no jets on skill 1: the flight is the same every time), ghost on.
+# The chopper flies out to the freighter (x 1728-1855, the sea gap between the second and third island), settles into the 24 x 20 px hover box
+# above its hold and winches a person up; the red timer bar under the HUD radar is nearly full. Ctrl+L, Z puts the timer 3 s from the end: the last
+# stage (the bow awash, steam and spray), then it sinks: "AGK sunk lost=1[0-5]" (the people still aboard are lost, the one in the cabin is safe), the
+# hull is gone and the bar with it. The unit tests (testW2Freighter*) hold the rules.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x06
+wait-serial "AGK world 2 loaded" 1500
+key 0x63
+key 0x28
+wait 5
+key 0x01
+wait 30
+screenshot card
+key 0x63
+key 0x28
+wait 5
+key 0x24
+wait 30
+press fire 2
+wait 60
+press up 60
+press left 771
+press down 45
+wait 30
+wait-serial "AGK winch start" 300
+wait 20
+screenshot hook
+expect-color hook 70 22 0xD42
+wait-serial "AGK winch board=1" 200
+wait 2
+screenshot board1
+key 0x63
+key 0x28
+wait 5
+key 0x31
+wait-serial "AGK sink stage=3" 100
+wait 5
+screenshot stage3
+wait-serial "AGK sunk lost=" 300
+wait 10
+screenshot sunk
+expect-serial "AGK winch board=1[\s\S]*AGK sink stage=3[\s\S]*AGK sunk lost=1[0-5]"
+expect-no-serial "AGK ERR|missing"
+expect-no-dropped-frames
+# (the sinking picture is the heaviest: the boom, the deaths, the HUD digits, the bar gone; and the flight out crosses the destroyer's strait, slice E: 98)
+expect-max-load 98
+expect-min-chip-free 96

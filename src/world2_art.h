@@ -92,6 +92,94 @@
 #define WORLD2_PAD80_OFFS 66792
 #define WORLD2_PAD96_OFFS 68176
 #define WORLD2_PAD_COMPOSED_BYTES 4976
+// slice 2's BOBs: the common set in disk/world2x.bin (a chip block of its own, worldLoad allocates it at world 2's load) and
+// each mission's part (world2x5.bin, world2x6.bin) in a second block that missionSetLoad makes at the mission's card
+#define ART_RADAR_W 33
+#define ART_RADAR_H 39
+#define ART_RADAR_FRAMES 4
+#define ART_RADAR_BITMAP_W 48
+#define ART_SOCK_W 10
+#define ART_SOCK_H 20
+#define ART_SOCK_FRAMES 2
+#define ART_SOCK_BITMAP_W 16
+#define ART_ROPE_W 8
+#define ART_ROPE_H 40
+#define ART_ROPE_FRAMES 3
+#define ART_ROPE_BITMAP_W 16
+#define ART_HOOK_W 8
+#define ART_HOOK_H 12
+#define ART_HOOK_FRAMES 1
+#define ART_HOOK_BITMAP_W 16
+#define ART_CLIMB_W 16
+#define ART_CLIMB_H 12
+#define ART_CLIMB_FRAMES 2
+#define ART_CLIMB_BITMAP_W 16
+#define ART_DECK_W 124
+#define ART_DECK_H 30
+#define ART_DECK_FRAMES 2
+#define ART_DECK_BITMAP_W 128
+#define ART_FRTR_W 128
+#define ART_FRTR_H 36
+#define ART_FRTR_FRAMES 4
+#define ART_FRTR_BITMAP_W 128
+#define ART_SPRAY_W 24
+#define ART_SPRAY_H 12
+#define ART_SPRAY_FRAMES 3
+#define ART_SPRAY_BITMAP_W 32
+#define ART_DHULL_W 154
+#define ART_DHULL_H 44
+#define ART_DHULL_FRAMES 2
+#define ART_DHULL_BITMAP_W 176
+#define ART_TURRET_W 32
+#define ART_TURRET_H 19
+#define ART_TURRET_FRAMES 4
+#define ART_TURRET_BITMAP_W 32
+#define ART_THIT_W 32
+#define ART_THIT_H 19
+#define ART_THIT_FRAMES 2
+#define ART_THIT_BITMAP_W 32
+#define ART_AAGUN_W 12
+#define ART_AAGUN_H 12
+#define ART_AAGUN_FRAMES 3
+#define ART_AAGUN_BITMAP_W 16
+#define ART_BARRAGE_W 24
+#define ART_BARRAGE_H 12
+#define ART_BARRAGE_FRAMES 3
+#define ART_BARRAGE_BITMAP_W 32
+#define ART_CAP_W 34
+#define ART_CAP_H 10
+#define ART_CAP_FRAMES 3
+#define ART_CAP_BITMAP_W 48
+#define WORLD2X_RADAR_OFFS 0
+#define WORLD2X_RADARMASK_OFFS 2808
+#define WORLD2X_SOCK_OFFS 5616
+#define WORLD2X_SOCKMASK_OFFS 5856
+#define WORLD2X_ROPE_OFFS 6096
+#define WORLD2X_ROPEMASK_OFFS 6816
+#define WORLD2X_HOOK_OFFS 7536
+#define WORLD2X_HOOKMASK_OFFS 7608
+#define WORLD2X_CLIMB_OFFS 7680
+#define WORLD2X_CLIMBMASK_OFFS 7824
+#define WORLD2X_BYTES 7968
+#define WORLD2M_DECK_OFFS 0   // (in mission 5's block)
+#define WORLD2M_DECKMASK_OFFS 2880   // (in mission 5's block)
+#define WORLD2M5_BYTES 5760
+#define WORLD2M_FRTR_OFFS 0   // (in mission 6's block)
+#define WORLD2M_FRTRMASK_OFFS 6912   // (in mission 6's block)
+#define WORLD2M_SPRAY_OFFS 13824   // (in mission 6's block)
+#define WORLD2M_SPRAYMASK_OFFS 14256   // (in mission 6's block)
+#define WORLD2M_DHULL_OFFS 14688   // (in mission 6's block)
+#define WORLD2M_TURRET_OFFS 20496   // (in mission 6's block)
+#define WORLD2M_TURRETMASK_OFFS 21408   // (in mission 6's block)
+#define WORLD2M_THIT_OFFS 22320   // (in mission 6's block)
+#define WORLD2M_THITMASK_OFFS 22776   // (in mission 6's block)
+#define WORLD2M_AAGUN_OFFS 23232   // (in mission 6's block)
+#define WORLD2M_AAGUNMASK_OFFS 23448   // (in mission 6's block)
+#define WORLD2M_BARRAGE_OFFS 23664   // (in mission 6's block)
+#define WORLD2M_BARRAGEMASK_OFFS 24096   // (in mission 6's block)
+#define WORLD2M_CAP_OFFS 24528   // (in mission 6's block)
+#define WORLD2M_CAPMASK_OFFS 25072   // (in mission 6's block)
+#define WORLD2M6_BYTES 25616
 
 // Per mission (4, 5, 6): PF2 pens 1-7 (index 0 unused), dark to light; the sky gradient
 // top to H (lines 24-179), the sea's H to C (180-207), C under the strip; AGA: 24 bits

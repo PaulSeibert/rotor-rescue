@@ -1,0 +1,23 @@
+# Winch hook 8 x 12, 1 frame: the short rope and its hook for the first moment of a winch (before the rope drops).
+colors
+  .  transparent
+  K  0x111
+  O  0x564
+  S  0x998
+  W  0xFEC
+  R  0xD42
+  Y  0xFC3
+  B  0x36B
+frame
+..KWSK..
+..KSSK..
+..KWSK..
+..KSSK..
+..KWSK..
+..KSSK..
+..KWSKK.
+..KWSKWK
+..KWSKSK
+..KSSSSK
+...KKKK.
+........

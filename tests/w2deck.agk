@@ -1,0 +1,54 @@
+# World 2's ship deck and winch (SPEC 11, "World 2, slice 2", slice C). Ctrl+L, W, 5 starts mission 5 at the base pad; skill 1 is pinned after the
+# world has loaded (no wind and no jets on skill 1, so the flight is the same every time) and ghost mode is on.
+# The chopper flies out to the moored cargo ship (x 1730-1853, in the sea gap between the second and third island), settles into the 24 x 20 px
+# hover box above its flat deck (x 1777-1800, skids 207-227): the hook falls, the rope hangs, a person climbs it and comes aboard (the first
+# one 12 + 50 frames after the hover began, then one every 50 frames: 8 people in 8 s); the lamps are yellow in the box. Leaving the box pauses
+# the climb. The card shows the ship on the strip map in place of a hut. The unit tests (testW2Deck*, testW2Winch*) hold the rules.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x05
+wait-serial "AGK world 2 loaded" 400
+key 0x63
+key 0x28
+wait 5
+key 0x01
+wait 30
+screenshot card
+# the strip map: the ship (a blue hull on the sea, x 128-134, rows 128-129) in place of the third hut
+expect-color card 131 129 0x36B
+key 0x63
+key 0x28
+wait 5
+key 0x24
+wait 30
+press fire 2
+wait 60
+press up 60
+press left 771
+press down 45
+wait 30
+wait-serial "AGK winch start" 300
+wait 8
+screenshot hook
+wait 14
+screenshot rope
+# the moored ship's blue plating, under the hovering chopper
+expect-color rope 170 240 0x36B near 4
+wait-serial "AGK winch board=1" 200
+wait 2
+screenshot board1
+wait-serial "AGK winch board=2" 200
+wait 10
+screenshot board2
+press right 30
+wait 10
+screenshot away
+expect-serial "AGK winch start[\s\S]*AGK winch board=1[\s\S]*AGK winch board=2"
+expect-no-serial "AGK ERR|missing"
+expect-no-dropped-frames
+expect-max-load 90
+expect-min-chip-free 96

@@ -267,12 +267,15 @@ Today's tank is 22 / 18 / 16 / 14 / 12 and the jet 24 / 20 / 16 / 14 / 12 [S].
 | **Gunship** (W4 M12 finale) | the boss | 24 (cannon), bomb 4; core exposed below 50% | cruises and strafes along the roof line; reachable at all times | a 5-shot arc, a rocket volley (marked lobs), calls the AA | big flash on the nose; rocket marker | 30 / 26 / 22 / 18 / 16 | 1000 | weak point opens at 30-45 s; fully open by 90 s |
 | **Fire** (W4, W2 M6) | a timer on a rescue | n/a | grows through 4 stages | none | visible flames, a bar on the HUD | n/a | n/a | rescue faster; the timer is at least 90 s on normal |
 
+**Destroyer, built 2026-11-24 (SPEC v1.24, slice E):** station-keeping in mission 6's strait (x 2560-2713, one facing, bow left); turrets 6 HP (cannon 1, bomb 3), shells under R1-R3 with the tell 28 / 24 / 20 / 18 / 16, 150 each; four AA guns with no HP, air only (skids above y 212, within 180 px, a ranging puff then the burst, tell 26 / 22 / 18 / 15 / 12); both turrets down: the hull lists, +100 (400 in all), every attack stops; anti-stall: a 30-frame-tell barrage at 40 s of the chopper near the ship and every 30 s after, the turrets open (2 HP) at 90 s. Zone bonus: +100 when the last radar site of a mission falls (the HUD says ZONE CLR). The strait's two gunboat slots in mission 6 are the destroyer's.
+
 Timers on rescue sites: at most two a mission, never in World 1; generous (90 s on normal; 120 / 105 / 90 / 75 / 60 by
 skill); shown on the preview card and on the HUD. Losing a site only loses the people still there.
 
 **Wind gusts** (W2 M5 on, W3, W4): a gust applies 0.25 px/frame sideways for 3 s every 12-20 s; the tell is 50
 frames before: the windsock turns, spray or snow streaks, a rising howl. No gusts while landed; none at all on skill 1; within
 100 px of a barracks on skill 2-3. The pad logic gives a 6 px landing tolerance that is reduced by wind never (it stays 6).
+**Built 2026-11-21 (SPEC v1.21, slice B):** direction +x, 3 s = 150 frames, a gap of 600-1000 frames, the first not before 18 s into a mission, none while landed or in the 2 s after take-off, a landing cancels it; the tell is the windsock only (no howl: no sample is drawn, none added); one sock beside each island's pad.
 
 **Winch rescue** (W2 M5 on): at a ledge, a ship deck or a rooftop you cannot land on, hover in a 24 x 20 px box above
 the site for the climb: 8 people take 8 s on normal (the climb is paused, not reset, if you drift out). A rope and ladder
@@ -454,6 +457,11 @@ World 2 with its jets (v1.16): a500 97 KB free in play (98 before the jet's 1,15
 modelled (`tests/chipwinuae.agk`, Ctrl+L Q). Radar, windsock and destroyer for missions 5 and 6 still need the levers of STYLE-world2 section 6 (pad widths by skill -3,040
 at skill 3, one destroyer facing -5,280, a mission's own set) [M].
 
+**Update, 2026-11-21 (SPEC v1.20, the slice 2 branch `w2-slice2`).** A bigger lever than those three was sitting in the program: the boot splash's DPS logo (37,456 bytes) and its two copper lists, 47 KB of chip, were held for the whole game.
+Freed at world 2's load they give world 2 **147,384 bytes free in play on the a500 (was 99,544: +47,840)**, world 1 unchanged at 105 KB [M: `AGK w2 chipbytes`, `tests/w2chip.agk`]. The sets still to come (radar 5,616, windsock 480, destroyer 5,280 and turret 1,824 for one facing, whitecaps 1,080, plus the ship deck and the freighter
+once drawn, about 3-5 KB each [E]) add up to about 22-26 KB, so the floor stays at 96 KB for the a500 and 64 KB under the squeeze with 20 KB or more to spare; none of the three plan levers is needed. If it is not enough once the deck and the freighter are drawn, the options with numbers are the pad widths by
+skill (-3,040 at skill 3, -4,144 at 4-5, not at skill 1) and the title logo and its lists freed in play (26 KB, a reload at the title). The floor is never lowered without Paul.
+
 ---
 
 ## 8. The art plan
@@ -505,6 +513,10 @@ The rules are TBD: small commits, behind a disabled flag, merged within one or t
 | **5 Disks, polish, release** (about 2 wk) | T22, the second disk image, the save, credits, AROS, perf, Prove It list | all gates green; a release candidate for Paul |
 
 About 15 weeks in all [E, plus or minus 40%]. Art and code run in parallel; art is the long pole (worlds 3 and 4).
+
+**Phase 2, slice 2 (missions 5 and 6 finished), order of work (SPEC v1.20, section 11 "World 2, slice 2"; branch `w2-slice2`).** Each slice is merged-quality on its own (unit tests red first, a scenario, goldens re-recorded in one call after every diff is read, the four-profile gate):
+A radar sites and the jet zone rule (zones red on the HUD radar and the card's strip map); B wind gusts and the windsock; C the ship-deck winch rescue (mission 5: needs a ship deck and a rope drawn first); D the timed freighter (mission 6: needs the freighter drawn; at most two timed sites a mission,
+90 s on normal, 120 / 105 / 90 / 75 / 60 by skill); E the strait destroyer set piece with its anti-stall (barrage at 40 s, turrets open by 90 s) and the zone bonus. Mission 4 and world 1 do not change. The memory budget is in section 7.4 (the boot splash's 47 KB freed at world 2's load pays for all five).
 
 **Why world 2 is the vertical slice.** It exercises every new thing in its easiest form: the terrain strip at its lowest, the
 sea (cheapest floor), pads (Paul's #1 and #4), boats (#3), the first winch and wind, a world card, a swap. World 3's
@@ -610,3 +622,7 @@ enemy helicopter, destroyer, gunship, fire), with:
 ---
 
 *End of the plan.*
+
+**Built 2026-11-21 (SPEC v1.22, slice C, mission 5):** one ship deck (16 people, in place of the third island's barracks), box 24 x 20 above the flat deck edge, 50 frames a person on every skill, paused not reset, landed-class for R1-R3 and the gusts; the art is `art/world2/deck_ship.txt`, `winch_rope.txt`, `winch_hook.txt`, `man_climb.txt`.
+
+**Built 2026-11-21 (SPEC v1.23, slice D, mission 6):** one sinking freighter (16 people, in place of the third island's barracks), the timer by skill from the plan's table in four stages, people left when it sinks are lost, a bar under the HUD radar and the card's line; the second timed site is not built (the plan allows it, mission 6's table has one).

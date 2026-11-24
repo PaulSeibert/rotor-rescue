@@ -406,6 +406,54 @@ __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 		agkPrint("AGK overrun\n");
 		return;
 	}
+	if(keyUse(KEY_K)) {
+		// everyone rescued at once: the mission's clear and the next card (tests/w2clear.agk)
+		s_sGame.saved = HOSTAGE_COUNT;
+		s_sGame.killed = 0;
+		s_sGame.aboard = 0;
+		s_sGame.deckLeft = 0;
+		s_ubSkillKeyWait = 0;
+		return;
+	}
+	if(keyUse(KEY_Z)) {
+		// the freighter 3 s from sinking (tests/w2frtr.agk)
+		if(s_sGame.deckOn && s_sGame.sinkTotal) s_sGame.sinkTimer = (UWORD)(s_sGame.sinkTotal - 150);
+		s_ubSkillKeyWait = 0;
+		return;
+	}
+	if(keyUse(KEY_D)) {
+		// to the strait destroyer (tests/w2dest.agk, the playtest list): low over the water 94 px east of its aft turret, in the air, facing left
+		if(s_sGame.destOn) {
+			s_sGame.chop.x = 2800; s_sGame.chop.y = 228; s_sGame.chop.vx = s_sGame.chop.vy = 0; s_sGame.chop.landed = 0;
+			s_sGame.landFrames = 0; s_sGame.airGrace = 0;
+			s_sGame.chop.face = s_sGame.chop.faceTarget = FACE_LEFT;
+			logicCameraSnap(&s_sGame);
+		}
+		s_ubSkillKeyWait = 0;
+		return;
+	}
+	if(keyUse(KEY_B)) {
+		// the destroyer's clock 2 s from its barrage; Ctrl+L, Y: 2 s from the turrets opening (tests/w2dest.agk)
+		if(s_sGame.destOn && s_sGame.destClock < s_sGame.barNext - 100) s_sGame.destClock = (UWORD)(s_sGame.barNext - 100);
+		s_ubSkillKeyWait = 0;
+		agkState("dest clock", s_sGame.destClock);
+		agkEnd();
+		return;
+	}
+	if(keyUse(KEY_Y)) {
+		if(s_sGame.destOn && s_sGame.destClock < DEST_OPEN_AT - 100) s_sGame.destClock = DEST_OPEN_AT - 100;
+		s_ubSkillKeyWait = 0;
+		agkState("dest clock", s_sGame.destClock);
+		agkEnd();
+		return;
+	}
+	if(keyUse(KEY_R)) {
+		// every radar site down at once: the zone bonus and its HUD line (tests/w2dest.agk)
+		logicKillRadars(&s_sGame);
+		if(s_sGame.events3 & EV4_ZONE) agkPrint("AGK zone clear\n");   // (the next logicUpdate clears the events before the usual report)
+		s_ubSkillKeyWait = 0;
+		return;
+	}
 	if(keyUse(KEY_H)) {
 		// the hall of fame read from the disk again, as at boot (tests)
 		s_ubSkillKeyWait = 0;
@@ -1394,12 +1442,14 @@ static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgCoverLines[2], s_pMsgFixLines[2];   // per buffer, the lines (a bit each) that may hold cover or fix bits: objectsQueue visits only those
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
-#define TPL_MAX 58   // the shared BOBs' 28 frames + world 2's 29 (world 1's own: 23); one more than the last template made
+#define TPL_MAX 104   // the shared BOBs' 28 frames + world 2's 29 and the common slice 2 set's 12 (world 1's own: 23) + the biggest mission part's 32 (mission 6: the freighter and the destroyer, the hull whole and in pieces); one more than the last template made
 static tAgkBlitArea s_pErase[2][DRAW_MAX];
 static UBYTE s_pErased[2];
 static UBYTE s_ubLastDrawn;          // objects in the last picture (the HUD types less after a busy one)
 static tBitMap *s_pBobBm[BOB_TYPES], *s_pBobMask[BOB_TYPES];
 static UBYTE s_pTplFirst[BOB_TYPES];
+// the destroyer's hull is one BOB while it lies between these (logic.h): where objectsQueue draws a BOB whole inside its margins
+_Static_assert(FB_W - 16 - 154 - FB_X0 == DEST_WHOLE_MAX && -FB_X0 == DEST_WHOLE_MIN, "logic.h: the whole hull's range");
 static tAgkBlit s_pTpl[TPL_MAX][2];
 // Per BOB type, for objectsQueue's loop (src/objblits.s reads it: 16 bytes)
 typedef struct {
@@ -1462,6 +1512,25 @@ static UBYTE s_ubBobBms;
 #define BOB_W2(B, N) bobAdd(B, bobBm(ARENA_OFFS + WORLD2_##N##_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
 	bobBm(ARENA_OFFS + WORLD2_##N##MASK_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
 	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)
+// World 2's slice 2 BOBs (missions 5 and 6), from disk/world2x.bin in the block s_pW2X (allocated at world 2's load): an
+// offset with W2X_BASE set is in that block, not in the art block. The mission's own part (the ship deck, or the freighter and
+// the destroyer's set: disk/world2x5.bin, world2x6.bin) is in a second block s_pW2M made at the mission's card: W2M_BASE
+#define W2X_BASE 0x40000000UL
+#define W2M_BASE 0x80000000UL
+#define BOB_W2X(B, N) bobAdd(B, bobBm(W2X_BASE + WORLD2X_##N##_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
+	bobBm(W2X_BASE + WORLD2X_##N##MASK_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
+	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)
+#define BOB_W2M(B, N) bobAdd(B, bobBm(W2M_BASE + WORLD2M_##N##_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
+	bobBm(W2M_BASE + WORLD2M_##N##MASK_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
+	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)
+#define BOB_W2M_NM(B, N) bobAdd(B, bobBm(W2M_BASE + WORLD2M_##N##_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), 0, \
+	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)   // (no mask: a plain copy, bobIsCopy)
+static UBYTE *s_pW2X;                // (chip) world 2's slice 2 common BOBs: allocated when world 2 loads, freed when it is left
+static UBYTE *s_pW2M;                // (chip) the mission's own BOBs: made at its card (missionSetLoad), freed at the next
+static ULONG s_ulW2MBytes;           // its size (0: none made)
+static UBYTE s_ubMPart = 0xFF;       // the mission (1 or 2) whose part is in s_pW2M; 0xFF: none
+static UBYTE s_ubBmsCommon;          // bobBm stores used by the world's BOBs, the common slice 2 set included: a mission's part follows
+static UBYTE s_ubTplMission;         // the first blit template of a mission's own BOBs
 static UBYTE s_ubTplWorld;           // the first blit template of the world's own BOBs (after the shared ones)
 static UBYTE s_ubDiskArtLoaded;      // diskArtLoad has run: the BOBs' art is in the block
 static void padCompose(void);
@@ -1473,7 +1542,8 @@ static tBitMap *bobBm(ULONG ulOffs, UWORD uwW, UWORD uwRows) {
 	pBm->Rows = uwRows;
 	pBm->Flags = BMF_INTERLEAVED;
 	pBm->Depth = 3;
-	for(UBYTE p = 0; p < 3; ++p) pBm->Planes[p] = (void *)(s_pDiskArt + ulOffs + p * (uwW / 8));
+	UBYTE *pBase = ulOffs >= W2M_BASE ? s_pW2M + (ulOffs - W2M_BASE) : ulOffs >= W2X_BASE ? s_pW2X + (ulOffs - W2X_BASE) : s_pDiskArt + ulOffs;
+	for(UBYTE p = 0; p < 3; ++p) pBm->Planes[p] = (void *)(pBase + p * (uwW / 8));
 	return pBm;
 }
 
@@ -1481,7 +1551,7 @@ static tBitMap *bobBm(ULONG ulOffs, UWORD uwW, UWORD uwRows) {
 // Buildings are drawn first, onto an empty buffer: a plain copy too
 static UBYTE bobIsCopy(UBYTE b) {
 	return b == BOB_SHOT || b == BOB_SHELL || b == BOB_HANGAR || b == BOB_FENCE || b == BOB_BARRACKS || b == BOB_FLAG ||
-		b == BOB_W2_BARRACKS || (b >= BOB_PAD48 && b <= BOB_PAD96);
+		b == BOB_W2_BARRACKS || (b >= BOB_PAD48 && b <= BOB_PAD96) || (b >= BOB_DHULL && b <= BOB_DHULL3);
 }
 
 // A BOB's blit templates (from its frame 0 at template t on) and its tables for objectsQueue
@@ -1569,8 +1639,14 @@ __attribute__((noinline, optimize("Os"))) static void bobsBind(UBYTE ubWorld) {
 		BOB_W2(BOB_PAD_LAMP, PAD_LAMP);
 		BOB_W2(BOB_SPLASH, SPLASH);
 		BOB_W2(BOB_W2_JET, W2_JET);
+		BOB_W2X(BOB_RADAR, RADAR);   // (slice 2's common set, in its own block; a mission's part: bobsBindMission)
+		BOB_W2X(BOB_SOCK, SOCK);
+		BOB_W2X(BOB_ROPE, ROPE);
+		BOB_W2X(BOB_HOOK, HOOK);
+		BOB_W2X(BOB_CLIMB, CLIMB);
+		s_ubBmsCommon = s_ubBobBms;
 		b0 = BOB_W2_FIRST;
-		b1 = BOB_TYPES;
+		b1 = BOB_M5_FIRST;
 	}
 	else {
 		BOB_AT(BOB_FENCE, FENCE);
@@ -1585,7 +1661,42 @@ __attribute__((noinline, optimize("Os"))) static void bobsBind(UBYTE ubWorld) {
 	UBYTE t = s_ubTplWorld;
 	for(UBYTE b = b0; b < b1; ++b) t = bobFill(b, t);
 	if(t >= TPL_MAX) agkPrint("AGK ERR too many BOB frames: raise TPL_MAX\n");
+	if(ubWorld) s_ubTplMission = t;
 	if(s_ubDiskArtLoaded) bobsCrop(b0, b1);   // (the art is in the block: at boot diskArtLoad crops them)
+}
+
+// A mission's own BOBs (the ship deck in mission 5; the freighter, the strait destroyer and the whitecaps in mission 6), once their
+// part is in s_pW2M: their bitmaps and templates, over the same slots each time (the other mission's are not drawn)
+__attribute__((noinline, optimize("Os"))) static void bobsBindMission(UBYTE ubMission) {
+	s_ubBobBms = s_ubBmsCommon;
+	UBYTE b0, b1;
+	if(ubMission == 1) {
+		BOB_W2M(BOB_DECK, DECK);
+		b0 = BOB_M5_FIRST;
+		b1 = BOB_M6_FIRST;
+	}
+	else {
+		BOB_W2M(BOB_FRTR, FRTR);
+		BOB_W2M(BOB_SPRAY, SPRAY);
+		BOB_W2M_NM(BOB_DHULL, DHULL);
+		for(UBYTE k = 0; k < 4; ++k) {   // the four pieces: views of the hull's columns (the same bitmap, 3 words a piece, the last one 1)
+			tBitMap *pV = &s_pBobBmStore[s_ubBobBms++];
+			*pV = *s_pBobBm[BOB_DHULL];
+			for(UBYTE p = 0; p < 3; ++p) pV->Planes[p] += 6 * k;
+			bobAdd((UBYTE)(BOB_DHULL0 + k), pV, 0, g_pBobW[BOB_DHULL0 + k], g_pBobH[BOB_DHULL0 + k], g_pBobFrames[BOB_DHULL0 + k]);
+		}
+		BOB_W2M(BOB_TURRET, TURRET);
+		BOB_W2M(BOB_THIT, THIT);
+		BOB_W2M(BOB_AAGUN, AAGUN);
+		BOB_W2M(BOB_BARRAGE, BARRAGE);
+		BOB_W2M(BOB_CAP, CAP);
+		b0 = BOB_M6_FIRST;
+		b1 = BOB_TYPES;
+	}
+	UBYTE t = s_ubTplMission;
+	for(UBYTE b = b0; b < b1; ++b) t = bobFill(b, t);
+	if(t >= TPL_MAX) agkPrint("AGK ERR too many BOB frames: raise TPL_MAX\n");
+	bobsCrop(b0, b1);
 }
 
 static UBYTE s_ubDraws;              // objects in s_pDraw this picture (objectsQueue)
@@ -2053,13 +2164,16 @@ __attribute__((noinline, noclone)) static void hudUpdate(UBYTE ubBfr) {
 	UBYTE ubBudget = s_ubLastDrawn >= HUD_BUSY_BOBS ? HUD_TYPE_BUSY : HUD_TYPE_PER_FRAME;
 	// the left slot: the choppers left; for a while after the last scoring tank
 	// kill of a mission, the quota (later tanks pay nothing)
-	UBYTE ubLeft = (UBYTE)(g->lives | (g->quotaMsg ? 0x10 : 0));
+	// (or a bonus: ZONE CLR when the last radar site fell, DEST DWN when the strait destroyer was disabled)
+	UBYTE ubLeft = (UBYTE)(g->lives | (g->quotaMsg ? 0x10 : 0));   // (the quota line's slot also says ZONE CLR and DEST DWN: quotaKind picks the text when it starts)
 	if(ubLeft != pLives[ubBfr]) {
 		pLives[ubBfr] = ubLeft;
-		const char *szL = g->quotaMsg ? "QUOTA 10" : "HELI 3  ";
+		static const char *const s_pQuotaText[3] = {"QUOTA 10", "ZONE CLR", "DEST DWN"};
+		UBYTE isMsg = g->quotaMsg;
+		const char *szL = g->quotaMsg ? s_pQuotaText[g->quotaKind] : "HELI 3  ";
 		char *pL = s_pHudSlotLine[ubBfr][0];
 		for(UBYTE i = 0; i < HUD_SLOT_LEN; ++i) pL[i] = szL[i];
-		if(!g->quotaMsg) pL[5] = (char)('0' + g->lives);
+		if(!isMsg) pL[5] = (char)('0' + g->lives);
 		s_pHudSlotPending[ubBfr][0] = 1;
 	}
 	// the right slot: the skill; DAMAGED while the chopper is damaged (until the pad mends it)
@@ -2131,7 +2245,34 @@ static inline void radarDot(UBYTE *pRow, UBYTE ubX, UBYTE ubPen) {
 // The strip's rows 0..RADAR_DYN_H-1 are cleared by the blitter (radarClear(),
 // queued first in the picture); row RADAR_H-1 is the ground line, drawn once.
 static tAgkBlitArea s_pRadarArea[2];
+static void radarBar(UBYTE *pRow, UBYTE ubX0, UBYTE ubX1);
+static UBYTE s_pSinkBar[2];   // the freighter's timer bar as drawn (px) in each HUD buffer
+
+// The timer bar of the sinking freighter (SPEC 11, slice D): the two HUD rows under the radar (22-23), pen 5, ubLen px from the radar's left edge
+__attribute__((noinline, optimize("Os"))) static void sinkBarDraw(UBYTE *pRadarTop, UBYTE ubLen) {
+	for(UBYTE r = RADAR_H; r < RADAR_H + 2; ++r) {
+		UBYTE *p = pRadarTop + r * HUD_ROW_BYTES;
+		for(UBYTE k = 0; k < RADAR_W / 8; ++k) { p[k] = 0; p[RADAR_P1 + k] = 0; p[RADAR_P2 + k] = 0; }
+		if(ubLen) radarBar(p, 0, (UBYTE)(ubLen - 1));
+	}
+}
+
+static UBYTE s_pRadarZones[2];   // the same for the radar sites and their zones (0: none, world 1; else bit 6, the mission, the sites standing)
 static UBYTE s_pRadarBuildings[2] = {0xFF, 0xFF};   // which barracks were open when drawn
+
+// A run of pixels ubX0..ubX1 of the ground line in pen 5, red (planes 0 and 2 set, plane 1 clear: pen 2 was the stone line),
+// whole bytes where it can (the strip starts on a byte: RADAR_X0 + 16 is a multiple of 8)
+__attribute__((noinline, optimize("Os"))) static void radarBar(UBYTE *pRow, UBYTE ubX0, UBYTE ubX1) {
+	for(UWORD x = ubX0; x <= ubX1;) {
+		UBYTE *p = pRow + (x >> 3);
+		UBYTE ubMask;
+		if(!(x & 7) && x + 7 <= ubX1) { ubMask = 0xFF; x += 8; }
+		else { ubMask = (UBYTE)(0x80 >> (x & 7)); ++x; }
+		p[0] |= ubMask;
+		p[RADAR_P1] &= (UBYTE)~ubMask;
+		p[RADAR_P2] |= ubMask;
+	}
+}
 
 static void radarCreate(void) {
 	for(UBYTE b = 0; b < 2; ++b) {
@@ -2152,41 +2293,73 @@ static inline void radarClear(UBYTE ubBfr) {
 // After agkBlitqFinish(): the strip is clear
 __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 	const tGame *g = &s_sGame;
-	UBYTE *pRow[RADAR_H];
-	UBYTE *pTop = s_pRadarArea[ubBfr].pD;
-	for(UBYTE y = 0; y < RADAR_H; ++y, pTop += HUD_ROW_BYTES) pRow[y] = pTop;
+	UBYTE *pTop = s_pRadarArea[ubBfr].pD;   // (a row is its top plus a constant: no table of the eight)
+#define ROW(y) (pTop + (y) * HUD_ROW_BYTES)
 	UBYTE isW2 = g->world;   // (its 4608 px at a 24th, not a 16th)
 	// the buildings (rows 5-6): only when a barracks has opened since
-	UBYTE ubOpen = 0;
-	for(UBYTE b = 0; b < BARRACKS_COUNT; ++b) ubOpen |= (UBYTE)((g->pBarracks[b].hp == 0) << b);
-	ubOpen |= (UBYTE)(isW2 << 4);
-	if(ubOpen != s_pRadarBuildings[ubBfr]) {
+	_Static_assert(BARRACKS_COUNT == 4, "radarUpdate: the open barracks, unrolled (a picture's cycles count)");
+	UBYTE ubOpen = (UBYTE)((g->pBarracks[0].hp == 0) | ((g->pBarracks[1].hp == 0) << 1) | ((g->pBarracks[2].hp == 0) << 2) |
+		((g->pBarracks[3].hp == 0) << 3) | (isW2 << 4));
+	// (a new mission's barracks are closed again: that redraw waits six pictures of its card, as the sites' below: the picture that starts a mission is the heaviest of the game)
+	if(ubOpen != s_pRadarBuildings[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {
 		s_pRadarBuildings[ubBfr] = ubOpen;
+		s_pRadarZones[ubBfr] = 0xFF;   // (rows 5-6 are cleared: the radar sites' dots are drawn again with the zones)
 		for(UBYTE y = 5; y < 7; ++y) {
-			UBYTE *p = pRow[y];
+			UBYTE *p = ROW(y);
 			for(UBYTE i = 0; i < FB_BPP * RADAR_P1; i += RADAR_P1)
 				for(UBYTE k = 0; k < RADAR_W / 8 + 1; ++k) p[i + k] = 0;
 		}
 		UBYTE ubBase = isW2 ? logicRadarX2(W2_HANGAR_X) : logicRadarX(HANGAR_X);
-		radarDot(pRow[6], ubBase, 7);
-		radarDot(pRow[6], (UBYTE)(ubBase + 1), 7);
+		radarDot(ROW(6), ubBase, 7);
+		radarDot(ROW(6), (UBYTE)(ubBase + 1), 7);
 		if(!isW2) {
-			radarDot(pRow[5], logicRadarX(BORDER_X), 3);
-			radarDot(pRow[6], logicRadarX(BORDER_X), 3);
+			radarDot(ROW(5), logicRadarX(BORDER_X), 3);
+			radarDot(ROW(6), logicRadarX(BORDER_X), 3);
 		}
 		for(UBYTE b = 0; b < BARRACKS_COUNT; ++b) {
 			UBYTE x = isW2 ? logicRadarX2(g->pBarracks[b].x) : logicRadarX(g->pBarracks[b].x);
 			UBYTE pen = (ubOpen >> b) & 1 ? 5 : 7;
-			radarDot(pRow[5], x, pen);
-			radarDot(pRow[5], (UBYTE)(x + 1), pen);
-			radarDot(pRow[6], x, pen);
-			radarDot(pRow[6], (UBYTE)(x + 1), pen);
+			radarDot(ROW(5), x, pen);
+			radarDot(ROW(5), (UBYTE)(x + 1), pen);
+			radarDot(ROW(6), x, pen);
+			radarDot(ROW(6), (UBYTE)(x + 1), pen);
 		}
 	}
+	// World 2's radar sites (missions 5-6): each standing site a white dot (pen 3, two wide, row 6) and, on the ground line (row 7,
+	// pen 2), each live jet zone in red (pen 5), cut where the base's approach begins. Drawn when a site falls or the mission changes,
+	// not in the first pictures of a card: the picture that starts a mission is the heaviest of the game, and these a few pictures
+	// later are not seen to lag
+	UBYTE ubZoneKey = 0;   // (world 1: nothing to draw, one test a picture)
+	if(isW2) {
+		ubZoneKey = (UBYTE)(0x40 | ((g->mission + 1) << 3));
+		for(UBYTE i = 0; i < g->radarCount; ++i) ubZoneKey |= (UBYTE)(g->pRadars[i].alive << i);
+		UBYTE ubBar = logicSinkBar(g);   // (mission 6: the freighter's time left, 0 when there is none or nobody aboard)
+		if(ubBar != s_pSinkBar[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {   // (not in the first pictures of the card, as the sites')
+			s_pSinkBar[ubBfr] = ubBar;
+			sinkBarDraw(pTop, ubBar);
+		}
+	}
+	if(ubZoneKey != s_pRadarZones[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {
+		s_pRadarZones[ubBfr] = ubZoneKey;
+		for(UBYTE i = 0; i < g->radarCount; ++i) {
+			UBYTE x = logicRadarX2(g->pRadars[i].x);
+			for(UBYTE d = 0; d < 2; ++d) {
+				UWORD uwX = (UWORD)(((RADAR_X0 + 16) & 7) + x + d);
+				UBYTE *pD = ROW(6) + (uwX >> 3);
+				UBYTE ubBit = (UBYTE)(0x80 >> (uwX & 7));
+				pD[0] &= (UBYTE)~ubBit; pD[RADAR_P1] &= (UBYTE)~ubBit; pD[RADAR_P2] &= (UBYTE)~ubBit;
+				if(g->pRadars[i].alive) radarDot(ROW(6), (UBYTE)(x + d), 3);
+			}
+		}
+		UBYTE *p = ROW(RADAR_H - 1);
+		for(UBYTE k = 0; k < RADAR_W / 8; ++k) { p[k] = 0; p[RADAR_P1 + k] = 0xFF; p[RADAR_P2 + k] = 0; }
+		tZone sZone[RADAR_MAX];
+		for(UBYTE i = 0, n = logicRadarZones(g, sZone, 0); i < n; ++i) radarBar(p, logicRadarX2(sZone[i].lo), logicRadarX2(sZone[i].hi));
+	}
 	UBYTE ubCam = isW2 ? logicRadarX2(g->cam) : logicRadarX(g->cam);
-	radarDot(pRow[0], ubCam, 3);
-	radarDot(pRow[0], (UBYTE)(ubCam + (isW2 ? SCREEN_W / 24 : SCREEN_W / 16)), 3);
-	UBYTE *pPeople = pRow[3] + RADAR_P2;   // pen 4: plane 3 only
+	radarDot(ROW(0), ubCam, 3);
+	radarDot(ROW(0), (UBYTE)(ubCam + (isW2 ? SCREEN_W / 24 : SCREEN_W / 16)), 3);
+	UBYTE *pPeople = ROW(3) + RADAR_P2;   // pen 4: plane 3 only
 	for(UBYTE k = 0; k < g->outCount; ++k) {
 		const tHostage *h = &g->pHostages[g->pOut[k]];
 		if(h->state != HS_DEAD) {
@@ -2195,11 +2368,11 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 		}
 	}
 	for(UBYTE i = 0; !isW2 && i < TANK_MAX; ++i) {
-		if(g->pTanks[i].active) radarDot(pRow[4], logicRadarX(g->pTanks[i].x), 5);
+		if(g->pTanks[i].active) radarDot(ROW(4), logicRadarX(g->pTanks[i].x), 5);
 	}
 	for(UBYTE i = 0; isW2 && i < BOAT_MAX; ++i) {
 		const tBoat *b = &g->pBoats[i];   // (world 2's boats: a gunboat red, a patrol boat stone)
-		if(b->active) radarDot(pRow[4], logicRadarX2(b->x), b->kind == BOAT_GUN ? 5 : 3);
+		if(b->active) radarDot(ROW(4), logicRadarX2(b->x), b->kind == BOAT_GUN ? 5 : 3);
 	}
 	WORD wRadarW = isW2 ? W2_W : WORLD_W;   // (world 2's jets: the same blips on its 4608 px)
 	for(UBYTE i = 0; i < JET_MAX; ++i) {
@@ -2212,27 +2385,28 @@ __attribute__((noinline)) static void radarUpdate(UBYTE ubBfr) {
 			x = x < 0 ? 0 : x >= wRadarW ? wRadarW - 1 : x;
 			if(g->frame & 8) {
 				UBYTE ubX = isW2 ? logicRadarX2(x) : logicRadarX(x);
-				radarDot(pRow[1], ubX, 7);
-				radarDot(pRow[2], ubX, 7);
-				radarDot(pRow[1], (UBYTE)(ubX + 1), 7);
-				radarDot(pRow[2], (UBYTE)(ubX + 1), 7);
+				radarDot(ROW(1), ubX, 7);
+				radarDot(ROW(2), ubX, 7);
+				radarDot(ROW(1), (UBYTE)(ubX + 1), 7);
+				radarDot(ROW(2), (UBYTE)(ubX + 1), 7);
 				continue;
 			}
 		}
-		if(x >= 0 && x < wRadarW) radarDot(pRow[1], isW2 ? logicRadarX2(x) : logicRadarX(x), 5);
+		if(x >= 0 && x < wRadarW) radarDot(ROW(1), isW2 ? logicRadarX2(x) : logicRadarX(x), 5);
 	}
 	for(UBYTE i = 0; !isW2 && i < MINE_MAX; ++i) {
 		WORD x = g->pMines[i].x;
-		if(g->pMines[i].active && x >= 0 && x < WORLD_W) radarDot(pRow[1], logicRadarX(x), 3);
+		if(g->pMines[i].active && x >= 0 && x < WORLD_W) radarDot(ROW(1), logicRadarX(x), 3);
 	}
 	if(!logicIsMenu(g) && g->state != GS_ENTRY) {
 		UBYTE x = isW2 ? logicRadarX2(g->chop.x) : logicRadarX(g->chop.x);
 		UBYTE y = (UBYTE)((g->chop.y - CEIL_Y) >> 5);   // 0..6
 		if(y > RADAR_DYN_H - 1) y = RADAR_DYN_H - 1;
-		radarDot(pRow[y], x, 6);
-		radarDot(pRow[y], (UBYTE)(x + 1), 6);
+		radarDot(ROW(y), x, 6);
+		radarDot(ROW(y), (UBYTE)(x + 1), 6);
 	}
 }
+#undef ROW
 
 // --------------------------------------------------------------- messages ---
 // Lines of text in the play area (title, mission, game over), drawn into the
@@ -2495,7 +2669,10 @@ __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey, UB
 				szA[8] = (char)('4' + g->mission);
 				szA[9] = 0;
 				pText[1] = pW2Name[g->mission];
-				pText[2] = "64 HELD ON 4 ISLANDS";
+				// (mission 5: three islands and a ship; mission 6: the freighter's timer, the skill in force at the card)
+				static const char *const pSink[DIFFICULTY_MAX + 1] = {"FREIGHTER SINKS IN 90 SECONDS", "FREIGHTER SINKS IN 120 SECONDS",
+					"FREIGHTER SINKS IN 105 SECONDS", "FREIGHTER SINKS IN 90 SECONDS", "FREIGHTER SINKS IN 75 SECONDS", "FREIGHTER SINKS IN 60 SECONDS"};
+				pText[2] = g->mission == 0 ? "64 HELD ON 4 ISLANDS" : g->mission == 1 ? "48 ON 3 ISLANDS, 16 ON A SHIP" : pSink[g->difficulty];
 			}
 		} break;
 		case GS_LOST:
@@ -2662,10 +2839,16 @@ __attribute__((noinline, optimize("Os"))) static void routeBox(UBYTE *pTop, UWOR
 	for(UBYTE y = y0; y <= y1; ++y) routeSpan(pTop, x0, w, y, ubPen, isHatch ? ((y & 1) ? 0x55 : 0xAA) : 0xFF);
 }
 
+// World 2's map differs from mission to mission (the jet zones: a red line in row 1, the radar sites: a tick in row 2, mission 5's ship
+// deck in place of a hut). Drawing a map row by row costs a quarter of an A500 frame in the 6-plane display, so at the world's load (a
+// frame nothing is measured) the map is made for each of the world's three missions (960 bytes each), and a mission's card shows its
+// own (routeShow): nothing drawn at the card
+#define ROUTE_IMG_LONGS (ROUTE_H * FB_BPP * ROUTE_ROW_BYTES / 4)
+static ULONG s_pRouteOver[MISSION_COUNT][ROUTE_IMG_LONGS];
+
 // At startup (after logicInit), and at a world's load (worldLoad: making it takes a couple of
-// frames, which a card's picture can't spare): the map into s_pRouteImg
-__attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
-	UBYTE *pTop = s_pRouteImg;
+// frames, which a card's picture can't spare): a map, from its marks, into an image
+__attribute__((noinline, optimize("Os"))) static void routeDraw(UBYTE *pTop, const tRouteMark *pMarks, UBYTE n) {
 	// a dark panel (pen 1: plane 0 set, the others clear), longs a row of a plane (no divides:
 	// the map is made at a world 2 card too)
 	ULONG *pL = (ULONG *)pTop;
@@ -2673,9 +2856,6 @@ __attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
 		for(UBYTE k = 0; k < ROUTE_ROW_BYTES / 4; ++k) *pL++ = 0xFFFFFFFFUL;
 		for(UBYTE k = 0; k < 2 * ROUTE_ROW_BYTES / 4; ++k) *pL++ = 0;
 	}
-
-	tRouteMark pMarks[ROUTE_MARKS];
-	UBYTE n = logicRouteMap(&s_sGame, pMarks);
 	for(UBYTE i = 0; i < n; ++i) {
 		const tRouteMark *m = &pMarks[i];
 		UWORD x = m->x;
@@ -2704,6 +2884,17 @@ __attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
 			case ROUTE_ISLAND:                                  // world 2: land, olive, on the sea
 				routeBox(pTop, x, m->w, 8, 9, 2, 0);
 				break;
+			case ROUTE_ZONE:                                    // world 2, missions 5-6: a jet zone, a red line over the islands
+				routeBox(pTop, x, m->w, 1, 1, 5, 0);
+				break;
+			case ROUTE_RADAR:                                   // ... and a radar site's tick
+				routeBox(pTop, x - 1, 3, 2, 2, 4, 0);
+				break;
+			case ROUTE_DECK:                                    // mission 5's ship deck: a blue hull on the sea, a cream house aft
+				routeBox(pTop, x, m->w, 8, 9, 7, 0);
+				routeBox(pTop, x + m->w - 3, 2, 6, 7, 4, 0);
+				routeBox(pTop, x + 2, 1, 7, 7, 3, 0);
+				break;
 			case ROUTE_HERE:                                    // you are here: a yellow arrow
 				routeBox(pTop, x - 2, 5, 0, 0, 6, 0);
 				routeBox(pTop, x - 1, 3, 1, 1, 6, 0);
@@ -2713,11 +2904,21 @@ __attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
 	}
 }
 
+__attribute__((noinline, optimize("Os"))) static void routeCreate(void) {
+	tRouteMark pMarks[ROUTE_MARKS];
+	if(s_sGame.world) {
+		for(UBYTE m = 0; m < MISSION_COUNT; ++m) routeDraw((UBYTE *)s_pRouteOver[m], pMarks, logicRouteMapFor(&s_sGame, m, pMarks));
+	}
+	else routeDraw(s_pRouteImg, pMarks, logicRouteMap(&s_sGame, pMarks));
+}
+
 // The card's first picture in a buffer (the blitter done): the map copied in
 __attribute__((noinline)) static void routeShow(UBYTE ubBfr) {
-	const ULONG *pSrc = (const ULONG *)s_pRouteImg;
+	// (world 2, once its art is loaded: this mission's map, made at the load)
+	const ULONG *pImg = s_sGame.world && s_sGame.world == s_ubWorld ? s_pRouteOver[s_sGame.mission] : (const ULONG *)s_pRouteImg;
 	UBYTE *pRow = s_pFb[ubBfr]->Planes[0] + s_pFbRowOffs[ROUTE_Y] + (FB_X0 + ROUTE_X0) / 8;
 	for(UBYTE y = 0; y < ROUTE_H * FB_BPP; ++y, pRow += FB_PLANE_BYTES) {
+		const ULONG *pSrc = pImg + y * (ROUTE_ROW_BYTES / 4);
 		ULONG *pDst = (ULONG *)pRow;   // (even addresses: longs are fine on a 68000)
 		for(UBYTE k = 0; k < ROUTE_ROW_BYTES / 4; ++k) *pDst++ = *pSrc++;
 	}
@@ -2790,10 +2991,44 @@ __attribute__((noinline, optimize("Os"))) static void diskArtLoad(void) {
 // half-loaded or of a list for the other world's art is seen. World 2's strip
 // ring is allocated here and freed when the game leaves world 2.
 static void world2Gradients(void);
+
+// A mission's own BOBs (SPEC 11, "World 2, slice 2": the per-mission set): the block of the previous mission's part freed, a block
+// of this one's size made, its file read into it (the OS is on, the display off: the caller turned it off) and its BOBs bound. Mission 4
+// has none (its block is freed, s_ubMPart 0). The deck (5,760 bytes) is not in chip in mission 6, nor the freighter and the destroyer (30,368) in mission 5.
+__attribute__((noinline, optimize("Os"))) static void missionSetRead(UBYTE ubMission) {
+	if(s_pW2M) memFree(s_pW2M, s_ulW2MBytes);
+	s_pW2M = 0;
+	s_ulW2MBytes = 0;
+	s_ubMPart = 0;
+	if(!ubMission) return;   // (mission 4's BOBs are all in the common set)
+	s_ulW2MBytes = ubMission == 1 ? WORLD2M5_BYTES : WORLD2M6_BYTES;
+	s_pW2M = memAllocChipClear(s_ulW2MBytes);
+	CHIP_CHECK(s_pW2M, "the mission's BOBs");
+	if(agkLoadFile(ubMission == 1 ? "world2x5.bin.pk" : "world2x6.bin.pk", s_pW2M, s_ulW2MBytes) != s_ulW2MBytes) agkPrint("AGK ERR world2 mission art missing\n");
+	bobsBindMission(ubMission);
+	s_ubMPart = ubMission;
+}
+
+// At the start of the first picture of a mission whose part is not in chip (a card of mission 5 or 6 after another mission): the same
+// skipped picture and the same two pictures with the bitplanes off as a world's load, so the mission's first picture is not
+// slower for it (the floppy read, the templates and the crop all happen here, before it)
+__attribute__((noinline, optimize("Os"))) static void missionSetLoad(void) {
+	systemSetDmaMask(DMAF_RASTER | DMAF_SPRITE, 0);
+	missionSetRead(s_sGame.mission);
+	s_ubRasterOff = 2;
+	s_pListMission[0] = s_pListMission[1] = 0xFF;   // both game lists written again
+	agkState("mission set", s_sGame.world * MISSION_COUNT + s_sGame.mission + 1);
+	agkState("w2 chipfree", (LONG)(AvailMem(MEMF_CHIP) >> 10));
+	agkState("w2 chipbytes", (LONG)AvailMem(MEMF_CHIP));
+	agkEnd();
+	agkPerfSkip();
+}
+
 __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 	systemSetDmaMask(DMAF_RASTER | DMAF_SPRITE, 0);
 	UBYTE *pArena = s_pDiskArt + ARENA_OFFS;
 	if(ubWorld) {
+		// (the boot splash's chip went at the title, genericProcess: SPEC v1.40)
 		static UBYTE isGradients;
 		if(!isGradients) {
 			isGradients = 1;
@@ -2803,6 +3038,11 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 			s_pStripMem = memAllocChipClear(3 * STRIP_PLANE_BYTES);
 			CHIP_CHECK(s_pStripMem, "world 2's terrain ring");
 		}
+		if(!s_pW2X) {   // slice 2's common BOBs (the radar site...): a block of their own, so the boot, the title and world 1 are as they were
+			s_pW2X = memAllocChipClear(WORLD2X_BYTES);
+			CHIP_CHECK(s_pW2X, "world 2's slice 2 BOBs");
+		}
+		if(agkLoadFile("world2x.bin.pk", s_pW2X, WORLD2X_BYTES) != WORLD2X_BYTES) agkPrint("AGK ERR world2x art missing\n");
 		if(agkLoadFile("world2.bin.pk", pArena, WORLD2_BYTES) != WORLD2_BYTES) agkPrint("AGK ERR world2 art missing\n");
 		s_pCloudsBm = &s_sW2Clouds;
 		s_pFarBm = &s_sW2Far;
@@ -2811,12 +3051,20 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 	else {
 		if(s_pStripMem) memFree(s_pStripMem, 3 * STRIP_PLANE_BYTES);
 		s_pStripMem = 0;
+		if(s_pW2X) memFree(s_pW2X, WORLD2X_BYTES);
+		s_pW2X = 0;
+		if(s_pW2M) memFree(s_pW2M, s_ulW2MBytes);
+		s_pW2M = 0;
+		s_ulW2MBytes = 0;
+		s_ubMPart = 0xFF;
+		for(UBYTE b = 0; b < 2; ++b) { s_pSinkBar[b] = 0; sinkBarDraw(s_pRadarArea[b].pD, 0); }   // (no freighter's bar in world 1's HUD)
 		if(agkLoadFile("world1.bin.pk", pArena, WORLD1_BANDS_BYTES) != WORLD1_BANDS_BYTES) agkPrint("AGK ERR world1 art missing\n");
 		s_pCloudsBm = s_pW1CloudsBm;
 		s_pFarBm = s_pMountains;
 	}
 	for(UBYTE p = 0; p < 3; ++p) s_sStrip.Planes[p] = s_pStripMem ? s_pStripMem + p * STRIP_PLANE_BYTES + 2 : 0;
 	bobsBind(ubWorld);   // (the world's own BOBs: their art is loaded, their templates made)
+	if(ubWorld) missionSetRead(s_sGame.mission);   // (the mission's own part, in this same skipped picture: a card for mission 5 or 6 starts the game from the debug keys)
 	routeCreate();   // (this world's card map)
 	s_ubWorld = ubWorld;
 	s_ubRasterOff = 2;   // (counted down at the start of each picture: on again when both lists are this world's)
@@ -2824,8 +3072,15 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 	agkState("world", ubWorld + 1);
 	agkState("mission", ubWorld * MISSION_COUNT + s_sGame.mission + 1);
 	agkEnd();
+	if(ubWorld) {   // the chip budget of the world's play, to the byte (the perf report's "AGK mem" is in KB)
+		agkState("w2 chipfree", (LONG)(AvailMem(MEMF_CHIP) >> 10));
+		agkState("w2 chipbytes", (LONG)AvailMem(MEMF_CHIP));
+		agkEnd();
+	}
 	agkPrint(ubWorld ? "AGK world 2 loaded\n" : "AGK world 1 loaded\n");
 	agkPerfSkip();
+	// (the loads above ran for several frames, with the OS on: the rest of this picture, and so the pictures after it,
+	// start at a vertical blank, not wherever the last read ended)
 }
 
 // At startup: world 2's bitmaps in the arena (blank until worldLoad)
@@ -3420,9 +3675,34 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 		agkState("barracks open", g->evBarracks - 1);
 		agkEnd();
 	}
+	if(g->evRadar) {
+		agkState("radar down", g->evRadar - 1);
+		agkState("radar zones", logicRadarZones(g, (tZone[RADAR_MAX]){{0}}, 0));
+		agkEnd();
+	}
 	if(g->events & EV_CRASH) agkPrint("AGK chopper lost\n");
 	if(g->events & EV_SHRUG) agkPrint("AGK hit ignored (invincible)\n");
 	if(g->events & EV_TANKTELL) agkPrint("AGK tank tell\n");
+	if(g->events3) {   // (one test a picture in world 1)
+		if(g->events3 & EV3_SINKSTAGE) { agkState("sink stage", g->sinkStage); agkEnd(); }
+		if(g->events3 & EV3_SUNK) { agkState("sunk lost", g->deckLost); agkEnd(); }
+		if(g->events3 & EV3_WINCHSTART) agkPrint("AGK winch start\n");
+		if(g->events3 & EV3_WINCHBOARD) { agkState("winch board", g->aboard); agkEnd(); }
+		if(g->events3 & EV3_GUSTTELL) agkPrint("AGK gust tell\n");
+		if(g->events3 & EV3_GUST) agkPrint("AGK gust start\n");
+	}
+	if(g->events3) {   // (the strait destroyer and the zone bonus: SPEC 11, slice E)
+		if(g->events3 & EV4_TURTELL) agkPrint("AGK destroyer tell\n");
+		if(g->events3 & EV4_TURFIRE) agkPrint("AGK destroyer fire\n");
+		if(g->events3 & EV4_TURDOWN) { agkState("turret down", (LONG)((!g->turHp[0]) + (!g->turHp[1]))); agkEnd(); }
+		if(g->events3 & EV4_DESTDOWN) agkPrint("AGK destroyer down\n");
+		if(g->events3 & EV4_DESTOPEN) agkPrint("AGK destroyer open\n");
+		if(g->events3 & EV4_BARTELL) agkPrint("AGK barrage tell\n");
+		if(g->events3 & EV4_BARFIRE) agkPrint("AGK barrage fire\n");
+		if(g->events3 & EV4_AATELL) agkPrint("AGK flak tell\n");
+		if(g->events3 & EV4_AABURST) agkPrint("AGK flak burst\n");
+		if(g->events3 & EV4_ZONE) agkPrint("AGK zone clear\n");
+	}
 	if(g->events2 & EV2_BOATTELL) agkPrint("AGK boat tell\n");
 	if(g->events2 & EV2_BOATFIRE) agkPrint("AGK boat fire\n");
 	if(g->events2 & EV2_SPLASH) agkPrint("AGK splash\n");
@@ -3609,6 +3889,7 @@ void genericProcess(void) {
 	agkBlitqPoll();
 	UBYTE ubStateBefore = s_sGame.state;
 	if(!s_isPaused) logicUpdate(&s_sGame, &sIn);
+	if(s_ubWorld && s_ubMPart != s_sGame.mission && s_sGame.world == s_ubWorld) missionSetLoad();   // (a new mission's own BOBs, before this picture draws them: SPEC 11, slice E)
 	if(s_sGame.state == GS_ENTRY && ubStateBefore != GS_ENTRY) hiKeyFlush();   // (a key held from the game isn't a letter)
 	else if(ubStateBefore == GS_ENTRY && s_sGame.state != GS_ENTRY) hiKeyFlush();   // (an Esc behind another key isn't a quit)
 	msgLayoutClear(ubBfr);
@@ -3688,6 +3969,8 @@ void genericDestroy(void) {
 	weatherDestroy();
 	chopperDestroy();
 	if(s_pStripMem) memFree(s_pStripMem, 3 * STRIP_PLANE_BYTES);
+	if(s_pW2X) memFree(s_pW2X, WORLD2X_BYTES);
+	if(s_pW2M) memFree(s_pW2M, s_ulW2MBytes);
 	memFree(s_pDiskArt, DISK_ART_ALLOC);   // (the bands, the BOBs and the chopper's frames)
 	for(UBYTE b = 0; b < 2; ++b) memFree(s_pTitleList[b], s_uwTitleCopCount * sizeof(tCopCmd));
 	if(s_pTitleLogo) memFree(s_pTitleLogo, s_ulTitleLogoBytes);
