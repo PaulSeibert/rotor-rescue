@@ -537,8 +537,8 @@ uint8_t logicTankLimit(const tGame *g) {
 }
 
 uint8_t logicJetsOn(const tGame *g) {
-	if(logicIsW3(g)) return 0;   // (the pilot has no jets)
 	if(g->world) {
+		if(logicIsW3(g)) return 0;   // (the pilot has no jets)
 		uint8_t ubFrom = s_pW2JetsFrom[g->mission][g->difficulty];
 		return ubFrom != 255 && g->trip >= ubFrom;
 	}
@@ -609,7 +609,7 @@ COLD static uint8_t basePadW2(const tGame *g, int16_t x) {
 
 // (world 1's base pad stays two compares: this runs every frame)
 static inline uint8_t onBasePad(const tGame *g, int16_t x) {
-	return logicIsW3(g) ? logicW3IsPad(x) : g->world ? basePadW2(g, x) : (x >= BASE_PAD_X0 && x <= BASE_PAD_X1);
+	return g->world ? (logicIsW3(g) ? logicW3IsPad(x) : basePadW2(g, x)) : (x >= BASE_PAD_X0 && x <= BASE_PAD_X1);
 }
 
 uint8_t logicOnBasePad(const tGame *g, int16_t x) {
@@ -621,8 +621,7 @@ uint16_t logicGroundDwell(const tGame *g) {
 }
 
 uint8_t logicJetsTripMax(const tGame *g) {
-	if(logicIsW2(g)) return s_pW2JetsTrip[g->mission][g->difficulty];
-	if(logicIsW3(g)) return 0;
+	if(g->world) return logicIsW3(g) ? 0 : s_pW2JetsTrip[g->mission][g->difficulty];
 	return s_pJetsTrip[g->difficulty];
 }
 
@@ -819,85 +818,8 @@ static void chopperDestroy(tGame *g) {
 	setState(g, GS_LOST, LOST_FRAMES);
 }
 
-// ------------------------------------------------------ world 3's terrain ---
-// SPEC 13.5. The map: the surface height (px above GROUND_Y) at each 16 px joint, a flag a column, the deck's base line a
-// joint (0: none). Between joints the surface is the straight line (the tile's own ragged profile is its art).
-static const uint8_t *s_pW3H = g_pW3Height, *s_pW3F = g_pW3Flags, *s_pW3C = 0;
-
-void logicW3UseMap(const uint8_t *pHeight, const uint8_t *pFlags, const uint8_t *pCeil) {
-	s_pW3H = pHeight ? pHeight : g_pW3Height;
-	s_pW3F = pHeight ? pFlags : g_pW3Flags;
-	s_pW3C = pHeight ? pCeil : 0;
-}
-
-uint8_t logicW3Joint(uint16_t uwJoint) { return uwJoint > W3_COLS ? 0 : s_pW3H[uwJoint]; }
-
-static int16_t w3HeightAt(int16_t x) {
-	if(x < 0) x = 0;
-	if(x >= W3_W) x = W3_W - 1;
-	uint16_t j = (uint16_t)x >> 4;
-	int16_t a = s_pW3H[j], b = s_pW3H[j + 1];
-	return (int16_t)(a + (((b - a) * (x & 15)) >> 4));
-}
-
-int16_t logicW3SurfaceY(int16_t x) { return (int16_t)(GROUND_Y - w3HeightAt(x)); }
-
-int16_t logicW3FloorAt(int16_t x) {
-	int16_t hMax = w3HeightAt((int16_t)(x - W3_SKID_HALF)), hB = w3HeightAt((int16_t)(x + W3_SKID_HALF));
-	if(hB > hMax) hMax = hB;
-	// (a joint between the skids can be higher than both)
-	for(int16_t jx = (int16_t)(((x - W3_SKID_HALF) >> 4) + 1); jx * 16 <= x + W3_SKID_HALF; ++jx) {
-		if(jx >= 0 && jx <= W3_COLS && s_pW3H[jx] > hMax) hMax = s_pW3H[jx];
-	}
-	return (int16_t)(GROUND_Y - hMax);
-}
-
-static uint8_t w3PadCol(int16_t x) {
-	if(x < 0 || x >= W3_W) return 0;
-	return (uint8_t)(s_pW3F[(uint16_t)x >> 4] & W3_FLAG_PAD);
-}
-
-// a landing needs both skids on the bed
-uint8_t logicW3IsPad(int16_t x) {
-	return (uint8_t)(w3PadCol(x) && w3PadCol((int16_t)(x - W3_SKID_HALF)) && w3PadCol((int16_t)(x + W3_SKID_HALF)));
-}
-
-int16_t logicW3CeilAt(int16_t x) {
-	if(!s_pW3C) return CEIL_Y;
-	if(x < 0) x = 0;
-	if(x >= W3_W) x = W3_W - 1;
-	uint16_t j = (uint16_t)x >> 4;
-	int16_t a = s_pW3C[j], b = s_pW3C[j + 1], base;
-	if(a && b) base = (int16_t)(a + (((b - a) * (x & 15)) >> 4));
-	else base = a ? a : b;
-	if(!base) return CEIL_Y;
-	return (int16_t)(base + W3_DECK_CLEAR > CEIL_Y ? base + W3_DECK_CLEAR : CEIL_Y);
-}
-
-// The body's leading edge xEdge, skids at y, heading bDir (+1 right, -1 left): inside rock whose flank here is a wall
-// (60 degrees or steeper facing the heading)? Gentler flanks carry the chopper up (floorAt lifts the skids), they don't stop it.
-uint8_t logicW3WallAt(int16_t xEdge, int16_t y, int8_t bDir) {
-	if(xEdge < 0 || xEdge >= W3_W) return 0;
-	if(logicW3SurfaceY(xEdge) >= y - 1) return 0;
-	uint16_t j = (uint16_t)xEdge >> 4;
-	int16_t wRise = (int16_t)(bDir > 0 ? s_pW3H[j + 1] - s_pW3H[j] : s_pW3H[j] - s_pW3H[j + 1]);
-	return wRise >= W3_WALL_RISE;
-}
-
-// SPEC 13.2: under a deck the route keeps at least W3_MIN_GAP px of air between the deck's base and the crest
-uint8_t logicW3GapOk(const uint8_t *pHeight, const uint8_t *pFlags, const uint8_t *pCeil) {
-	if(!pHeight) { pHeight = g_pW3Height; pFlags = g_pW3Flags; pCeil = 0; }
-	if(!pCeil) return 1;
-	for(uint16_t j = 0; j < W3_COLS; ++j) {
-		if(!pCeil[j] && !pCeil[j + 1]) continue;
-		if(pFlags[j] & W3_FLAG_MASSIF) continue;
-		int16_t h = pHeight[j] > pHeight[j + 1] ? pHeight[j] : pHeight[j + 1];
-		int16_t base = pCeil[j] > pCeil[j + 1] ? pCeil[j] : pCeil[j + 1];
-		if(GROUND_Y - h - base < W3_MIN_GAP) return 0;
-	}
-	return 1;
-}
-
+static void w3ChopperTerrain(tGame *g, int16_t wPrevX);
+static uint8_t logicDrawW3(const tGame *g, tDraw *pOut);
 // The highest the skids may go down to at x: the ground, or a roof
 static int16_t floorAt(const tGame *g, int16_t x, uint8_t *pIsGround) {
 	*pIsGround = 1;
@@ -911,13 +833,15 @@ static int16_t floorAt(const tGame *g, int16_t x, uint8_t *pIsGround) {
 		*pIsGround = 0;
 		return FEET_Y - 40;
 	}
-	// world 3: the height map (SPEC 13.5): the skids stop at the highest surface under them, a landing only on a pad bed
-	if(logicIsW3(g)) {
-		*pIsGround = logicW3IsPad(x);
-		return logicW3FloorAt(x);
+	if(g->world) {
+		// world 3: the height map (SPEC 13.5): the skids stop at the highest surface under them, a landing only on a pad bed
+		if(g->world == W3_WORLD) {
+			*pIsGround = logicW3IsPad(x);
+			return logicW3FloorAt(x);
+		}
+		// world 2: a pad is a landing; the beach, the palms and the sea are floors to stop on
+		*pIsGround = logicPadAt(g, x) != 0xFF;
 	}
-	// world 2: a pad is a landing; the beach, the palms and the sea are floors to stop on
-	if(g->world) *pIsGround = logicPadAt(g, x) != 0xFF;
 	return GROUND_Y;
 }
 
@@ -1083,29 +1007,11 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 	}
 	int16_t wPrevX = c->x;
 	subStep(&c->x, c->vx, &c->fx);
-	if(logicIsW3(g) && c->vx) {
-		// a wall is solid from the side: the body stops, its speed goes, nothing is damaged
-		int8_t bDir = c->vx > 0 ? 1 : -1;
-		if(logicW3WallAt((int16_t)(c->x + bDir * W3_BODY_HALF), c->y, bDir)) {
-			c->x = wPrevX;
-			c->fx = 0;
-			c->vx = 0;
-			g->events3 |= EV3_BUMP;
-		}
-	}
 	subStep(&c->y, c->vy, &c->fy);
 	if(c->x < 24) { c->x = 24; c->vx = 0; }
 	if(c->x > logicWorldW(g) - 24) { c->x = (int16_t)(logicWorldW(g) - 24); c->vx = 0; }
 	if(c->y < CEIL_Y) { c->y = CEIL_Y; c->vy = 0; }
-	if(logicIsW3(g)) {
-		// a cloud deck or a tunnel roof: the skids stop under it (eased down, never a pop)
-		int16_t wCeil = logicW3CeilAt(c->x);
-		if(c->y < wCeil) {
-			c->y = (int16_t)(c->y + 3 > wCeil ? wCeil : c->y + 3);
-			c->fy = 0;
-			if(c->vy < 0) c->vy = 0;
-		}
-	}
+	if(g->world == W3_WORLD) w3ChopperTerrain(g, wPrevX);   // (world 3: walls and a deck; one test for the other worlds' frames)
 	// the pad guide (skill 1-3): the last PAD_ASSIST_PX of a descent nudge the chopper toward
 	// the pad's centre, half a pixel a frame
 	if(logicIsW2(g) && c->vy > 0 && c->y >= GROUND_Y - PAD_ASSIST_PX && (g->frame & 1) && g->difficulty <= DIFFICULTY_NORMAL) {
@@ -1309,12 +1215,6 @@ __attribute__((noinline)) static void shotsUpdate(tGame *g) {
 		if(s->kind == SHOT_BOMB) s->vy = (int16_t)(s->vy + BOMB_GRAVITY);
 		subStep(&s->x, s->vx, &s->fx);
 		subStep(&s->y, s->vy, &s->fy);
-		if(logicIsW3(g) && s->x >= 0 && s->x < W3_W && s->y >= logicW3SurfaceY(s->x)) {
-			// world 3: terrain stops shots
-			s->active = 0;
-			boomAt(g, s->x, s->y);
-			continue;
-		}
 		if(s->kind == SHOT_BOMB) {
 			// barracks roofs stop a bomb too
 			uint8_t isGround;
@@ -1869,8 +1769,15 @@ static void worldUpdate(tGame *g) {
 	smokeUpdate(g);
 	if(g->quotaMsg) --g->quotaMsg;
 	if(logicIsW3(g)) {
-		// the pilot: terrain and the chopper's shots only (SPEC 13.7)
+		// the pilot: terrain and the chopper's shots only (SPEC 13.7); terrain stops a shot
 		shotsUpdate(g);
+		for(uint8_t i = 0; i < SHOT_MAX; ++i) {
+			tShot *s = &g->pShots[i];
+			if(s->active && s->x >= 0 && s->x < W3_W && s->y >= logicW3SurfaceY(s->x)) {
+				s->active = 0;
+				boomAt(g, s->x, s->y);
+			}
+		}
 		boomsUpdate(g);
 		return;
 	}
@@ -2277,21 +2184,12 @@ COLD static uint8_t seaDraw(const tGame *g, tDraw *pOut, uint8_t n) {
 	return n;
 }
 
-// World 3's pilot scenery (SPEC 13.7): the lodge and the AA nest stand on their benches, the pad's slab top is the bed's floor (the
-// skids rest on its second row, as world 2's). The nest idles: its tell and fire frames are the behaviour slice's.
-COLD static uint8_t w3Draw(const tGame *g, tDraw *pOut, uint8_t n) {
-	int16_t cam = g->cam;
-	n = drawAddS(pOut, n, (int16_t)(W3_LODGE_X - cam), (int16_t)(logicW3SurfaceY(W3_LODGE_X + 26) - 32), BOB_W3_LODGE, 0);
-	n = drawAddS(pOut, n, (int16_t)(W3_NEST_X - cam), (int16_t)(logicW3SurfaceY(W3_NEST_X + 15) - 24), BOB_W3_NEST, 0);
-	n = drawAddS(pOut, n, (int16_t)(W3_PAD_X - cam), (int16_t)(logicW3SurfaceY(W3_PAD_X + W3_PAD_W / 2) - 2 - PAD_SLAB_ROW), BOB_PAD64, 0);
-	return n;
-}
-
 uint8_t logicDraw(const tGame *g, tDraw *pOut) {
+	if(g->world == W3_WORLD) return logicDrawW3(g, pOut);
 	uint8_t n = 0;
 	int16_t cam = g->cam;
 	// structures (world 1's base and fence, world 2's hangar)
-	if(!logicIsW3(g)) n = drawAdd(pOut, n, (int16_t)(logicHangarX(g) - cam), FEET_Y - 40, BOB_HANGAR, 0);
+	n = drawAdd(pOut, n, (int16_t)(logicHangarX(g) - cam), FEET_Y - 40, BOB_HANGAR, 0);
 	if(!g->world) {
 		n = drawAdd(pOut, n, (int16_t)(BASE_PAD_X0 - 20 - cam), FEET_Y - 24, BOB_FLAG, (uint8_t)((g->frame >> 4) & 1));
 		n = drawAdd(pOut, n, (int16_t)(BORDER_X - 8 - cam), FEET_Y - 32, BOB_FENCE, 0);
@@ -2304,9 +2202,8 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		else n = drawAdd(pOut, n, (int16_t)(pB->x - 24 - cam), FEET_Y - 28, BOB_BARRACKS, f);
 	}
 	if(logicIsW2(g)) n = padsDraw(g, pOut, n);
-	else if(logicIsW3(g)) n = w3Draw(g, pOut, n);
 	// the chopper's shadow, on the track under it (and under the people)
-	if(logicChopperVisible(g) && !logicIsW3(g) && !(logicIsW2(g) && logicOnWater(g->chop.x))) {
+	if(logicChopperVisible(g) && !(logicIsW2(g) && logicOnWater(g->chop.x))) {
 		static const uint8_t pSize[13] = {0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3};   // by altitude / 16
 		int16_t wAlt = (int16_t)(GROUND_Y - g->chop.y);
 		if(wAlt < 0) wAlt = 0;
@@ -2718,4 +2615,139 @@ const char *logicRank(uint16_t uwSaved) {
 	if(uwSaved >= 90) return "CAPTAIN";
 	if(uwSaved >= 40) return "PILOT";
 	return "ROOKIE";
+}
+
+// ------------------------------------------------------ world 3's terrain ---
+// SPEC 13.5. The map: the surface height (px above GROUND_Y) at each 16 px joint, a flag a column, the deck's base line a
+// joint (0: none). Between joints the surface is the straight line (the tile's own ragged profile is its art).
+static const uint8_t *s_pW3HIn, *s_pW3FIn, *s_pW3C;   // (zero: the built-in map; bss, not data)
+#define s_pW3H (s_pW3HIn ? s_pW3HIn : g_pW3Height)
+#define s_pW3F (s_pW3FIn ? s_pW3FIn : g_pW3Flags)
+
+void logicW3UseMap(const uint8_t *pHeight, const uint8_t *pFlags, const uint8_t *pCeil) {
+	s_pW3HIn = pHeight;
+	s_pW3FIn = pHeight ? pFlags : 0;
+	s_pW3C = pHeight ? pCeil : 0;
+}
+
+uint8_t logicW3Joint(uint16_t uwJoint) { return uwJoint > W3_COLS ? 0 : s_pW3H[uwJoint]; }
+
+static int16_t w3HeightAt(int16_t x) {
+	if(x < 0) x = 0;
+	if(x >= W3_W) x = W3_W - 1;
+	uint16_t j = (uint16_t)x >> 4;
+	int16_t a = s_pW3H[j], b = s_pW3H[j + 1];
+	return (int16_t)(a + (((b - a) * (x & 15)) >> 4));
+}
+
+int16_t logicW3SurfaceY(int16_t x) { return (int16_t)(GROUND_Y - w3HeightAt(x)); }
+
+int16_t logicW3FloorAt(int16_t x) {
+	int16_t hMax = w3HeightAt((int16_t)(x - W3_SKID_HALF)), hB = w3HeightAt((int16_t)(x + W3_SKID_HALF));
+	if(hB > hMax) hMax = hB;
+	// (a joint between the skids can be higher than both)
+	for(int16_t jx = (int16_t)(((x - W3_SKID_HALF) >> 4) + 1); jx * 16 <= x + W3_SKID_HALF; ++jx) {
+		if(jx >= 0 && jx <= W3_COLS && s_pW3H[jx] > hMax) hMax = s_pW3H[jx];
+	}
+	return (int16_t)(GROUND_Y - hMax);
+}
+
+static uint8_t w3PadCol(int16_t x) {
+	if(x < 0 || x >= W3_W) return 0;
+	return (uint8_t)(s_pW3F[(uint16_t)x >> 4] & W3_FLAG_PAD);
+}
+
+// a landing needs both skids on the bed
+uint8_t logicW3IsPad(int16_t x) {
+	return (uint8_t)(w3PadCol(x) && w3PadCol((int16_t)(x - W3_SKID_HALF)) && w3PadCol((int16_t)(x + W3_SKID_HALF)));
+}
+
+int16_t logicW3CeilAt(int16_t x) {
+	if(!s_pW3C) return CEIL_Y;
+	if(x < 0) x = 0;
+	if(x >= W3_W) x = W3_W - 1;
+	uint16_t j = (uint16_t)x >> 4;
+	int16_t a = s_pW3C[j], b = s_pW3C[j + 1], base;
+	if(a && b) base = (int16_t)(a + (((b - a) * (x & 15)) >> 4));
+	else base = a ? a : b;
+	if(!base) return CEIL_Y;
+	return (int16_t)(base + W3_DECK_CLEAR > CEIL_Y ? base + W3_DECK_CLEAR : CEIL_Y);
+}
+
+// The body's leading edge xEdge, skids at y, heading bDir (+1 right, -1 left): inside rock whose flank here is a wall
+// (60 degrees or steeper facing the heading)? Gentler flanks carry the chopper up (floorAt lifts the skids), they don't stop it.
+uint8_t logicW3WallAt(int16_t xEdge, int16_t y, int8_t bDir) {
+	if(xEdge < 0 || xEdge >= W3_W) return 0;
+	if(logicW3SurfaceY(xEdge) >= y - 1) return 0;
+	uint16_t j = (uint16_t)xEdge >> 4;
+	int16_t wRise = (int16_t)(bDir > 0 ? s_pW3H[j + 1] - s_pW3H[j] : s_pW3H[j] - s_pW3H[j + 1]);
+	return wRise >= W3_WALL_RISE;
+}
+
+// SPEC 13.2: under a deck the route keeps at least W3_MIN_GAP px of air between the deck's base and the crest
+uint8_t logicW3GapOk(const uint8_t *pHeight, const uint8_t *pFlags, const uint8_t *pCeil) {
+	if(!pHeight) { pHeight = g_pW3Height; pFlags = g_pW3Flags; pCeil = 0; }
+	if(!pCeil) return 1;
+	for(uint16_t j = 0; j < W3_COLS; ++j) {
+		if(!pCeil[j] && !pCeil[j + 1]) continue;
+		if(pFlags[j] & W3_FLAG_MASSIF) continue;
+		int16_t h = pHeight[j] > pHeight[j + 1] ? pHeight[j] : pHeight[j + 1];
+		int16_t base = pCeil[j] > pCeil[j + 1] ? pCeil[j] : pCeil[j + 1];
+		if(GROUND_Y - h - base < W3_MIN_GAP) return 0;
+	}
+	return 1;
+}
+
+// World 3's pilot scenery (SPEC 13.7): the lodge and the AA nest stand on their benches, the pad's slab top is the bed's floor (the
+// skids rest on its second row, as world 2's). The nest idles: its tell and fire frames are the behaviour slice's.
+COLD static uint8_t w3Draw(const tGame *g, tDraw *pOut, uint8_t n) {
+	int16_t cam = g->cam;
+	n = drawAddS(pOut, n, (int16_t)(W3_LODGE_X - cam), (int16_t)(logicW3SurfaceY(W3_LODGE_X + 26) - 32), BOB_W3_LODGE, 0);
+	n = drawAddS(pOut, n, (int16_t)(W3_NEST_X - cam), (int16_t)(logicW3SurfaceY(W3_NEST_X + 15) - 24), BOB_W3_NEST, 0);
+	n = drawAddS(pOut, n, (int16_t)(W3_PAD_X - cam), (int16_t)(logicW3SurfaceY(W3_PAD_X + W3_PAD_W / 2) - 2 - PAD_SLAB_ROW), BOB_PAD64, 0);
+	return n;
+}
+
+// World 3's picture: its scenery, then what the chopper shoots and what burns (no shadow, hangar or barracks yet)
+COLD static uint8_t logicDrawW3(const tGame *g, tDraw *pOut) {
+	uint8_t n = w3Draw(g, pOut, 0);
+	int16_t cam = g->cam;
+	for(uint8_t i = 0; i < SMOKE_MAX; ++i) {
+		const tSmoke *p = &g->pSmoke[i];
+		if(p->active) n = drawAdd(pOut, n, (int16_t)(p->x - 8 - cam), (int16_t)(p->y - 4), BOB_SMOKE,
+			p->age >= 16 ? SMOKE_THIN : p->age >= 8 ? SMOKE_BIG : SMOKE_SMALL);
+	}
+	for(uint8_t i = 0; i < SHOT_MAX; ++i) {
+		const tShot *s = &g->pShots[i];
+		if(!s->active) continue;
+		if(s->kind == SHOT_CANNON) n = drawAdd(pOut, n, (int16_t)(s->x - 4 - cam), (int16_t)(s->y - 1), BOB_SHOT, 0);
+		else n = drawAdd(pOut, n, (int16_t)(s->x - 2 - cam), (int16_t)(s->y - 3), BOB_BOMB, 0);
+	}
+	for(uint8_t i = 0; i < BOOM_MAX; ++i) {
+		const tBoom *b = &g->pBooms[i];
+		if(b->active) n = drawAdd(pOut, n, (int16_t)(b->x - 16 - cam), (int16_t)(b->y - 16), BOB_BOOM, b->frame);
+	}
+	return n;
+}
+
+// World 3's chopper against the terrain, after its moves (SPEC 13.5): a wall is solid from the side (the body stops, its speed goes,
+// nothing is damaged), a cloud deck or a tunnel roof stops the skids under it (eased down, never a pop). Out of line: the other
+// worlds' frames pay one test for it (jets runs at its own 97 % limit in world 1).
+__attribute__((noinline)) static void w3ChopperTerrain(tGame *g, int16_t wPrevX) {
+	tChopper *c = &g->chop;
+	if(c->vx) {
+		int8_t bDir = c->vx > 0 ? 1 : -1;
+		if(logicW3WallAt((int16_t)(c->x + bDir * W3_BODY_HALF), c->y, bDir)) {
+			c->x = wPrevX;
+			c->fx = 0;
+			c->vx = 0;
+			g->events3 |= EV3_BUMP;
+		}
+	}
+	int16_t wCeil = logicW3CeilAt(c->x);
+	if(c->y < wCeil) {
+		c->y = (int16_t)(c->y + 3 > wCeil ? wCeil : c->y + 3);
+		c->fy = 0;
+		if(c->vy < 0) c->vy = 0;
+	}
 }

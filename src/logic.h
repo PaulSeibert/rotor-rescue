@@ -449,7 +449,7 @@ void logicStartMission(tGame *g, uint8_t ubMission);
 void logicStartAt(tGame *g, uint8_t ubWorld, uint8_t ubMission);
 void logicUpdate(tGame *g, const tInput *pIn);
 // The battlefield's width: WORLD_W, or W2_W in world 2
-static inline int16_t logicWorldW(const tGame *g) { return g->world == W3_WORLD ? W3_W : g->world ? W2_W : WORLD_W; }
+static inline int16_t logicWorldW(const tGame *g) { return g->world ? (g->world == W3_WORLD ? W3_W : W2_W) : WORLD_W; }   // (world 1 first: the hot paths pay one test)
 static inline uint8_t logicIsW2(const tGame *g) { return g->world == 1; }
 static inline uint8_t logicIsW3(const tGame *g) { return g->world == W3_WORLD; }
 

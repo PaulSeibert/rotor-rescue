@@ -2866,8 +2866,8 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 	agkState("mission", ubWorld * MISSION_COUNT + s_sGame.mission + 1);
 	agkEnd();
 	if(ubWorld) {   // the chip budget of the world's play, to the byte (the perf report's "AGK mem" is in KB)
-		agkState(ubWorld == W3_WORLD ? "w3 chipbytes" : "w2 chipbytes", (LONG)AvailMem(MEMF_CHIP));
 		agkState(ubWorld == W3_WORLD ? "w3 chipfree" : "w2 chipfree", (LONG)(AvailMem(MEMF_CHIP) >> 10));
+		agkState(ubWorld == W3_WORLD ? "w3 chipbytes" : "w2 chipbytes", (LONG)AvailMem(MEMF_CHIP));
 		agkEnd();
 	}
 	agkPrint(ubWorld == W3_WORLD ? "AGK world 3 loaded\n" : ubWorld ? "AGK world 2 loaded\n" : "AGK world 1 loaded\n");

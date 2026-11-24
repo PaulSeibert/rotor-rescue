@@ -1108,10 +1108,21 @@ Per-mission pens 1-7 (12-bit): see STYLE-world3 section 3 (the table is the cont
 `112 435 765 C96 9AC DDE FFF`; M8 and M9 as there). Far pens 6, 7 equal strip pens 6, 7 in every mission.
 
 ### 13.4 Memory
-- The world arena target is **<= 62 KB on the a500 and <= 71 KB with WinUAE's smaller chip** (derived in STYLE-world3 section 6;
-  the pilot re-measures them). The floors stay **96 KB (a500 in play) and 64 KB (squeeze)** in worlds 1, 2 and 3: never lowered.
-- One tile bank for all three missions, **at most 40 top tiles**; only the palette differs per mission.
-- Loading world 3 **replaces** the previous world's art in the arena; it never adds to it.
+- The floors stay **96 KB (a500, lowest chip free in play) and 64 KB (with WinUAE's 23 KB taken away)** in worlds 1, 2 and 3: never lowered.
+- **One tile bank** for all three missions, **at most 40 top tiles** (the pilot uses 27 of the art's 35); only the palette differs per mission.
+  16 rock fills, stored from row 21 (rows 0-20 are never visible: 630 B a fill).
+- **The arena** is one chip block made at boot at the size of the biggest world (today 69,832 B: world 2's file and its composed pads).
+  Loading a world **replaces** the previous one's art in it, never adds. World 3's content: the pilot is 51,394 B (the file 30,304 B, the
+  gradients 2,784 B, the strip's ring 18,306 B); the art pass's levered figures are M8 66,878 B and M9 67,262 B (STYLE-world3 section 13):
+  they fit the arena as it is, so **world 3 costs the game no chip**. (The older 62 KB / 71 KB targets were derived from world 2's figures
+  before the splash lever below; they are replaced by this derivation.)
+- **The ceiling for the arena** (a500, vAmiga, measured with `W3_KEEP_SPLASH` and without): the arena is made at boot, so every extra byte
+  comes off every world's chip free. World 1 keeps the boot splash's 47,840 B until a world loads: 105 KB lowest in play, 9 KB above the floor,
+  so **the arena may grow by about 9 KB (to about 79 KB) while the splash is freed only at the first world load**. Freeing the splash at the
+  first game start instead (a one-line move, not made here) would lift that to world 2's and 3's own headroom, **about 57 KB (to about
+  124 KB)** on the a500, and 66 KB on the squeezed run. Chip free in play in world 3 (bytes): a500 155,592 with the lever (107,752 without),
+  a500-ks31 190,912 (143,072), a500-aros 197,280 (149,440), a1200 1,287,632 (1,239,808); with the 23 KB squeeze 132,040 (84,200), 167,360
+  (119,520), 173,728 (125,888) and 1,264,080 (1,216,256). World 2 with the lever: 147,384 (a500).
 
 ### 13.5 Height-map semantics (`floorAt` / `ceilAt`)
 A map is one byte per 16 px column: the surface height `h` (px above `GROUND_Y`, 0-100) at the column's left joint, plus a flag per
@@ -1137,11 +1148,10 @@ at skill 1-5**. The fire frame is the tell held with a muzzle flash.
 1:1 terrain strip streamed a 16 px column at a time into a ring in PF2, the far range at 1/4, the haze, the strip fill under the world
 card, and the world's art loaded into the shared arena in place of the previous world's (`disk/world3.bin`, `art/tools/make_world3_disk.py`).
 Missions 8 and 9 show a "not built" card. No enemy behaviour yet (the nest and lodge are scenery): that is for amiga-game.
-Measured in vAmiga (docs/WORLD3-HANDOFF.md has all of it): chip free in play 104 KB on the a500 (the floor is 96; world 1 and 2 are
-unchanged), 82 KB with WinUAE's 23 KB taken away (floor 64); the world's art, gradients and the strip's 18.3 KB ring all live in the
-shared arena world 2 already sized (world 3 adds no chip: `WORLD3_END` 45.5 KB of the arena's 68.2 KB, so M7's pilot is under the 62 / 71 KB targets with room for the ceiling strip); copper entries 631 (OCS) and
-1,333 (AGA) against the lists' 661 and 1,340; frame load 26-47 % average, worst 74 % (the card's fill window); `disk/world3.bin` 25.5 KB,
-12.8 KB packed.
+Measured in vAmiga (docs/WORLD3-HANDOFF.md has all of it): chip in play as in 13.4 (the world adds none); copper entries 631 (OCS) and
+1,333 (AGA) against the lists' 661 and 1,340 (world 2's list is the bigger on the a500, so no growth); frame load 26-47 % average, worst
+74 % (the picture after the card's world load); `disk/world3.bin` 30.3 KB, 13 KB packed; the strip streams pixel-exact against the art's
+raster at 5 camera offsets (`tools/check_w3strip.py`, a500 and a1200).
 
 ## Open questions for Paul
 
