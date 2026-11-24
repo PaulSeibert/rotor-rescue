@@ -3423,6 +3423,7 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 	bobsBind(ubWorld);   // (the world's own BOBs: their art is loaded, their templates made)
 	if(ubWorld == 1) missionSetRead(s_sGame.mission);   // (the mission's own part, in this same skipped picture: a card for mission 5 or 6 starts the game from the debug keys)
 	routeCreate();   // (this world's card map)
+	s_pRouteLit[0] = s_pRouteLit[1] = 0;   // (a card to card jump, Ctrl+L, W: the new world's map is copied in again, not the old card's left in the buffer)
 	s_ubWorld = ubWorld;
 	s_ubRasterOff = 2;   // (counted down at the start of each picture: on again when both lists are this world's)
 	s_pListMission[0] = s_pListMission[1] = 0xFF;   // both game lists written again
