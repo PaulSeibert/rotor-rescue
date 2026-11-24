@@ -2603,9 +2603,40 @@ __attribute__((noinline)) static UBYTE msgTypeFast(UBYTE ubBfr, UWORD uwKey) {
 	return 1;
 }
 
+// A settled key (everything typed) and letters an erase crossed - an explosion over a line in play, a
+// missile across the typed prompt: those letters drawn again and nothing else, which is all the body does
+// then after its set-up (sixteen text pointers, the state's switch, the settings of four lines: 18-20
+// raster lines of the barrage's pictures in world 2). Only the lines flagged in s_pMsgFixLines.
+__attribute__((noinline)) static void msgFixOnly(UBYTE ubBfr) {
+	UBYTE ubLayout = msgLayout();
+	UWORD uwLayout = (UWORD)(((1UL << s_pMsgEnd[ubLayout]) - 1) & ~((1UL << s_pMsgFirst[ubLayout]) - 1));
+	UWORD uwLines = (UWORD)(s_pMsgFixLines[ubBfr] & uwLayout);
+	s_pMsgFixLines[ubBfr] &= (UWORD)~uwLayout;
+	s_pMsgAnyFix[ubBfr] = 0;
+	for(UBYTE l = 0; uwLines; ++l, uwLines >>= 1) {
+		if(!(uwLines & 1)) continue;
+		const char *pStage = s_pMsgStage[ubBfr][l];
+		ULONG *pFix = s_pMsgFix[ubBfr][l];
+		const ULONG *pInk = s_pMsgInk[ubBfr][l];
+		tAgkText *pT = &s_pMsg[ubBfr][l];
+		ULONG ulFix0 = pFix[0] & pInk[0], ulFix1 = pFix[1] & pInk[1];
+		pFix[0] = pFix[1] = 0;
+		if(!(ulFix0 | ulFix1)) continue;
+		UBYTE c = 0;
+		for(ULONG m = ulFix0; m; m >>= 1, ++c) if(m & 1) msgChar(pT, c, pStage[c]);
+		c = 32;
+		for(ULONG m = ulFix1; m; m >>= 1, ++c) if(m & 1) msgChar(pT, c, pStage[c]);
+		s_pMsgLit[ubBfr] |= (UWORD)(1 << l);
+	}
+}
+
 __attribute__((noinline)) static void msgUpdate(UBYTE ubBfr) {
 	UWORD uwKey = msgKeyNow();
 	if(uwKey == s_pMsgKey[ubBfr] && !s_pMsgAnyFix[ubBfr]) return;
+	if(uwKey == s_pMsgKey[ubBfr] && uwKey == s_pMsgTypeKey[ubBfr]) {   // (settled, so a fix is what is wanted)
+		msgFixOnly(ubBfr);
+		return;
+	}
 	if(uwKey != s_pMsgKey[ubBfr] && !s_pMsgAnyFix[ubBfr] &&
 		(s_sGame.state == GS_PLAY || (s_sGame.state == GS_LOST && s_sGame.stateTimer >= LOST_FRAMES - 40))) {
 		// A new key with nothing to say (play starting, the 40 pictures after a lost chopper before
