@@ -8,7 +8,7 @@ import math
 import numpy as np
 from w2lib import *
 import w2sea as isea, w2tiles as itiles, w2bobs as ibobs
-from w2tiles import TW, TH, island, water_layer, to_tiles, put, lock_palm, crop_palm, smooth
+from w2tiles import TW, TH, WATER_MARKS, WATER_GLINT, WATER_CREST, water_cycle, island, water_layer, to_tiles, put, lock_palm, crop_palm, smooth
 
 M0 = MISSIONS[0]
 
@@ -25,7 +25,7 @@ def boulder(a, x, yb, w, h, seed):
                 if nx + ny * 1.2 < -0.55:
                     v = 5
                 if nx + ny * 0.6 > 0.55 or yy >= h - 1:
-                    v = 1
+                    v = 2
                 a[yb - h + yy + 1, x + xx] = v
     for k in range(w):                                  # a surf/sand shadow under it
         if a[yb + 1, x + k] in (5, 4):
@@ -62,7 +62,7 @@ def build_bank():
                         if nx + ny < -0.4:
                             v = 3
                         if ny > 0.5 or nx > 0.7:
-                            v = 1
+                            v = 2
                         c[yy, xx] = v
         bank[nm] = c
     for v, seed in enumerate((600, 601)):
@@ -71,13 +71,14 @@ def build_bank():
         boulder(c, 20 - 5 * v, 38, 6, 4, seed + 7)
         bank["rock%d_0" % v], bank["rock%d_1" % v] = to_tiles(c)
     for v, seed in enumerate((700, 701)):                 # reef: rocks in the water with surf rings
-        c = water_layer(TW, seed)
+        c = water_layer(TW, seed, finish=False)
         boulder(c, 3 + 4 * v, 40, 7, 4, seed)
         for x in range(1, 15):
             for y in (41, 42):
-                if c[y, x] == 0 or c[y, x] in (6, 7, 1):
+                if c[y, x] == 0 or c[y, x] in WATER_MARKS:
                     if (x + y * 2 + v) % 3 != 0:
-                        c[y, x] = 7 if (x + y) % 2 else 6
+                        c[y, x] = WATER_GLINT if (x + y) % 2 else WATER_CREST
+        water_cycle(c, seed)
         bank["reef%d" % v] = c
     for v, seed in enumerate((800, 801)):
         bank["padbed%d" % v] = island(TW, seed, vegetation=True, ground_detail=True)

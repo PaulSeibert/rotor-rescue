@@ -298,6 +298,7 @@ static WORD s_wSeaBaseCam = -1;
 static UWORD s_pSeaPenCol[MISSION_COUNT][4][3];   // the sea's pens 4-7 per mission and level (world2Gradients)
 static UBYTE s_ubSeaHold;                         // pictures left that hold the swell and shimmer at frame 0 after a list is written or patched
 static UWORD s_pSeaPenStep[2] = {0xFFFF, 0xFFFF};
+static UWORD s_pBaseStep[2] = {0xFFFF, 0xFFFF};   // the base ocean pens step each list shows (logicBaseWave)
 static UWORD s_pPalSlot[2][4];   // its PF2 palettes: clouds, far band (mountains, far islands), land or sea, islands
 
 typedef struct {
@@ -814,6 +815,7 @@ __attribute__((noinline, optimize("Os"))) static void copperMission(tCopCmd *pLi
 	UBYTE isW2 = s_ubWorld;
 	s_pSeaPhase[ubBfr] = 0xFF;
 	s_pSeaPenStep[ubBfr] = 0xFFFF;
+	s_pBaseStep[ubBfr] = 0xFFFF;
 	s_ubSeaHold = 12;
 	const UWORD *pSky = isW2 ? s_pW2Sky[ubMission] : s_pSky[ubMission];
 	const UWORD *pSkyLo = isW2 ? s_pW2SkyLo[ubMission] : s_pSkyLo ? s_pSkyLo[ubMission] : 0;
@@ -877,6 +879,20 @@ __attribute__((noinline, optimize("Os"))) static void seaPens(tCopCmd *pList, UB
 	s_pSeaPenStep[ubBfr] = uwStep;
 	for(UBYTE k = 4; k < 8; ++k)
 		copSetMoveVal(&pList[s_pPalSlot[ubBfr][2] + k - 1].sMove, s_pSeaPenCol[ubMission][k - 4][logicSeaPenLevel(k, uwFrame)]);
+}
+
+// The base ocean (the terrain strip's water, SPEC 11): its three water pens, 1, 6 and 7 of the island palette (the
+// palette MOVEs after line 207's WAIT), run through logicBaseWave's colours, a step every 2 frames. Three MOVEs, so
+// it runs every picture the step moved, whatever the blitter has queued
+__attribute__((noinline, optimize("Os"))) static void basePens(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UWORD uwFrame) {
+	UWORD uwKey = (UWORD)(uwFrame >> BASE_STEP_SHIFT);
+	if(uwKey == s_pBaseStep[ubBfr]) return;
+	s_pBaseStep[ubBfr] = uwKey;
+	const UWORD *pIsl = g_pW2IslPal[ubMission];
+	UWORD uwSlot = s_pPalSlot[ubBfr][3];
+	copSetMoveVal(&pList[uwSlot].sMove, logicBaseWave(pIsl[1], pIsl[6], pIsl[7], uwFrame, 0));
+	copSetMoveVal(&pList[uwSlot + 5].sMove, logicBaseWave(pIsl[1], pIsl[6], pIsl[7], uwFrame, 1));
+	copSetMoveVal(&pList[uwSlot + 6].sMove, logicBaseWave(pIsl[1], pIsl[6], pIsl[7], uwFrame, 2));
 }
 
 // The HUD panel (lines 0..PLAY_TOP-1), all from the copper: a brushed-steel
@@ -1160,7 +1176,7 @@ static void songsFree(void) {
 __attribute__((optimize("Os", "no-unswitch-loops")))
 static void copperWriteList(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UBYTE isTitle) {
 	tAgkCopWriter sW;
-	if(!isTitle) { s_pSeaPhase[ubBfr] = 0xFF; s_pSeaPenStep[ubBfr] = 0xFFFF; s_ubSeaHold = 12; }
+	if(!isTitle) { s_pSeaPhase[ubBfr] = 0xFF; s_pSeaPenStep[ubBfr] = 0xFFFF; s_pBaseStep[ubBfr] = 0xFFFF; s_ubSeaHold = 12; }
 	// the game list starts after the sprite pointers, the title list jumped to
 	// from there
 	agkCopInit(&sW, pList, isTitle ? 0 : COP_TOP_POS, s_pView->ubPosY);
@@ -1517,6 +1533,7 @@ __attribute__((noinline, optimize("Os"))) static void stripUpdate(tCopCmd *pList
 __attribute__((noinline, optimize("Os"))) static void w2Update(tCopCmd *pList, UBYTE ubBfr, WORD wCam, WORD *pCamShown) {
 	stripUpdate(pList, ubBfr, wCam);
 	UWORD uwFrame = s_ubSeaStill ? 0 : s_sGame.frame;
+	basePens(pList, ubBfr, s_sGame.mission, uwFrame);
 	// (a list just written or patched: a mission's first pictures are the budget's worst, so the
 	// swell and the shimmer wait a few pictures, the water as the camera alone puts it)
 	UBYTE ubPhase = s_ubSeaHold ? SEA_NO_SWELL : logicSeaPhase(uwFrame);

@@ -1,5 +1,6 @@
 """Terrain strip tile kit: 16 px wide x 48 rows, PF2 pens 1-7 (island palette). Built procedurally;
 palms are Retro Diffusion sprites locked to the pens. Light from the top left."""
+import math
 import numpy as np
 from w2lib import *
 TW, TH = 16, 48
@@ -7,8 +8,40 @@ BACK, FRONT = 24, 41          # island back edge (jungle foot) and front edge (s
 MISS = MISSIONS[0]
 
 
-def water_layer(w, seed, rows=range(TH)):
-    """ripple texture (pens 6 crest, 7 glint, 1 trough) for a w-wide canvas, 1-px margins so tiles join anywhere"""
+WATER_CREST, WATER_GLINT, WATER_TROUGH = 16, 17, 11     # water pixels carry these marks until water_cycle, so an island pixel in
+WATER_MARKS = (WATER_CREST, WATER_GLINT, WATER_TROUGH)   # pen 1, 6 or 7 can never be mistaken for water (pens 1, 6, 7 are the cycled ones)
+WATER_PENS = (1, 6, 7)                                   # class 0, 1, 2 of the base ocean's colour cycling (SPEC 11, "Base ocean animation")
+
+
+def water_phase(y):
+    """the wave's phase at strip row y, in waves: perspective, a wave about 5 rows long at the top, about 25 at the foot"""
+    return 2.2 * math.log(1 + y / 12.0)
+
+
+def water_cycle(a, seed):
+    """turn the marked water strokes (a horizontal run each) into pens 1, 6 or 7 by wave phase of the row plus a random
+    +-(0.2..0.4) of a wave a stroke (more at the foot): no row is a band, no two neighbours match"""
+    r = rng(seed + 77)
+    h, w = a.shape
+    for y in range(h):
+        x = 0
+        while x < w:
+            if a[y, x] in WATER_MARKS:
+                x2 = x
+                while x2 < w and a[y, x2] in WATER_MARKS:
+                    x2 += 1
+                amp = 0.2 + 0.2 * y / 47.0
+                u = (water_phase(y) + r.uniform(-amp, amp)) % 1.0
+                # (strip row 0 shows pens 6 and 7 only: the palettes switch around line 207, check_world2.py)
+                a[y, x:x2] = WATER_PENS[1 + int(u * 2) % 2] if y == 0 else WATER_PENS[int(u * 3) % 3]
+                x = x2
+            else:
+                x += 1
+
+
+def water_layer(w, seed, rows=range(TH), finish=True):
+    """ripple texture (marked crest, glint, trough; water_cycle gives them their pens unless finish is False) for a w-wide
+    canvas, 1-px margins so tiles join anywhere"""
     r = rng(seed)
     a = np.zeros((TH, w), np.uint8)
     for y in rows:
@@ -24,15 +57,17 @@ def water_layer(w, seed, rows=range(TH)):
             x = int(r.integers(0, w - L + 1))
             if (a[y, max(0, x - 1):x + L + 1] > 0).any():
                 continue
-            a[y, x:x + L] = 6
+            a[y, x:x + L] = WATER_CREST
             if L >= 6 and r.uniform() < 0.5:
-                a[y, x] = 7
+                a[y, x] = WATER_GLINT
             if y + 1 < TH and L >= 4 and r.uniform() < 0.75:    # trough: 1 px down and right of the crest
                 xs = x + 1
                 xe = x + L - (1 if L > 5 else 0)
                 if (a[y + 1, xs + 1:xe + 1] == 0).all() and xe < w - 1 and r.uniform() < 0.5:
-                    a[y + 1, xs + 1:xe + 1] = 1
+                    a[y + 1, xs + 1:xe + 1] = WATER_TROUGH
             got = (a[y] > 0).sum()
+    if finish:
+        water_cycle(a, seed)
     return a
 
 
@@ -41,12 +76,19 @@ def smooth(t):
     return t * t * (3 - 2 * t)
 
 
+def island_pens(a):
+    """what is left in pens 1, 6 and 7 after the water is marked is island (a bush's dark underside, a pebble, a boulder's
+    shadow): pens 1, 6, 7 are the strip's colour-cycled water pens now, so the island keeps to pens 2-5"""
+    a[a == 1] = 2
+    a[(a == 6) | (a == 7)] = 5
+
+
 def island(canvas_w, seed, left_slope=0, right_slope=0, vegetation=True, ground_detail=True, bare=False):
     """paint an island run on a canvas (pens), starting from water. left_slope / right_slope: width in px of the
     beach that rises from / falls to the water at that end (0 = the run continues past the canvas edge)."""
     r = rng(seed)
     W = canvas_w
-    a = water_layer(W, seed + 1)
+    a = water_layer(W, seed + 1, finish=False)
     b = np.full(W, float(BACK))
     f = np.full(W, float(FRONT))
     wob = np.zeros(W)
@@ -149,8 +191,10 @@ def island(canvas_w, seed, left_slope=0, right_slope=0, vegetation=True, ground_
                 a[bi[x], x] = 1 if r.uniform() < 0.7 else 4
     for y in range(TH):
         for x in range(W):
-            if ring[y, x] and not land[y, x] and a[y, x] in (0, 6, 7, 1) and y >= 28:
-                a[y, x] = 7 if (r.uniform() < 0.45) else 6
+            if ring[y, x] and not land[y, x] and (a[y, x] == 0 or a[y, x] in WATER_MARKS) and y >= 28:
+                a[y, x] = WATER_GLINT if (r.uniform() < 0.45) else WATER_CREST
+    island_pens(a)
+    water_cycle(a, seed)
     return a
 
 
@@ -169,6 +213,7 @@ def lock_palm(path):
             if p[3] < 128:
                 continue
             a[y, x] = nearest(p[:3], pal) + 1
+    island_pens(a)
     return a
 
 
