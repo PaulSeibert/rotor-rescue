@@ -1408,7 +1408,7 @@ static UBYTE s_pMsgAnyFix[2];
 static UBYTE s_pMsgAnyCover[2];              // any bits in s_pMsgCover[buffer]
 static UWORD s_pMsgKey[2] = {0xFFFF, 0xFFFF};   // what the lines say (state, blink...) once settled
 
-#define TPL_MAX 80   // the shared BOBs' 28 frames + world 2's 33 (world 1's own: 23); one more than the last template made
+#define TPL_MAX 100   // the shared BOBs' 28 frames + world 2's 29 and the common slice 2 set's 12 (world 1's own: 23) + the biggest mission part's 30 (mission 6: the freighter and the destroyer); one more than the last template made
 static tAgkBlitArea s_pErase[2][DRAW_MAX];
 static UBYTE s_pErased[2];
 static UBYTE s_ubLastDrawn;          // objects in the last picture (the HUD types less after a busy one)
@@ -1477,12 +1477,22 @@ static UBYTE s_ubBobBms;
 	bobBm(ARENA_OFFS + WORLD2_##N##MASK_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
 	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)
 // World 2's slice 2 BOBs (missions 5 and 6), from disk/world2x.bin in the block s_pW2X (allocated at world 2's load): an
-// offset with this flag set is in that block, not in the art block
+// offset with W2X_BASE set is in that block, not in the art block. The mission's own part (the ship deck, or the freighter and
+// the destroyer's set: disk/world2x5.bin, world2x6.bin) is in a second block s_pW2M made at the mission's card: W2M_BASE
 #define W2X_BASE 0x40000000UL
+#define W2M_BASE 0x80000000UL
 #define BOB_W2X(B, N) bobAdd(B, bobBm(W2X_BASE + WORLD2X_##N##_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
 	bobBm(W2X_BASE + WORLD2X_##N##MASK_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
 	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)
-static UBYTE *s_pW2X;                // (chip) world 2's slice 2 BOBs: allocated when world 2 loads, freed when it is left
+#define BOB_W2M(B, N) bobAdd(B, bobBm(W2M_BASE + WORLD2M_##N##_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
+	bobBm(W2M_BASE + WORLD2M_##N##MASK_OFFS, ART_##N##_BITMAP_W, ART_##N##_H * ART_##N##_FRAMES), \
+	ART_##N##_W, ART_##N##_H, ART_##N##_FRAMES)
+static UBYTE *s_pW2X;                // (chip) world 2's slice 2 common BOBs: allocated when world 2 loads, freed when it is left
+static UBYTE *s_pW2M;                // (chip) the mission's own BOBs: made at its card (missionSetLoad), freed at the next
+static ULONG s_ulW2MBytes;           // its size (0: none made)
+static UBYTE s_ubMPart = 0xFF;       // the mission (1 or 2) whose part is in s_pW2M; 0xFF: none
+static UBYTE s_ubBmsCommon;          // bobBm stores used by the world's BOBs, the common slice 2 set included: a mission's part follows
+static UBYTE s_ubTplMission;         // the first blit template of a mission's own BOBs
 static UBYTE s_ubTplWorld;           // the first blit template of the world's own BOBs (after the shared ones)
 static UBYTE s_ubDiskArtLoaded;      // diskArtLoad has run: the BOBs' art is in the block
 static void padCompose(void);
@@ -1494,7 +1504,7 @@ static tBitMap *bobBm(ULONG ulOffs, UWORD uwW, UWORD uwRows) {
 	pBm->Rows = uwRows;
 	pBm->Flags = BMF_INTERLEAVED;
 	pBm->Depth = 3;
-	UBYTE *pBase = ulOffs >= W2X_BASE ? s_pW2X + (ulOffs - W2X_BASE) : s_pDiskArt + ulOffs;
+	UBYTE *pBase = ulOffs >= W2M_BASE ? s_pW2M + (ulOffs - W2M_BASE) : ulOffs >= W2X_BASE ? s_pW2X + (ulOffs - W2X_BASE) : s_pDiskArt + ulOffs;
 	for(UBYTE p = 0; p < 3; ++p) pBm->Planes[p] = (void *)(pBase + p * (uwW / 8));
 	return pBm;
 }
@@ -1591,16 +1601,14 @@ __attribute__((noinline, optimize("Os"))) static void bobsBind(UBYTE ubWorld) {
 		BOB_W2(BOB_PAD_LAMP, PAD_LAMP);
 		BOB_W2(BOB_SPLASH, SPLASH);
 		BOB_W2(BOB_W2_JET, W2_JET);
-		BOB_W2X(BOB_RADAR, RADAR);   // (slice 2's, in its own block)
+		BOB_W2X(BOB_RADAR, RADAR);   // (slice 2's common set, in its own block; a mission's part: bobsBindMission)
 		BOB_W2X(BOB_SOCK, SOCK);
-		BOB_W2X(BOB_DECK, DECK);
 		BOB_W2X(BOB_ROPE, ROPE);
 		BOB_W2X(BOB_HOOK, HOOK);
 		BOB_W2X(BOB_CLIMB, CLIMB);
-		BOB_W2X(BOB_FRTR, FRTR);
-		BOB_W2X(BOB_SPRAY, SPRAY);
+		s_ubBmsCommon = s_ubBobBms;
 		b0 = BOB_W2_FIRST;
-		b1 = BOB_TYPES;
+		b1 = BOB_M5_FIRST;
 	}
 	else {
 		BOB_AT(BOB_FENCE, FENCE);
@@ -1615,7 +1623,39 @@ __attribute__((noinline, optimize("Os"))) static void bobsBind(UBYTE ubWorld) {
 	UBYTE t = s_ubTplWorld;
 	for(UBYTE b = b0; b < b1; ++b) t = bobFill(b, t);
 	if(t >= TPL_MAX) agkPrint("AGK ERR too many BOB frames: raise TPL_MAX\n");
+	if(ubWorld) s_ubTplMission = t;
 	if(s_ubDiskArtLoaded) bobsCrop(b0, b1);   // (the art is in the block: at boot diskArtLoad crops them)
+}
+
+// A mission's own BOBs (the ship deck in mission 5; the freighter, the strait destroyer and the whitecaps in mission 6), once their
+// part is in s_pW2M: their bitmaps and templates, over the same slots each time (the other mission's are not drawn)
+__attribute__((noinline, optimize("Os"))) static void bobsBindMission(UBYTE ubMission) {
+	s_ubBobBms = s_ubBmsCommon;
+	UBYTE b0, b1;
+	if(ubMission == 1) {
+		BOB_W2M(BOB_DECK, DECK);
+		b0 = BOB_M5_FIRST;
+		b1 = BOB_M6_FIRST;
+	}
+	else {
+		BOB_W2M(BOB_FRTR, FRTR);
+		BOB_W2M(BOB_SPRAY, SPRAY);
+		BOB_W2M(BOB_DHULL0, DHULL0);
+		BOB_W2M(BOB_DHULL1, DHULL1);
+		BOB_W2M(BOB_DHULL2, DHULL2);
+		BOB_W2M(BOB_DHULL3, DHULL3);
+		BOB_W2M(BOB_TURRET, TURRET);
+		BOB_W2M(BOB_THIT, THIT);
+		BOB_W2M(BOB_AAGUN, AAGUN);
+		BOB_W2M(BOB_BARRAGE, BARRAGE);
+		BOB_W2M(BOB_CAP, CAP);
+		b0 = BOB_M6_FIRST;
+		b1 = BOB_TYPES;
+	}
+	UBYTE t = s_ubTplMission;
+	for(UBYTE b = b0; b < b1; ++b) t = bobFill(b, t);
+	if(t >= TPL_MAX) agkPrint("AGK ERR too many BOB frames: raise TPL_MAX\n");
+	bobsCrop(b0, b1);
 }
 
 static UBYTE s_ubDraws;              // objects in s_pDraw this picture (objectsQueue)
@@ -1735,7 +1775,7 @@ __attribute__((noinline)) static void erasesQueue(UBYTE ubBfr) {
 __attribute__((noinline)) static void objectsQueue(UBYTE ubBfr) {
 	tBitMap *pFb = s_pFb[ubBfr];
 	// (the picture the world changes in: the new world's BOBs are loaded at the start of the next)
-	UBYTE n = s_sGame.world == s_ubWorld ? logicDraw(&s_sGame, s_pDraw) : 0;
+	UBYTE n = s_sGame.world == s_ubWorld && (!s_ubWorld || s_ubMPart == s_sGame.mission) ? logicDraw(&s_sGame, s_pDraw) : 0;
 	tAgkBlitArea *pErase = s_pErase[ubBfr];
 	UBYTE ubDrawn = 0;
 	const tDraw *pD = s_pDraw;
@@ -2731,6 +2771,39 @@ __attribute__((noinline, optimize("Os"))) static void diskArtLoad(void) {
 // half-loaded or of a list for the other world's art is seen. World 2's strip
 // ring is allocated here and freed when the game leaves world 2.
 static void world2Gradients(void);
+
+// A mission's own BOBs (SPEC 11, "World 2, slice 2": the per-mission set): the block of the previous mission's part freed, a block
+// of this one's size made, its file read into it (the OS is on, the display off: the caller turned it off) and its BOBs bound. Mission 4
+// has none (its block is freed, s_ubMPart 0). The deck (5,760 bytes) is not in chip in mission 6, nor the freighter and the destroyer (30,368) in mission 5.
+__attribute__((noinline, optimize("Os"))) static void missionSetRead(UBYTE ubMission) {
+	if(s_pW2M) memFree(s_pW2M, s_ulW2MBytes);
+	s_pW2M = 0;
+	s_ulW2MBytes = 0;
+	s_ubMPart = 0;
+	if(!ubMission) return;   // (mission 4's BOBs are all in the common set)
+	s_ulW2MBytes = ubMission == 1 ? WORLD2M5_BYTES : WORLD2M6_BYTES;
+	s_pW2M = memAllocChipClear(s_ulW2MBytes);
+	CHIP_CHECK(s_pW2M, "the mission's BOBs");
+	if(agkLoadFile(ubMission == 1 ? "world2x5.bin.pk" : "world2x6.bin.pk", s_pW2M, s_ulW2MBytes) != s_ulW2MBytes) agkPrint("AGK ERR world2 mission art missing\n");
+	bobsBindMission(ubMission);
+	s_ubMPart = ubMission;
+}
+
+// At the start of the first picture of a mission whose part is not in chip (a card of mission 5 or 6 after another mission): the same
+// skipped picture and the same two pictures with the bitplanes off as a world's load, so the mission's first picture is not
+// slower for it (the floppy read, the templates and the crop all happen here, before it)
+__attribute__((noinline, optimize("Os"))) static void missionSetLoad(void) {
+	systemSetDmaMask(DMAF_RASTER | DMAF_SPRITE, 0);
+	missionSetRead(s_sGame.mission);
+	s_ubRasterOff = 2;
+	s_pListMission[0] = s_pListMission[1] = 0xFF;   // both game lists written again
+	agkState("mission set", s_sGame.world * MISSION_COUNT + s_sGame.mission + 1);
+	agkState("w2 chipfree", (LONG)(AvailMem(MEMF_CHIP) >> 10));
+	agkState("w2 chipbytes", (LONG)AvailMem(MEMF_CHIP));
+	agkEnd();
+	agkPerfSkip();
+}
+
 __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 	systemSetDmaMask(DMAF_RASTER | DMAF_SPRITE, 0);
 	UBYTE *pArena = s_pDiskArt + ARENA_OFFS;
@@ -2748,7 +2821,7 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 			s_pStripMem = memAllocChipClear(3 * STRIP_PLANE_BYTES);
 			CHIP_CHECK(s_pStripMem, "world 2's terrain ring");
 		}
-		if(!s_pW2X) {   // slice 2's BOBs (the radar site...): a block of their own, so the boot, the title and world 1 are as they were
+		if(!s_pW2X) {   // slice 2's common BOBs (the radar site...): a block of their own, so the boot, the title and world 1 are as they were
 			s_pW2X = memAllocChipClear(WORLD2X_BYTES);
 			CHIP_CHECK(s_pW2X, "world 2's slice 2 BOBs");
 		}
@@ -2763,6 +2836,10 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 		s_pStripMem = 0;
 		if(s_pW2X) memFree(s_pW2X, WORLD2X_BYTES);
 		s_pW2X = 0;
+		if(s_pW2M) memFree(s_pW2M, s_ulW2MBytes);
+		s_pW2M = 0;
+		s_ulW2MBytes = 0;
+		s_ubMPart = 0xFF;
 		for(UBYTE b = 0; b < 2; ++b) { s_pSinkBar[b] = 0; sinkBarDraw(s_pRadarArea[b].pD, 0); }   // (no freighter's bar in world 1's HUD)
 		if(agkLoadFile("world1.bin.pk", pArena, WORLD1_BANDS_BYTES) != WORLD1_BANDS_BYTES) agkPrint("AGK ERR world1 art missing\n");
 		s_pCloudsBm = s_pW1CloudsBm;
@@ -2770,6 +2847,7 @@ __attribute__((noinline, optimize("Os"))) static void worldLoad(UBYTE ubWorld) {
 	}
 	for(UBYTE p = 0; p < 3; ++p) s_sStrip.Planes[p] = s_pStripMem ? s_pStripMem + p * STRIP_PLANE_BYTES + 2 : 0;
 	bobsBind(ubWorld);   // (the world's own BOBs: their art is loaded, their templates made)
+	if(ubWorld) missionSetRead(s_sGame.mission);   // (the mission's own part, in this same skipped picture: a card for mission 5 or 6 starts the game from the debug keys)
 	routeCreate();   // (this world's card map)
 	s_ubWorld = ubWorld;
 	s_ubRasterOff = 2;   // (counted down at the start of each picture: on again when both lists are this world's)
@@ -3503,6 +3581,7 @@ void genericProcess(void) {
 #endif
 		worldLoad(s_sGame.world);
 	}
+	else if(s_ubWorld && s_sGame.world == s_ubWorld && s_ubMPart != s_sGame.mission && !s_isSplash) missionSetLoad();
 	// the weather first, in the vertical blank (last frame's positions: a frame
 	// behind the ground, unseen in rain and dust)
 	if(!s_isSplash) weatherUpdate();
@@ -3654,6 +3733,7 @@ void genericDestroy(void) {
 	chopperDestroy();
 	if(s_pStripMem) memFree(s_pStripMem, 3 * STRIP_PLANE_BYTES);
 	if(s_pW2X) memFree(s_pW2X, WORLD2X_BYTES);
+	if(s_pW2M) memFree(s_pW2M, s_ulW2MBytes);
 	memFree(s_pDiskArt, DISK_ART_ALLOC);   // (the bands, the BOBs and the chopper's frames)
 	for(UBYTE b = 0; b < 2; ++b) memFree(s_pTitleList[b], s_uwTitleCopCount * sizeof(tCopCmd));
 	if(s_pTitleLogo) memFree(s_pTitleLogo, s_ulTitleLogoBytes);

@@ -47,12 +47,25 @@ SET = [("w2_barracks", None, "W2_BARRACKS", True), ("w2_patrol_boat", [0, 2, 4, 
        ("w2_pad_slab", [0, 1, 2], "PAD_SLAB", False), ("w2_pad_centre", [0], "PAD_CENTRE", False),
        ("w2_pad_lamp", None, "PAD_LAMP", True), ("w2_splash", None, "SPLASH", True),
        ("w2_jet", None, "W2_JET", True)]   # (v1.16: world 1's jet art again, the 4 frames: left, right, flash left, flash right)
-# World 2's slice 2 BOBs (missions 5 and 6: SPEC 11, "World 2, slice 2"): a file of their own, loaded into a chip block of its
-# own that worldLoad allocates when world 2 loads (after the boot splash's 47 KB are freed) and frees when the game leaves
-# world 2, so the boot-time block, the title and world 1 stay as they were.
-SETX = [("w2_radar", None, "RADAR", True), ("w2_windsock", None, "SOCK", True),
-         ("w2_deck", None, "DECK", True), ("w2_rope", None, "ROPE", True), ("w2_hook", None, "HOOK", True), ("w2_man_climb", None, "CLIMB", True),
-         ("w2_freighter", None, "FRTR", True), ("w2_spray", None, "SPRAY", True)]   # slice A: the radar site, 4 frames, the dish turning: wide, half, thin, half
+# World 2's slice 2 BOBs (missions 5 and 6: SPEC 11, "World 2, slice 2"), in three files. The COMMON set (disk/world2x.bin: the radar,
+# the windsock and the winch's rope, hook and climbing man: both missions use them) is loaded into a chip block of its own that
+# worldLoad allocates when world 2 loads (after the boot splash's 47 KB are freed) and frees when the game leaves world 2, so the
+# boot-time block, the title and world 1 stay as they were. Each mission's own part is a file of its own (disk/world2x5.bin: the
+# ship deck; disk/world2x6.bin: the freighter and the strait destroyer's set) loaded into a second block that is freed and made
+# again when the mission changes (main.c missionSetLoad: the SPEC's per-mission lever): a mission's BOBs not in it are not in chip.
+# An entry: the art's name, the frames kept (None: all), the game's name, whether it has a mask and, for a piece of a wide BOB,
+# (first word, words, its width in px). BOBs wider than 48 px are cut into pieces of at most 48 px: the blitter's buffer has no
+# clipping (a BOB is drawn only whole inside its margins, 48 px left and 48 px right of the screen), so a 154 px hull would
+# appear and vanish with 100 px still showing; a 48 px piece does both off screen.
+SETX = [("w2_radar", None, "RADAR", True, None), ("w2_windsock", None, "SOCK", True, None),
+        ("w2_rope", None, "ROPE", True, None), ("w2_hook", None, "HOOK", True, None), ("w2_man_climb", None, "CLIMB", True, None)]   # slice A: the radar site, 4 frames, the dish turning: wide, half, thin, half
+SETX5 = [("w2_deck", None, "DECK", True, None)]
+SETX6 = [("w2_freighter", None, "FRTR", True, None), ("w2_spray", None, "SPRAY", True, None),
+         ("w2_destroyer_hull_e", None, "DHULL0", True, (0, 3, 48)), ("w2_destroyer_hull_e", None, "DHULL1", True, (3, 3, 48)),
+         ("w2_destroyer_hull_e", None, "DHULL2", True, (6, 3, 48)), ("w2_destroyer_hull_e", None, "DHULL3", True, (9, 1, 10)),
+         ("w2_destroyer_turret", [0, 1, 2, 3], "TURRET", True, None),   # one facing: the left frames (idle, tell 1, tell 2, fire)
+         ("w2_turret_hit", None, "THIT", True, None), ("w2_aa_gun", None, "AAGUN", True, None),
+         ("w2_barrage", None, "BARRAGE", True, None), ("w2_whitecap", None, "CAP", True, None)]
 PAD_ROWS = 46
 PAD_WIDTHS = (48, 64, 80, 96)   # the pad's widths on the 16 px grid: one composed BOB each (chip, 3 planes, no mask)
 SEA_LINES = 28
@@ -84,7 +97,7 @@ def convert(out_dir):
     keep = []
     for block in re.split(r"(?m)^(?=\[)", toml):
         head = re.match(r"\[(\w+)\]", block)
-        if head is None or head.group(1) == "art" or head.group(1) in PARTS or head.group(1) in [n for n, _, _, _ in SET + SETX]:
+        if head is None or head.group(1) == "art" or head.group(1) in PARTS or head.group(1) in [e[0] for e in SET + SETX + SETX5 + SETX6]:
             keep.append(block)
     tmp = tempfile.mkdtemp(prefix="world-art-")
     try:
@@ -147,9 +160,10 @@ def sea(src, hdr):
     return planar(wide, SEA_W)
 
 
-def bob_parts(src, hdr, name, keep):
+def bob_parts(src, hdr, name, keep, cols=None):
     """A BOB's image and mask as the chip bitmaps hold them (as make_disk_art.py: 3 interleaved planes,
-    the mask in all 3), only the frames in keep, stacked in that order"""
+    the mask in all 3), only the frames in keep, stacked in that order; cols = (first word, words): only those
+    columns of every row (a piece of a wide BOB)"""
     up = name.upper()
     h, frames = define(hdr, f"ART_{up}_H"), define(hdr, f"ART_{up}_FRAMES")
     wpr = define(hdr, f"ART_{up}_BITMAP_W") // 16
@@ -162,8 +176,16 @@ def bob_parts(src, hdr, name, keep):
             raise SystemExit(f"make_world_disk: [{name}] has no frame {f}")
         for y in range(f * h, (f + 1) * h):
             row = data[y * 4 * wpr:(y + 1) * 4 * wpr]
-            img += row[:3 * wpr]
-            mask += row[3 * wpr:] * 3
+            if cols is None:
+                img += row[:3 * wpr]
+                mask += row[3 * wpr:] * 3
+            else:
+                c0, n = cols
+                if c0 + n > wpr:
+                    raise SystemExit(f"make_world_disk: [{name}] has {wpr} words a row, not {c0 + n}")
+                for p in range(3):
+                    img += row[p * wpr + c0:p * wpr + c0 + n]
+                mask += row[3 * wpr + c0:3 * wpr + c0 + n] * 3
     return struct.pack(">%dH" % len(img), *img), struct.pack(">%dH" % len(mask), *mask)
 
 
@@ -213,13 +235,18 @@ def outputs(src, hdr):
         if isMask:
             set_parts.append((cname + "MASK", mask + b"\0" * (-len(mask) % 8)))
     files[os.path.join("disk", "world2.bin")] = b"".join(d for _, d in parts + set_parts)
-    setx_parts = []
-    for name, keep, cname, isMask in SETX:
-        img, mask = bob_parts(src, hdr, name, keep)
-        setx_parts.append((cname, img + b"\0" * (-len(img) % 8)))
-        if isMask:
-            setx_parts.append((cname + "MASK", mask + b"\0" * (-len(mask) % 8)))
+    def setx(entries):
+        out = []
+        for name, keep, cname, isMask, cols in entries:
+            img, mask = bob_parts(src, hdr, name, keep, cols and cols[:2])
+            out.append((cname, img + b"\0" * (-len(img) % 8)))
+            if isMask:
+                out.append((cname + "MASK", mask + b"\0" * (-len(mask) % 8)))
+        return out
+    setx_parts, setx5_parts, setx6_parts = setx(SETX), setx(SETX5), setx(SETX6)
     files[os.path.join("disk", "world2x.bin")] = b"".join(d for _, d in setx_parts)
+    files[os.path.join("disk", "world2x5.bin")] = b"".join(d for _, d in setx5_parts)
+    files[os.path.join("disk", "world2x6.bin")] = b"".join(d for _, d in setx6_parts)
     pal = tomllib.load(open(os.path.join(root, "art", "world2", "palettes.toml"), "rb"))
     h = ["// Generated by art/tools/make_world_disk.py from art/world2/ - do not edit.",
          "// World 2 (Coral Islands, missions 4-6): the display art on the floppy (disk/world2.bin,",
@@ -259,18 +286,25 @@ def outputs(src, hdr):
         h.append(f"#define WORLD2_PAD{w}_OFFS {offs + comp}")
         comp += (w // 8 * 3 * PAD_ROWS + 7) & ~7
     h.append(f"#define WORLD2_PAD_COMPOSED_BYTES {comp}")
-    h.append("// slice 2's BOBs: disk/world2x.bin, in a chip block of their own (worldLoad allocates it at world 2's load)")
-    for name, keep, cname, isMask in SETX:
+    h.append("// slice 2's BOBs: the common set in disk/world2x.bin (a chip block of its own, worldLoad allocates it at world 2's load) and")
+    h.append("// each mission's part (world2x5.bin, world2x6.bin) in a second block that missionSetLoad makes at the mission's card")
+    for name, keep, cname, isMask, cols in SETX + SETX5 + SETX6:
         up = name.upper()
-        h.append(f"#define ART_{cname}_W {define(hdr, f'ART_{up}_W')}")
+        h.append(f"#define ART_{cname}_W {cols[2] if cols else define(hdr, f'ART_{up}_W')}")
         h.append(f"#define ART_{cname}_H {define(hdr, f'ART_{up}_H')}")
         h.append(f"#define ART_{cname}_FRAMES {len(keep) if keep is not None else define(hdr, f'ART_{up}_FRAMES')}")
-        h.append(f"#define ART_{cname}_BITMAP_W {define(hdr, f'ART_{up}_BITMAP_W')}")
+        h.append(f"#define ART_{cname}_BITMAP_W {cols[1] * 16 if cols else define(hdr, f'ART_{up}_BITMAP_W')}")
     xoffs = 0
     for name, data in setx_parts:
         h.append(f"#define WORLD2X_{name}_OFFS {xoffs}")
         xoffs += len(data)
     h.append(f"#define WORLD2X_BYTES {xoffs}")
+    for key, parts in (("5", setx5_parts), ("6", setx6_parts)):
+        moffs = 0
+        for name, data in parts:
+            h.append(f"#define WORLD2M_{name}_OFFS {moffs}   // (in mission {key}'s block)")
+            moffs += len(data)
+        h.append(f"#define WORLD2M{key}_BYTES {moffs}")
     h += ["", "// Per mission (4, 5, 6): PF2 pens 1-7 (index 0 unused), dark to light; the sky gradient",
           "// top to H (lines 24-179), the sea's H to C (180-207), C under the strip; AGA: 24 bits"]
 

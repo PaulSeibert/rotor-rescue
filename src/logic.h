@@ -95,11 +95,15 @@ enum {
 	BOB_HOSTAGE, BOB_SHOT, BOB_BOMB, BOB_SHELL, BOB_BOOM, BOB_SHADOW, BOB_SMOKE, BOB_HANGAR,
 	BOB_FENCE, BOB_BARRACKS, BOB_TANK, BOB_JET, BOB_MINE, BOB_FLAG,
 	BOB_W2_BARRACKS, BOB_PATROL, BOB_GUNBOAT, BOB_PAD48, BOB_PAD64, BOB_PAD80, BOB_PAD96,
-	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET, BOB_RADAR, BOB_SOCK, BOB_DECK, BOB_ROPE, BOB_HOOK, BOB_CLIMB, BOB_FRTR, BOB_SPRAY,
+	BOB_PAD_LAMP, BOB_SPLASH, BOB_W2_JET, BOB_RADAR, BOB_SOCK, BOB_ROPE, BOB_HOOK, BOB_CLIMB,   // (slice 2's common set: both missions)
+	BOB_DECK,                                                                                   // (mission 5's part, loaded at its card)
+	BOB_FRTR, BOB_SPRAY, BOB_DHULL0, BOB_DHULL1, BOB_DHULL2, BOB_DHULL3, BOB_TURRET, BOB_THIT, BOB_AAGUN, BOB_BARRAGE, BOB_CAP,   // (mission 6's part)
 	BOB_TYPES
 };
+#define BOB_M5_FIRST BOB_DECK        // mission 5's own BOBs: BOB_DECK only
+#define BOB_M6_FIRST BOB_FRTR        // mission 6's: BOB_FRTR .. BOB_CAP (the freighter, the strait destroyer, the whitecaps)
 #define BOB_W1_FIRST BOB_FENCE       // world 1's own BOBs: BOB_FENCE .. BOB_FLAG
-#define BOB_W2_FIRST BOB_W2_BARRACKS // world 2's: BOB_W2_BARRACKS .. BOB_RADAR (the jet is world 1's, a copy in the set)
+#define BOB_W2_FIRST BOB_W2_BARRACKS // world 2's: BOB_W2_BARRACKS .. BOB_TYPES - 1 (the jet is world 1's, a copy in the set; from BOB_M5_FIRST a mission's own)
 // The chopper's shadow on the track: frame = size * 2 + dither phase (x & 1),
 // size 0 (on the ground) .. SHADOW_SIZES - 1 (high up)
 #define SHADOW_Y (GROUND_Y + 1)

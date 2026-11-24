@@ -19,6 +19,8 @@ const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_W2_BARRACKS] = 51, [BOB_PATROL] = 43, [BOB_GUNBOAT] = 61, [BOB_PAD48] = 48,
 	[BOB_PAD64] = 64, [BOB_PAD80] = 80, [BOB_PAD96] = 96, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 32,
 	[BOB_RADAR] = 33, [BOB_SOCK] = 10, [BOB_DECK] = 124, [BOB_ROPE] = 8, [BOB_HOOK] = 8, [BOB_CLIMB] = 16, [BOB_FRTR] = 128, [BOB_SPRAY] = 24,
+	[BOB_DHULL0] = 48, [BOB_DHULL1] = 48, [BOB_DHULL2] = 48, [BOB_DHULL3] = 10, [BOB_TURRET] = 32, [BOB_THIT] = 32, [BOB_AAGUN] = 12,
+	[BOB_BARRAGE] = 24, [BOB_CAP] = 34,
 };
 const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_HANGAR] = 40, [BOB_FENCE] = 32, [BOB_BARRACKS] = 28, [BOB_TANK] = 14,
@@ -28,6 +30,8 @@ const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_W2_BARRACKS] = 31, [BOB_PATROL] = 17, [BOB_GUNBOAT] = 30, [BOB_PAD48] = PAD_ROWS,
 	[BOB_PAD64] = PAD_ROWS, [BOB_PAD80] = PAD_ROWS, [BOB_PAD96] = PAD_ROWS, [BOB_PAD_LAMP] = 5, [BOB_SPLASH] = 24, [BOB_W2_JET] = 12,
 	[BOB_RADAR] = 39, [BOB_SOCK] = 20, [BOB_DECK] = 30, [BOB_ROPE] = 40, [BOB_HOOK] = 12, [BOB_CLIMB] = 12, [BOB_FRTR] = 36, [BOB_SPRAY] = 12,
+	[BOB_DHULL0] = 44, [BOB_DHULL1] = 44, [BOB_DHULL2] = 44, [BOB_DHULL3] = 44, [BOB_TURRET] = 19, [BOB_THIT] = 19, [BOB_AAGUN] = 12,
+	[BOB_BARRAGE] = 12, [BOB_CAP] = 10,
 };
 // (world 2's frames are the ones the floppy set carries: art/tools/make_world_disk.py picks
 // them from the art: one wake frame a facing and the patrol boat's tell a facing, the gunboat's fire frame is its second tell's,
@@ -40,6 +44,8 @@ const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_W2_BARRACKS] = 4, [BOB_PATROL] = 4, [BOB_GUNBOAT] = 6, [BOB_PAD48] = 1,
 	[BOB_PAD64] = 1, [BOB_PAD80] = 1, [BOB_PAD96] = 1, [BOB_PAD_LAMP] = 2, [BOB_SPLASH] = 5, [BOB_W2_JET] = 4,
 	[BOB_RADAR] = 4, [BOB_SOCK] = 2, [BOB_DECK] = 2, [BOB_ROPE] = 3, [BOB_HOOK] = 1, [BOB_CLIMB] = 2, [BOB_FRTR] = 4, [BOB_SPRAY] = 3,
+	[BOB_DHULL0] = 2, [BOB_DHULL1] = 2, [BOB_DHULL2] = 2, [BOB_DHULL3] = 2, [BOB_TURRET] = 4, [BOB_THIT] = 2, [BOB_AAGUN] = 3,
+	[BOB_BARRAGE] = 3, [BOB_CAP] = 3,
 };
 
 // World 2's islands (logic.h): the tile map's "island" lines (art/world2/tilemap.txt), px
