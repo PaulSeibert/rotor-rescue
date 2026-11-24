@@ -5835,7 +5835,279 @@ static void testHintCountsKeptThroughAContinueResetByANewGame(void) {
 	CHECK(g.hintShowsB == 0 && g.bombUses == 0);
 }
 
+// T3 (SPEC 13.3): the copper builder reads each world's bands from one table. Worlds 1 and 2 are the
+// lines the builder had as constants (every golden stays identical); world 3 is STYLE-world3 section 2.
+static void testBandLayoutTable(void) {
+	const tBandLayout *l1 = logicBands(0), *l2 = logicBands(1), *l3 = logicBands(2);
+	// world 1: clouds 72 (40 rows, /8), mountains 120 (60, /4) with the far strip, the floor 180 (19), hills, ground 224 (/1)
+	CHECK(l1->skyEnd == 180);
+	CHECK(l1->b[BK_CLOUDS].y == 72 && l1->b[BK_CLOUDS].rows == 40 && l1->b[BK_CLOUDS].shift == 3);
+	CHECK(l1->b[BK_FAR].y == 120 && l1->b[BK_FAR].rows == 60 && l1->b[BK_FAR].shift == 2);
+	CHECK(l1->b[BK_FLOOR].y == 180 && l1->b[BK_FLOOR].rows == 19);
+	CHECK(l1->b[BK_HILLS].y == 199 && l1->b[BK_HILLS].shift == 1);
+	CHECK(l1->b[BK_GROUND].y == 224 && l1->b[BK_GROUND].rows == 32 && l1->b[BK_GROUND].shift == 0);
+	// world 2: the same down to 179, the sea 180-207 (28), the strip 208 (48, 1:1)
+	CHECK(l2->skyEnd == 180);
+	CHECK(l2->b[BK_CLOUDS].y == 72 && l2->b[BK_FAR].y == 120 && l2->b[BK_FAR].rows == 60);
+	CHECK(l2->b[BK_FLOOR].y == 180 && l2->b[BK_FLOOR].rows == 28);
+	CHECK(l2->b[BK_HILLS].rows == 0);
+	CHECK(l2->b[BK_GROUND].y == 208 && l2->b[BK_GROUND].rows == 48 && l2->b[BK_GROUND].shift == 0);
+	// world 3: the ceiling 44 (41 rows, 1:1), the far range 88 (42, /4), the strip 130 (126, 1:1), no floor, no hills
+	CHECK(l3->skyEnd == 130);
+	CHECK(l3->b[BK_CLOUDS].y == 44 && l3->b[BK_CLOUDS].rows == 41 && l3->b[BK_CLOUDS].shift == 0);
+	CHECK(l3->b[BK_FAR].y == 88 && l3->b[BK_FAR].rows == 42 && l3->b[BK_FAR].shift == 2);
+	CHECK(l3->b[BK_FLOOR].rows == 0 && l3->b[BK_HILLS].rows == 0);
+	CHECK(l3->b[BK_GROUND].y == 130 && l3->b[BK_GROUND].rows == 126 && l3->b[BK_GROUND].shift == 0);
+	// every world: the bands run top to bottom without overlapping and end inside the screen
+	for(uint8_t w = 0; w < 3; ++w) {
+		const tBandLayout *l = logicBands(w);
+		uint16_t uwEnd = PLAY_TOP;
+		for(uint8_t k = 0; k < BK_COUNT; ++k) {
+			const tBand *b = &l->b[k];
+			if(!b->rows) continue;
+			CHECK(b->y >= uwEnd);
+			uwEnd = (uint16_t)(b->y + b->rows);
+			CHECK(uwEnd <= 256);
+		}
+	}
+	// world 3's far range pens 6 and 7 are its strip's (the shared seam colours, STYLE-world3 section 3)
+	for(uint8_t m = 0; m < 3; ++m)
+		CHECK(g_pW3FarPal[m][6] == g_pW3StripPal[m][6] && g_pW3FarPal[m][7] == g_pW3StripPal[m][7]);
+	CHECK(g_pW3StripPal[0][3] == 0x765 && g_pW3StripPal[0][4] == 0xC96 && g_pW3FarPal[0][1] == 0x345 && g_pW3StripPal[2][1] == 0x011);
+	CHECK(g_pW3SkyTop[0] == 0x236 && g_pW3SkyH[0] == 0xFDC && g_pW3SkyV[2] == 0x234);
+}
+
+// T4 (SPEC 13.5): World 3's height map. A map is the surface height (px above GROUND_Y) at each 16 px joint, a flag a column
+// (bit 0 a pad bed, bit 1 a massif the route doesn't use), and optionally a ceiling (the deck's base line a joint, 0 none).
+static uint8_t s_pH[W3_COLS + 1], s_pFl[W3_COLS], s_pCe[W3_COLS + 1];
+
+static void mapFlat(void) {
+	memset(s_pH, 0, sizeof(s_pH));
+	memset(s_pFl, 0, sizeof(s_pFl));
+	memset(s_pCe, 0, sizeof(s_pCe));
+}
+
+// A game in world 3 on a synthetic map, the chopper airborne at (x, y)
+static void w3Game(int16_t x, int16_t y) {
+	logicW3UseMap(s_pH, s_pFl, s_pCe);
+	logicInit(&g);
+	logicStartAt(&g, W3_WORLD, 0);
+	step(NONE, INTRO_FRAMES + 1);
+	flyAt(x, y);
+	g.cam = (int16_t)(x - SCREEN_W / 2);
+}
+
+static void testW3SurfaceInterpolates(void) {
+	mapFlat();
+	for(int j = 10; j <= 20; ++j) s_pH[j] = (uint8_t)((j - 10) * 4);    // a 15 degree ramp: 4 px per 16
+	logicW3UseMap(s_pH, s_pFl, s_pCe);
+	CHECK(logicW3SurfaceY(0) == GROUND_Y);
+	CHECK(logicW3SurfaceY(160) == GROUND_Y);
+	CHECK(logicW3SurfaceY(160 + 8) == GROUND_Y - 2);
+	CHECK(logicW3SurfaceY(160 + 16) == GROUND_Y - 4);
+	CHECK(logicW3SurfaceY(160 + 80) == GROUND_Y - 20);
+	CHECK(logicW3SurfaceY(320) == GROUND_Y - 40);          // the top joint (s_pH[20] = 40)
+	CHECK(logicW3SurfaceY(320 + 8) == GROUND_Y - 20);      // a cliff column: [21] = 0
+}
+
+static void testW3SkidsStopAtTheHighestSurfaceUnderThem(void) {
+	mapFlat();
+	for(int j = 20; j <= 40; ++j) s_pH[j] = 40;             // a bench 40 px high from x 320
+	logicW3UseMap(s_pH, s_pFl, s_pCe);
+	CHECK(logicW3FloorAt(500) == GROUND_Y - 40);
+	CHECK(logicW3FloorAt(320 - 5) == GROUND_Y - 40);        // the right skid (x + 10) is over the bench
+	CHECK(logicW3FloorAt(320 - 11) == GROUND_Y - 37);       // the ramp column: 40 px over 16, 37 under the right skid at x 319
+	CHECK(logicW3FloorAt(304 - 11) == GROUND_Y);            // both skids clear of it
+}
+
+static void testW3LandsOnABenchPad(void) {
+	mapFlat();
+	for(int j = 20; j <= 32; ++j) s_pH[j] = 40;             // a bench at 40 px, columns 20-31 a pad bed
+	for(int j = 20; j < 32; ++j) s_pFl[j] = 1;
+	w3Game(400, 120);
+	uint8_t hp = g.chop.alive;
+	CHECK(hp);
+	for(int i = 0; i < 400 && !g.chop.landed; ++i) {
+		tInput in = {0};
+		in.dy = 1;
+		logicUpdate(&g, &in);
+	}
+	CHECK(g.chop.landed);
+	CHECK(g.chop.alive);
+	CHECK(g.chop.y == GROUND_Y - 40);                       // on the bench, not on the ground
+	CHECK(g.chop.x == 400);
+}
+
+static void testW3NoLandingOffAPad(void) {
+	mapFlat();
+	for(int j = 20; j <= 32; ++j) s_pH[j] = 40;             // the same bench, but not a pad
+	w3Game(400, 120);
+	uint8_t lives = g.lives;
+	for(int i = 0; i < 400 && g.chop.y < GROUND_Y - 40; ++i) {
+		tInput in = {0};
+		in.dy = 1;
+		logicUpdate(&g, &in);
+	}
+	CHECK(g.chop.y == GROUND_Y - 40);                       // the skids stopped at the floor
+	CHECK(!g.chop.landed);                                  // no landing off a pad
+	CHECK(g.chop.alive && g.lives == lives && g.state == GS_PLAY);   // and no damage
+}
+
+static void testW3WallIsSolidFromTheSide(void) {
+	mapFlat();
+	// a 70 degree flank: 44 px per 16, then 88, then the 100 px crest (columns 20-22), rock behind it
+	s_pH[20] = 0; s_pH[21] = 44; s_pH[22] = 88; s_pH[23] = 100;
+	for(int j = 24; j <= 40; ++j) s_pH[j] = 100;
+	w3Game(200, 200);                                       // flying right at y 200: the flank's toe is at y 236, its face above 200
+	tInput in = {0};
+	in.dx = 1;
+	uint8_t bumped = 0;
+	int16_t wX150 = 0;
+	for(int i = 0; i < 300; ++i) {
+		logicUpdate(&g, &in);
+		bumped |= (g.events5 & EV5_BUMP) != 0;
+		if(i == 150) wX150 = g.chop.x;
+	}
+	CHECK(g.chop.x < 330 && g.chop.x > 300);                // stopped at the foot of the flank (column 20 is x 320; the body's edge is 16 ahead)
+	CHECK(g.chop.x == wX150);                               // and stays there with the stick held: each frame's step is undone
+	CHECK(bumped);
+	CHECK(g.chop.alive && g.state == GS_PLAY);              // the bump costs speed, never damage
+	CHECK(g.chop.y == 200);                                 // it did not ride up the face
+}
+
+static void testW3GentleSlopeCarriesTheChopperUp(void) {
+	mapFlat();
+	for(int j = 20; j <= 30; ++j) s_pH[j] = (uint8_t)((j - 20) * 9);   // 30 degrees: 9 px per 16, up to 90 px
+	for(int j = 31; j <= 60; ++j) s_pH[j] = 90;
+	w3Game(200, GROUND_Y - 4);
+	tInput in = {0};
+	in.dx = 1;
+	for(int i = 0; i < 400; ++i) logicUpdate(&g, &in);
+	CHECK(g.chop.x > 560);                                  // over the top, not stopped by the flank
+	CHECK(g.chop.y <= GROUND_Y - 90);                       // lifted to the crest's height by the floor
+	CHECK(g.chop.alive && g.state == GS_PLAY);
+}
+
+static void testW3CeilingStopsTheClimb(void) {
+	mapFlat();
+	w3Game(300, 120);
+	tInput in = {0};
+	in.dy = -1;
+	for(int i = 0; i < 200; ++i) logicUpdate(&g, &in);
+	CHECK(g.chop.y == CEIL_Y);                              // no deck: the usual ceiling
+	mapFlat();
+	for(int j = 10; j <= 30; ++j) s_pCe[j] = 85;            // a cloud deck whose base is line 85 over columns 10-30
+	w3Game(300, 150);
+	for(int i = 0; i < 300; ++i) logicUpdate(&g, &in);
+	CHECK(logicW3CeilAt(300) == 85 + 20);
+	CHECK(g.chop.y == 85 + 20);                             // the skids stop 20 px under the base: the chopper's top is the deck's
+	g.chop.x = 50;                                          // out from under it
+	for(int i = 0; i < 300; ++i) logicUpdate(&g, &in);
+	CHECK(g.chop.y == CEIL_Y);
+}
+
+static void testW3AirGapRule(void) {
+	mapFlat();
+	for(int j = 10; j <= 30; ++j) s_pCe[j] = 85;
+	for(int j = 12; j <= 18; ++j) s_pH[j] = 80;             // an 80 px crest under the deck: a 71 px gap
+	CHECK(logicW3GapOk(s_pH, s_pFl, s_pCe));
+	for(int j = 12; j <= 18; ++j) s_pH[j] = 100;            // 100 px: the 51 px gap the route must not force
+	CHECK(!logicW3GapOk(s_pH, s_pFl, s_pCe));
+	for(int j = 11; j <= 18; ++j) s_pFl[j] |= 2;            // unless it is a massif the route goes round
+	CHECK(logicW3GapOk(s_pH, s_pFl, s_pCe));
+	mapFlat();
+	for(int j = 12; j <= 18; ++j) s_pH[j] = 100;            // no deck: any peak is fine
+	CHECK(logicW3GapOk(s_pH, s_pFl, s_pCe));
+}
+
+static void testW3WorldIsItsOwn(void) {
+	mapFlat();
+	w3Game(300, 150);
+	CHECK(g.world == W3_WORLD);
+	CHECK(logicWorldW(&g) == W3_W);
+	// the pilot has no enemy and no hostage activity: nothing is out after a minute in the air
+	step(NONE, 3600);
+	for(int i = 0; i < TANK_MAX; ++i) CHECK(!g.pTanks[i].active);
+	for(int i = 0; i < JET_MAX; ++i) CHECK(!g.pJets[i].active);
+	for(int i = 0; i < BOAT_MAX; ++i) CHECK(!g.pBoats[i].active);
+	for(int i = 0; i < MINE_MAX; ++i) CHECK(!g.pMines[i].active);
+	CHECK(g.state == GS_PLAY);
+	logicW3UseMap(0, 0, 0);
+}
+
+static void testW3BuiltInMapIsPlayable(void) {
+	logicW3UseMap(0, 0, 0);                                 // the generated pilot map (src/world3_map.h)
+	logicInit(&g);
+	logicStartAt(&g, W3_WORLD, 0);
+	step(NONE, INTRO_FRAMES + 1);
+	CHECK(g.chop.landed && g.chop.alive);
+	CHECK(logicW3IsPad(g.chop.x));                          // it starts on the pad bed
+	CHECK(g.chop.y == logicW3FloorAt(g.chop.x));
+	CHECK(logicW3GapOk(0, 0, 0));
+	// the quantised rises: no joint pair steeper than the 70 degree class, heights inside 0..100
+	for(int j = 0; j < W3_COLS; ++j) {
+		int a = logicW3Joint((uint16_t)j), b = logicW3Joint((uint16_t)(j + 1));
+		CHECK(a >= 0 && a <= W3_PEAK && absi(a - b) <= 44);
+	}
+}
+
+
+// T5 (SPEC 13): the terrain strip's ring keeps SPAN (22) columns drawn, lo .. lo + 21; the picture shows (and the back picture will show)
+// the 21 words from the column its camera's first word is on. logicStripNew gives the columns that come into the ring when lo moves
+// (one range): a sweep of the camera at any speed, either way, never leaves a displayed column undrawn.
+static void testStripStreamsEveryColumn(void) {
+	enum { SPAN = 22 };
+	int16_t from, to;
+	logicStripNew(10, 10, SPAN, &from, &to);
+	CHECK(from >= to);                                      // nothing moved: nothing to draw
+	logicStripNew(11, 10, SPAN, &from, &to);
+	CHECK(from == 32 && to == 33);                          // one column in on the right
+	logicStripNew(9, 10, SPAN, &from, &to);
+	CHECK(from == 9 && to == 10);                           // one column in on the left
+	logicStripNew(40, 10, SPAN, &from, &to);
+	CHECK(from == 40 && to == 62);                          // a jump: the whole span
+	for(int speed = 1; speed <= 5; ++speed) {
+		for(int dir = -1; dir <= 1; dir += 2) {
+			static uint8_t drawn[400];
+			memset(drawn, 0, sizeof(drawn));
+			int16_t cam = dir > 0 ? 0 : 3700;
+			int16_t lo = (int16_t)(((cam - 1) >> 4));
+			for(int j = lo; j < lo + SPAN; ++j) if(j >= 0) drawn[j] = 1;     // the fill after a jump
+			int16_t prevFirst = lo, prevFirst0 = lo;
+			for(int f = 0; f < 4000 / speed - 30; ++f) {
+				cam = (int16_t)(cam + dir * speed);
+				int16_t first = (int16_t)((cam - 1) >> 4);
+				// as stripUpdate: the span covers this picture's columns and the last one's
+				int16_t wLo = first < prevFirst ? first : prevFirst;
+				if(dir > 0) wLo = prevFirst < first ? prevFirst : first;
+				int16_t oldLo = lo;
+				logicStripNew(wLo, oldLo, SPAN, &from, &to);
+				for(int j = from; j < to; ++j) if(j >= 0 && j < 400) drawn[j] = 1;
+				lo = wLo;
+				prevFirst = first;
+				// the 21 words this picture fetches, and the last picture's (still on screen until the swap)
+				for(int j = first; j < first + 21; ++j) if(j >= 0 && j < 260) CHECK(drawn[j]);
+				for(int j = prevFirst0; j < prevFirst0 + 21; ++j) if(j >= 0 && j < 260) CHECK(drawn[j]);
+				prevFirst0 = first;
+			}
+		}
+	}
+}
+
 int main(void) {
+	testBandLayoutTable();
+	testStripStreamsEveryColumn();
+	testW3SurfaceInterpolates();
+	testW3SkidsStopAtTheHighestSurfaceUnderThem();
+	testW3LandsOnABenchPad();
+	testW3NoLandingOffAPad();
+	testW3WallIsSolidFromTheSide();
+	testW3GentleSlopeCarriesTheChopperUp();
+	testW3CeilingStopsTheClimb();
+	testW3AirGapRule();
+	testW3WorldIsItsOwn();
+	testW3BuiltInMapIsPlayable();
+
 	testRotorRateFollowsSpeedAndClimb();
 	testRotorIdlesSlowAndSoftOnTheGround();
 	testRotorSpinsUpAtTakeoff();

@@ -1,0 +1,33 @@
+# World 3 with WinUAE's smaller chip (tests/chipwinuae.agk's squeeze: Ctrl+L, Q takes 23 KB away for the run). World 3's art, gradients
+# and strip ring live in the shared world arena, so with the squeeze every allocation must still be made, the strip must fill and
+# the pilot must fly, and the floor of the game, 64 KB (SPEC 2), must hold.
+wait-serial "AGK t0" 3000
+key 0x63
+key 0x28
+wait 5
+key 0x10
+wait 30
+expect-serial "AGK chip squeezed"
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x07
+wait-serial "AGK world 3 loaded" 400
+wait 90
+key 0x63
+key 0x28
+wait 5
+key 0x03
+wait 30
+press fire 2
+wait 60
+press up 40
+hold right
+wait 200
+screenshot squeezed
+release
+expect-no-serial "AGK ERR|missing|out of chip"
+expect-no-dropped-frames
+expect-min-chip-free 64

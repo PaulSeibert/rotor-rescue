@@ -2,6 +2,7 @@
 // (c) 2026 Desert Palms Software. Game by Paul Ross Seibert.
 
 #include "logic.h"
+#include "world3_map.h"   // world 3's pilot map and its scenery (art/tools/make_world3_disk.py)
 
 // Code that runs between games (menus, the hall of fame): small, not inlined
 // into the per-frame update (the A500's slow RAM is nearly full)
@@ -21,6 +22,7 @@ const uint8_t g_pBobW[BOB_TYPES] = {
 	[BOB_RADAR] = 33, [BOB_SOCK] = 10, [BOB_DECK] = 124, [BOB_ROPE] = 8, [BOB_HOOK] = 8, [BOB_CLIMB] = 16, [BOB_FRTR] = 128, [BOB_SPRAY] = 24,
 	[BOB_DHULL] = 154, [BOB_DHULL0] = 48, [BOB_DHULL1] = 48, [BOB_DHULL2] = 48, [BOB_DHULL3] = 10, [BOB_TURRET] = 32, [BOB_THIT] = 32, [BOB_AAGUN] = 12,
 	[BOB_BARRAGE] = 24, [BOB_CAP] = 34,
+	[BOB_W3_LODGE] = 52, [BOB_W3_NEST] = 30,
 };
 const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_HANGAR] = 40, [BOB_FENCE] = 32, [BOB_BARRACKS] = 28, [BOB_TANK] = 14,
@@ -32,6 +34,7 @@ const uint8_t g_pBobH[BOB_TYPES] = {
 	[BOB_RADAR] = 39, [BOB_SOCK] = 20, [BOB_DECK] = 30, [BOB_ROPE] = 40, [BOB_HOOK] = 12, [BOB_CLIMB] = 12, [BOB_FRTR] = 36, [BOB_SPRAY] = 12,
 	[BOB_DHULL] = 44, [BOB_DHULL0] = 44, [BOB_DHULL1] = 44, [BOB_DHULL2] = 44, [BOB_DHULL3] = 44, [BOB_TURRET] = 19, [BOB_THIT] = 19, [BOB_AAGUN] = 12,
 	[BOB_BARRAGE] = 12, [BOB_CAP] = 10,
+	[BOB_W3_LODGE] = 32, [BOB_W3_NEST] = 24,
 };
 // (world 2's frames are the ones the floppy set carries: art/tools/make_world_disk.py picks
 // them from the art: one wake frame a facing and the patrol boat's tell a facing, the gunboat's fire frame is its second tell's,
@@ -46,6 +49,7 @@ const uint8_t g_pBobFrames[BOB_TYPES] = {
 	[BOB_RADAR] = 4, [BOB_SOCK] = 2, [BOB_DECK] = 2, [BOB_ROPE] = 3, [BOB_HOOK] = 1, [BOB_CLIMB] = 2, [BOB_FRTR] = 4, [BOB_SPRAY] = 3,
 	[BOB_DHULL] = 2, [BOB_DHULL0] = 2, [BOB_DHULL1] = 2, [BOB_DHULL2] = 2, [BOB_DHULL3] = 2, [BOB_TURRET] = 4, [BOB_THIT] = 2, [BOB_AAGUN] = 3,
 	[BOB_BARRAGE] = 3, [BOB_CAP] = 3,
+	[BOB_W3_LODGE] = 3, [BOB_W3_NEST] = 3,   // (the lodge: intact, shot, burning)
 };
 
 // World 2's islands (logic.h): the tile map's "island" lines (art/world2/tilemap.txt), px
@@ -342,8 +346,8 @@ COLD void logicChopperRespawn(tGame *g) {
 	tChopper *c = &g->chop;
 	uint8_t *p = (uint8_t *)c;
 	for(uint16_t i = 0; i < sizeof(*c); ++i) p[i] = 0;
-	c->x = g->world ? W2_START_X : START_X;
-	c->y = GROUND_Y;
+	c->x = logicIsW3(g) ? W3_START_X : logicIsW2(g) ? W2_START_X : START_X;
+	c->y = logicIsW3(g) ? logicW3FloorAt(c->x) : GROUND_Y;   // (world 3: on its pad bed)
 	c->landed = 1;
 	c->alive = 1;
 	c->face = FACE_LEFT;
@@ -380,7 +384,7 @@ COLD static void boatsPlace(tGame *g) {
 	for(uint8_t i = 0; i < BOAT_MAX; ++i) {
 		tBoat *b = &g->pBoats[i];
 		const tBoatPlace *p = &s_pBoatPlace[g->mission][i];
-		b->active = g->world && p->x1 && ubSkill >= p->minSkill;
+		b->active = logicIsW2(g) && p->x1 && ubSkill >= p->minSkill;
 		if(!b->active) continue;
 		b->kind = p->kind;
 		b->x0 = p->x0;
@@ -409,13 +413,13 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->wxDrift = 0;
 	// (world 2's barracks stand on its four islands, the people wander about half way to the pad)
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
-		g->pBarracks[b].x = g->world ? g_pIslands[b].barracksX : s_pBarracksX[b];
-		g->pBarracks[b].wx = g->world ? (int16_t)((g_pIslands[b].barracksX + g_pIslands[b].padX) >> 1) : g->pBarracks[b].x;
+		g->pBarracks[b].x = logicIsW3(g) ? (int16_t)-1000 : logicIsW2(g) ? g_pIslands[b].barracksX : s_pBarracksX[b];   // (world 3's pilot: no barracks)
+		g->pBarracks[b].wx = logicIsW2(g) ? (int16_t)((g_pIslands[b].barracksX + g_pIslands[b].padX) >> 1) : g->pBarracks[b].x;
 		g->pBarracks[b].hp = 2;
 		g->pBarracks[b].released = 0;
 		g->pBarracks[b].timer = 0;
 	}
-	g->deckOn = g->world && (ubMission == 1 || ubMission == 2);   // (mission 5: a moored ship, mission 6: a sinking freighter, in place of the third island's barracks)
+	g->deckOn = logicIsW2(g) && (ubMission == 1 || ubMission == 2);   // (mission 5: a moored ship, mission 6: a sinking freighter, in place of the third island's barracks)
 	g->deckLeft = g->deckOn ? DECK_PEOPLE : 0;
 	g->deckTimer = 0;
 	g->winch = 0;
@@ -441,7 +445,7 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	}
 	g->outCount = 0;
 	for(uint8_t i = 0; i < TANK_MAX; ++i) g->pTanks[i].active = 0;
-	for(uint8_t i = 0; i < JET_MAX; ++i) { g->pJets[i].active = 0; g->pJets[i].cool = (uint16_t)((g->world ? W2_JET_FIRST : 100) + i * 120); }
+	for(uint8_t i = 0; i < JET_MAX; ++i) { g->pJets[i].active = 0; g->pJets[i].cool = (uint16_t)((logicIsW2(g) ? W2_JET_FIRST : 100) + i * 120); }
 	g->landFrames = 0; g->airGrace = 0; g->jetWait = 0; g->jetsTrip = 0;
 	for(uint8_t i = 0; i < MINE_MAX; ++i) g->pMines[i].active = 0;
 	for(uint8_t i = 0; i < SHOT_MAX; ++i) g->pShots[i].active = 0;
@@ -474,7 +478,7 @@ COLD void logicStartGame(tGame *g) {
 }
 
 COLD void logicStartAt(tGame *g, uint8_t ubWorld, uint8_t ubMission) {
-	if(g->demo || ubWorld >= WORLD_COUNT || ubMission >= MISSION_COUNT) return;
+	if(g->demo || ubWorld >= WORLD_DEBUG_COUNT || ubMission >= MISSION_COUNT) return;
 	if(logicIsMenu(g) || g->state == GS_ENTRY || g->state == GS_OVER || g->state == GS_VICTORY) {
 		g->lives = LIVES_START;
 		g->score = 0;
@@ -588,6 +592,7 @@ uint8_t logicTankLimit(const tGame *g) {
 
 uint8_t logicJetsOn(const tGame *g) {
 	if(g->world) {
+		if(logicIsW3(g)) return 0;   // (the pilot has no jets)
 		uint8_t ubFrom = s_pW2JetsFrom[g->mission][g->difficulty];
 		return ubFrom != 255 && g->trip >= ubFrom;
 	}
@@ -595,7 +600,7 @@ uint8_t logicJetsOn(const tGame *g) {
 }
 
 uint8_t logicJetsPossible(const tGame *g) {
-	return g->world && s_pW2JetsFrom[g->mission][g->difficulty] != 255;
+	return logicIsW2(g) && s_pW2JetsFrom[g->mission][g->difficulty] != 255;
 }
 
 uint8_t logicMinesOn(const tGame *g) {
@@ -614,7 +619,7 @@ uint8_t logicBoatTell(const tGame *g) {
 	return s_pBoatTell[g->difficulty];
 }
 uint8_t logicPatrolArmed(const tGame *g) {
-	return g->world && (g->mission >= 1 || g->difficulty >= 3);   // M5 on; M4 too from skill 3 (Paul, 2026-11-14: M4 was too easy)
+	return logicIsW2(g) && (g->mission >= 1 || g->difficulty >= 3);   // M5 on; M4 too from skill 3 (Paul, 2026-11-14: M4 was too easy)
 }
 // A boat's extra speed-up per skill (frames off the pause between shells, on top of the tank table)
 static const int8_t s_pBoatCool[DIFFICULTY_MAX + 1] = {0, 0, 0, -15, -25, -30};
@@ -658,7 +663,7 @@ COLD static uint8_t basePadW2(const tGame *g, int16_t x) {
 
 // (world 1's base pad stays two compares: this runs every frame)
 static inline uint8_t onBasePad(const tGame *g, int16_t x) {
-	return g->world ? basePadW2(g, x) : (x >= BASE_PAD_X0 && x <= BASE_PAD_X1);
+	return g->world ? (logicIsW3(g) ? logicW3IsPad(x) : basePadW2(g, x)) : (x >= BASE_PAD_X0 && x <= BASE_PAD_X1);
 }
 
 uint8_t logicOnBasePad(const tGame *g, int16_t x) {
@@ -670,7 +675,7 @@ uint16_t logicGroundDwell(const tGame *g) {
 }
 
 uint8_t logicJetsTripMax(const tGame *g) {
-	if(g->world) return s_pW2JetsTrip[g->mission][g->difficulty];
+	if(g->world) return logicIsW3(g) ? 0 : s_pW2JetsTrip[g->mission][g->difficulty];
 	return s_pJetsTrip[g->difficulty];
 }
 
@@ -713,7 +718,7 @@ static inline int16_t siteFloor(const tGame *g) { return g->mission == 2 ? (int1
 static inline int16_t siteBoxX0(const tGame *g) { return g->mission == 2 ? FRTR_X + FRTR_BOX_DX : DECK_BOX_X0; }
 
 uint8_t logicGustsOn(const tGame *g) {
-	return g->world && g->mission >= 1 && g->difficulty != 1;
+	return logicIsW2(g) && g->mission >= 1 && g->difficulty != 1;
 }
 
 // World 2's wind (SPEC 11, slice B). The gust's own random: a 16-bit xorshift, so the game's LFSR (the jets, the aim) is not disturbed
@@ -828,7 +833,7 @@ static int16_t zoneLo(int16_t x) { return (int16_t)(x < RADAR_ZONE_HALF ? 0 : x 
 static int16_t zoneHi(int16_t x) { return (int16_t)(x + RADAR_ZONE_HALF > W2_JET_SAFE_X ? W2_JET_SAFE_X : x + RADAR_ZONE_HALF); }
 
 uint8_t logicJetZone(const tGame *g, int16_t x) {
-	if(!g->world || !g->radarCount) return 1;   // (world 1 and mission 4 have no sites: a jet may start anywhere)
+	if(!logicIsW2(g) || !g->radarCount) return 1;   // (world 1 and mission 4 have no sites: a jet may start anywhere)
 	for(uint8_t i = 0; i < g->radarCount; ++i) {
 		const tRadar *r = &g->pRadars[i];
 		if(r->alive && x >= zoneLo(r->x) && x <= zoneHi(r->x)) return 1;
@@ -870,7 +875,7 @@ COLD static void radarsPlace(tGame *g) {
 	int16_t pX[RADAR_MAX];
 	g->radarCount = 0;
 	g->evRadar = 0;
-	for(uint8_t i = 0, n = g->world ? logicRadarSites(g->mission, pX) : 0; i < n; ++i) {
+	for(uint8_t i = 0, n = logicIsW2(g) ? logicRadarSites(g->mission, pX) : 0; i < n; ++i) {
 		tRadar *r = &g->pRadars[g->radarCount++];
 		r->x = pX[i];
 		r->alive = 1;
@@ -919,7 +924,7 @@ __attribute__((noinline)) static void hostagesUpdate(tGame *g) {
 		switch(h->state) {
 			case HS_FREE: {
 				int16_t dx = (int16_t)(c->x - h->x);
-				if(isCalling && absw(dx) < (g->world ? W2_CALL_RANGE : HOSTAGE_CALL_RANGE)) {
+				if(isCalling && absw(dx) < (logicIsW2(g) ? W2_CALL_RANGE : HOSTAGE_CALL_RANGE)) {
 					h->state = HS_TO_CHOPPER;
 					break;
 				}
@@ -959,7 +964,7 @@ __attribute__((noinline)) static void hostagesUpdate(tGame *g) {
 				h->anim = (uint8_t)((s > 0 ? MAN_RUN0 : MAN_RUNL0) + ((g->frame >> 2) & 1));
 			} break;
 			case HS_TO_HANGAR: {
-				h->x = (int16_t)(h->x + (g->world ? 2 : 1));   // (world 2: a quicker run, fewer people on screen at once)
+				h->x = (int16_t)(h->x + (logicIsW2(g) ? 2 : 1));   // (world 2: a quicker run, fewer people on screen at once)
 				h->anim = (uint8_t)(MAN_RUN0 + ((g->frame >> 2) & 1));
 				if(h->x >= logicHangarX(g) + 12) {
 					h->state = HS_SAVED;
@@ -1005,7 +1010,7 @@ __attribute__((noinline)) static void barracksUpdate(tGame *g) {
 		tBarracks *pB = &g->pBarracks[b];
 		if(pB->hp || pB->released >= HOSTAGES_PER_BARRACKS) continue;
 		if(pB->timer) { --pB->timer; continue; }
-		if(g->world && g->outCount >= W2_OUT_MAX) continue;   // (the next waits for room on the beach)
+		if(logicIsW2(g) && g->outCount >= W2_OUT_MAX) continue;   // (the next waits for room on the beach)
 		pB->timer = 8;
 		tHostage *h = &g->pHostages[b * HOSTAGES_PER_BARRACKS + pB->released];
 		++pB->released;
@@ -1025,7 +1030,7 @@ __attribute__((noinline)) static void barracksUpdate(tGame *g) {
 // The strait destroyer (mission 6 only; SPEC 11, slice E): two turrets of DEST_HP, four AA guns, the barrage's clock; a quiet start. The zone
 // bonus and the HUD line of a bonus are reset with it (every mission)
 COLD static void destroyerPlace(tGame *g) {
-	g->destOn = g->world && g->mission == 2;
+	g->destOn = logicIsW2(g) && g->mission == 2;
 	for(uint8_t t = 0; t < DEST_TURRETS; ++t) {
 		g->turHp[t] = g->destOn ? DEST_HP : 0;
 		g->turTell[t] = g->turFire[t] = 0;
@@ -1090,6 +1095,8 @@ static void chopperDestroy(tGame *g) {
 	setState(g, GS_LOST, LOST_FRAMES);
 }
 
+static void w3ChopperTerrain(tGame *g, int16_t wPrevX);
+static uint8_t logicDrawW3(const tGame *g, tDraw *pOut);
 // The highest the skids may go down to at x: the ground, or a roof
 static int16_t floorAt(const tGame *g, int16_t x, uint8_t *pIsGround) {
 	*pIsGround = 1;
@@ -1107,8 +1114,15 @@ static int16_t floorAt(const tGame *g, int16_t x, uint8_t *pIsGround) {
 		*pIsGround = 0;
 		return FEET_Y - 40;
 	}
-	// world 2: a pad is a landing; the beach, the palms and the sea are floors to stop on
-	if(g->world) *pIsGround = logicPadAt(g, x) != 0xFF;
+	if(g->world) {
+		// world 3: the height map (SPEC 13.5): the skids stop at the highest surface under them, a landing only on a pad bed
+		if(g->world == W3_WORLD) {
+			*pIsGround = logicW3IsPad(x);
+			return logicW3FloorAt(x);
+		}
+		// world 2: a pad is a landing; the beach, the palms and the sea are floors to stop on
+		*pIsGround = logicPadAt(g, x) != 0xFF;
+	}
 	return GROUND_Y;
 }
 
@@ -1273,14 +1287,16 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 		else c->vy = 0;
 		c->vy = clampw(c->vy, -wUpMax, wDownMax);
 	}
+	int16_t wPrevX = c->x;
 	subStep(&c->x, c->vx, &c->fx);
 	subStep(&c->y, c->vy, &c->fy);
 	if(c->x < 24) { c->x = 24; c->vx = 0; }
 	if(c->x > logicWorldW(g) - 24) { c->x = (int16_t)(logicWorldW(g) - 24); c->vx = 0; }
 	if(c->y < CEIL_Y) { c->y = CEIL_Y; c->vy = 0; }
+	if(g->world == W3_WORLD) w3ChopperTerrain(g, wPrevX);   // (world 3: walls and a deck; one test for the other worlds' frames)
 	// the pad guide (skill 1-3): the last PAD_ASSIST_PX of a descent nudge the chopper toward
 	// the pad's centre, half a pixel a frame
-	if(g->world && c->vy > 0 && c->y >= GROUND_Y - PAD_ASSIST_PX && (g->frame & 1) && g->difficulty <= DIFFICULTY_NORMAL) {
+	if(logicIsW2(g) && c->vy > 0 && c->y >= GROUND_Y - PAD_ASSIST_PX && (g->frame & 1) && g->difficulty <= DIFFICULTY_NORMAL) {
 		for(uint8_t i = 0; i < W2_ISLANDS; ++i) {
 			int16_t dxp = (int16_t)(g_pIslands[i].padX - c->x), ad = absw(dxp);
 			if(ad > 2 && ad <= logicPadPx(g, i) / 2 + PAD_TOLERANCE + PAD_ASSIST_REACH) c->x = (int16_t)(c->x + (dxp > 0 ? 1 : -1));
@@ -1292,7 +1308,7 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 		c->y = wFloor;
 		c->fy = 0;
 		if(c->vy > 0) c->vy = 0;
-		if(g->world && !g->wet && logicOnWater(c->x)) {
+		if(logicIsW2(g) && !g->wet && logicOnWater(c->x)) {
 			// the sea: a soft stop and a splash (no damage), one a touch
 			g->wet = 1;
 			g->splashX = c->x;
@@ -1449,7 +1465,7 @@ static uint8_t shotHitsTargets(tGame *g, tShot *s) {
 		}
 	}
 	if(sy < FEET_Y - 30) return 0;
-	for(uint8_t i = 0; g->world && i < BOAT_MAX; ++i) {
+	for(uint8_t i = 0; logicIsW2(g) && i < BOAT_MAX; ++i) {
 		tBoat *b = &g->pBoats[i];
 		if(b->active && boxHit(sx, sy, 6, 3, (int16_t)(b->x - 28), BOAT_BOX_Y, 56, 26)) {
 			boatHit(g, b, 1);
@@ -1502,7 +1518,7 @@ static void bombExplode(tGame *g, int16_t x) {
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
 		if(absw((int16_t)(g->pBarracks[b].x - x)) < 30) barracksDamage(g, b, 2);
 	}
-	for(uint8_t i = 0; g->world && i < BOAT_MAX; ++i) {
+	for(uint8_t i = 0; logicIsW2(g) && i < BOAT_MAX; ++i) {
 		if(g->pBoats[i].active && absw((int16_t)(g->pBoats[i].x - x)) < 30) boatHit(g, &g->pBoats[i], 3);
 	}
 	for(uint8_t i = 0; i < g->radarCount; ++i) {
@@ -1703,7 +1719,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 	for(uint8_t i = 0; i < JET_MAX; ++i) {
 		tJet *j = &g->pJets[i];
 		if(!j->active) {
-			if(!logicJetsOn(g) || !c->alive || c->x > (g->world ? W2_JET_SAFE_X : BORDER_X + 120) || i >= JETS_MAX()) continue;
+			if(!logicJetsOn(g) || !c->alive || c->x > (logicIsW2(g) ? W2_JET_SAFE_X : BORDER_X + 120) || i >= JETS_MAX()) continue;
 			if(g->radarCount && !logicJetZone(g, c->x)) continue;   // (world 2 missions 5-6: only inside a live radar site's zone; the delay counts there too)
 			if(g->jetsTrip >= logicJetsTripMax(g)) continue;   // this trip's jets are all out
 			if(j->cool) { --j->cool; continue; }
@@ -1778,7 +1794,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 		}
 		else if(c->alive && !j->cool && !j->warn && jetNearlyOnScreen(g, j, ubTell) && (c->landed ? isBombOk : isMissileOk) &&
 			(!g->jetWait || g->jetLast == i) && (JETS_MAX() > 1 || !jetEarlierOut(g, i)) &&
-			(!g->world || !g->atkWait || g->atkLast == ATK_JET)) {
+			(!logicIsW2(g) || !g->atkWait || g->atkLast == ATK_JET)) {
 			// start the flash if a shot is on, allowing for how far the jet flies meanwhile
 			// (4 px a frame): a missile needs JET_AHEAD_MIN left at the end, a bomb the chopper under it
 			int16_t wRun = (int16_t)(ubTell * 4);
@@ -1790,7 +1806,7 @@ __attribute__((noinline)) static void jetsUpdate(tGame *g) {
 				++g->jetAttacks;
 				g->jetLast = i;
 				g->jetWait = JET_PAIR_GAP;
-				if(g->world) { g->atkWait = BOAT_ATTACK_GAP; g->atkLast = ATK_JET; }   // (R3: one attack at a time, jets and boats)
+				if(logicIsW2(g)) { g->atkWait = BOAT_ATTACK_GAP; g->atkLast = ATK_JET; }   // (R3: one attack at a time, jets and boats)
 				g->events2 |= EV2_JETTELL;
 			}
 		}
@@ -2284,12 +2300,25 @@ __attribute__((noinline)) static void destTick(tGame *g) {
 static void worldUpdate(tGame *g) {
 	smokeUpdate(g);
 	if(g->quotaMsg) --g->quotaMsg;
+	if(logicIsW3(g)) {
+		// the pilot: terrain and the chopper's shots only (SPEC 13.7); terrain stops a shot
+		shotsUpdate(g);
+		for(uint8_t i = 0; i < SHOT_MAX; ++i) {
+			tShot *s = &g->pShots[i];
+			if(s->active && s->x >= 0 && s->x < W3_W && s->y >= logicW3SurfaceY(s->x)) {
+				s->active = 0;
+				boomAt(g, s->x, s->y);
+			}
+		}
+		boomsUpdate(g);
+		return;
+	}
 	barracksUpdate(g);
 	hostagesUpdate(g);
 	shotsUpdate(g);
 	eshotsUpdate(g);
 	tanksUpdate(g);
-	if(g->world) {
+	if(logicIsW2(g)) {
 		// A winch hover is a landed-class state (SPEC 11, slice C): the jets and the boats see a landed chopper for this picture
 		// (the ground grace and its dwell count it, a bomb is the weapon), then it is airborne again. World 1 pays nothing.
 		uint8_t ubWinch = g->winch && !g->chop.landed;
@@ -2437,6 +2466,7 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 	g->evBarracks = 0;
 	g->evRadar = 0;
 	g->events3 = 0;
+	g->events5 = 0;
 	if(g->stateTimer) --g->stateTimer;
 	if(g->state != GS_TITLE) g->attract = 0;
 	tInput sDemoIn;
@@ -2890,6 +2920,10 @@ COLD static uint8_t drawW2Sea(const tGame *g, tDraw *pOut, uint8_t n) {
 }
 
 uint8_t logicDraw(const tGame *g, tDraw *pOut) {
+	if(g->world == W3_WORLD) {
+		g_ubDrawPeople0 = g_ubDrawPeople1 = 0;   // (no people run to merge: main.c)
+		return logicDrawW3(g, pOut);
+	}
 	uint8_t n = 0;
 	int16_t cam = g->cam;
 	// structures (world 1's base and fence, world 2's hangar)
@@ -2918,7 +2952,7 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		if(r->alive) n = drawAddS(pOut, n, (int16_t)(r->x - 16 - cam), FEET_Y - 38, BOB_RADAR, (uint8_t)((g->frame >> 3) & 3));
 	}
 	// the chopper's shadow, on the track under it (and under the people)
-	if(logicChopperVisible(g) && !(g->world && logicOnWater(g->chop.x))) {
+	if(logicChopperVisible(g) && !(logicIsW2(g) && logicOnWater(g->chop.x))) {
 		static const uint8_t pSize[13] = {0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3};   // by altitude / 16
 		int16_t wAlt = (int16_t)(GROUND_Y - g->chop.y);
 		if(wAlt < 0) wAlt = 0;
@@ -2952,7 +2986,7 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 		if(j->active) {
 			// the tell: the nose and engine glow, blinking every 4 frames
 			uint8_t f = (uint8_t)((j->dir < 0 ? JET_L : JET_R) + ((j->tell & 4) ? 2 : 0));
-			n = drawAdd(pOut, n, (int16_t)(j->x - 16 - cam), (int16_t)(j->y - 6), g->world ? BOB_W2_JET : BOB_JET, f);
+			n = drawAdd(pOut, n, (int16_t)(j->x - 16 - cam), (int16_t)(j->y - 6), logicIsW2(g) ? BOB_W2_JET : BOB_JET, f);
 		}
 	}
 	for(uint8_t i = 0; i < MINE_MAX; ++i) {
@@ -2984,6 +3018,25 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 }
 
 // ------------------------------------------------------------ scrolling ---
+
+// T3: the bands per world (logic.h). World 0: clouds 72 (40 rows), mountains + far strip 120 (60), the floor 180 (19), the
+// hills from 199 (their row 2; rows 0-1 are empty), the ground 224 (32). World 1: the sea 180 (28), the strip 208 (48, 1:1).
+// World 2: the ceiling strip 44 (41, 1:1; M8 and M9), the far range 88 (42, /4), the strip 130 (126, 1:1), no floor or hills.
+static const tBandLayout s_pBandLayout[3] = {
+	{180, {{72, 40, 3, 0}, {120, 60, 2, 1}, {180, 19, 0, 2}, {199, 25, 1, 2}, {224, 32, 0, 2}}},
+	{180, {{72, 40, 3, 0}, {120, 60, 2, 1}, {180, 28, 0, 2}, {0, 0, 0, 0}, {208, 48, 0, 3}}},
+	{130, {{44, 41, 0, 0}, {88, 42, 2, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, {130, 126, 0, 2}}},
+};
+const tBandLayout *logicBands(uint8_t ubWorld) { return &s_pBandLayout[ubWorld > 2 ? 2 : ubWorld]; }
+
+void logicStripNew(int16_t wLo, int16_t wOldLo, uint8_t ubSpan, int16_t *pFrom, int16_t *pTo) {
+	int16_t wFrom = wLo, wTo = (int16_t)(wLo + ubSpan);
+	if(wLo > wOldLo && wLo < wOldLo + ubSpan) wFrom = (int16_t)(wOldLo + ubSpan);          // moved right: the new right end
+	else if(wLo < wOldLo && wLo + ubSpan > wOldLo) wTo = wOldLo;                              // moved left: the new left end
+	else if(wLo == wOldLo) wTo = wFrom;                                                       // not moved
+	*pFrom = wFrom;
+	*pTo = wTo;
+}
 
 uint16_t logicBandOffset(int16_t wCam, uint8_t ubShift, uint16_t uwLoopW) {
 	uint16_t x = (uint16_t)wCam >> ubShift;
@@ -3409,6 +3462,7 @@ static const char *const s_pW2BriefJets[MISSION_COUNT] = {
 };
 
 COLD const char *logicBrief(const tGame *g) {
+	if(logicIsW3(g)) return g->mission ? "NOT BUILT: PILOT PALETTE" : "A PASS, A PAD, A NEST";
 	if(g->world) return logicJetsPossible(g) ? s_pW2BriefJets[g->mission] : s_pW2Brief[g->mission];
 	// the threats this mission starts with (trip 0, this difficulty)
 	if(logicMinesOn(g)) return "TANKS, JETS AND AIR MINES";
@@ -3459,7 +3513,8 @@ COLD uint8_t logicRouteMapFor(const tGame *g, uint8_t ubMission, tRouteMark *pOu
 }
 
 COLD uint8_t logicRouteMap(const tGame *g, tRouteMark *pOut) {
-	if(g->world) return routeMap2(g, g->mission, pOut);
+	if(logicIsW3(g)) return 0;   // (the pilot's card has no map)
+	if(logicIsW2(g)) return routeMap2(g, g->mission, pOut);
 	uint8_t n = 0, ubFence = routeX(BORDER_X);
 	pOut[n++] = (tRouteMark){ROUTE_ENEMY, 0, ubFence};
 	pOut[n++] = (tRouteMark){ROUTE_HOME, (uint8_t)(ubFence + 1), (uint8_t)(ROUTE_W - 1 - ubFence)};
@@ -3479,4 +3534,139 @@ const char *logicRank(uint16_t uwSaved) {
 	if(uwSaved >= 90) return "CAPTAIN";
 	if(uwSaved >= 40) return "PILOT";
 	return "ROOKIE";
+}
+
+// ------------------------------------------------------ world 3's terrain ---
+// SPEC 13.5. The map: the surface height (px above GROUND_Y) at each 16 px joint, a flag a column, the deck's base line a
+// joint (0: none). Between joints the surface is the straight line (the tile's own ragged profile is its art).
+static const uint8_t *s_pW3HIn, *s_pW3FIn, *s_pW3C;   // (zero: the built-in map; bss, not data)
+#define s_pW3H (s_pW3HIn ? s_pW3HIn : g_pW3Height)
+#define s_pW3F (s_pW3FIn ? s_pW3FIn : g_pW3Flags)
+
+void logicW3UseMap(const uint8_t *pHeight, const uint8_t *pFlags, const uint8_t *pCeil) {
+	s_pW3HIn = pHeight;
+	s_pW3FIn = pHeight ? pFlags : 0;
+	s_pW3C = pHeight ? pCeil : 0;
+}
+
+uint8_t logicW3Joint(uint16_t uwJoint) { return uwJoint > W3_COLS ? 0 : s_pW3H[uwJoint]; }
+
+static int16_t w3HeightAt(int16_t x) {
+	if(x < 0) x = 0;
+	if(x >= W3_W) x = W3_W - 1;
+	uint16_t j = (uint16_t)x >> 4;
+	int16_t a = s_pW3H[j], b = s_pW3H[j + 1];
+	return (int16_t)(a + (((int16_t)((int16_t)(b - a) * (int16_t)(x & 15))) >> 4));   // (16-bit operands: MULS.W)
+}
+
+int16_t logicW3SurfaceY(int16_t x) { return (int16_t)(GROUND_Y - w3HeightAt(x)); }
+
+int16_t logicW3FloorAt(int16_t x) {
+	int16_t hMax = w3HeightAt((int16_t)(x - W3_SKID_HALF)), hB = w3HeightAt((int16_t)(x + W3_SKID_HALF));
+	if(hB > hMax) hMax = hB;
+	// (a joint between the skids can be higher than both)
+	for(int16_t jx = (int16_t)(((x - W3_SKID_HALF) >> 4) + 1); (jx << 4) <= x + W3_SKID_HALF; ++jx) {
+		if(jx >= 0 && jx <= W3_COLS && s_pW3H[jx] > hMax) hMax = s_pW3H[jx];
+	}
+	return (int16_t)(GROUND_Y - hMax);
+}
+
+static uint8_t w3PadCol(int16_t x) {
+	if(x < 0 || x >= W3_W) return 0;
+	return (uint8_t)(s_pW3F[(uint16_t)x >> 4] & W3_FLAG_PAD);
+}
+
+// a landing needs both skids on the bed
+uint8_t logicW3IsPad(int16_t x) {
+	return (uint8_t)(w3PadCol(x) && w3PadCol((int16_t)(x - W3_SKID_HALF)) && w3PadCol((int16_t)(x + W3_SKID_HALF)));
+}
+
+int16_t logicW3CeilAt(int16_t x) {
+	if(!s_pW3C) return CEIL_Y;
+	if(x < 0) x = 0;
+	if(x >= W3_W) x = W3_W - 1;
+	uint16_t j = (uint16_t)x >> 4;
+	int16_t a = s_pW3C[j], b = s_pW3C[j + 1], base;
+	if(a && b) base = (int16_t)(a + (((int16_t)((int16_t)(b - a) * (int16_t)(x & 15))) >> 4));
+	else base = a ? a : b;
+	if(!base) return CEIL_Y;
+	return (int16_t)(base + W3_DECK_CLEAR > CEIL_Y ? base + W3_DECK_CLEAR : CEIL_Y);
+}
+
+// The body's leading edge xEdge, skids at y, heading bDir (+1 right, -1 left): inside rock whose flank here is a wall
+// (60 degrees or steeper facing the heading)? Gentler flanks carry the chopper up (floorAt lifts the skids), they don't stop it.
+uint8_t logicW3WallAt(int16_t xEdge, int16_t y, int8_t bDir) {
+	if(xEdge < 0 || xEdge >= W3_W) return 0;
+	if(logicW3SurfaceY(xEdge) >= y - 1) return 0;
+	uint16_t j = (uint16_t)xEdge >> 4;
+	int16_t wRise = (int16_t)(bDir > 0 ? s_pW3H[j + 1] - s_pW3H[j] : s_pW3H[j] - s_pW3H[j + 1]);
+	return wRise >= W3_WALL_RISE;
+}
+
+// SPEC 13.2: under a deck the route keeps at least W3_MIN_GAP px of air between the deck's base and the crest
+uint8_t logicW3GapOk(const uint8_t *pHeight, const uint8_t *pFlags, const uint8_t *pCeil) {
+	if(!pHeight) { pHeight = g_pW3Height; pFlags = g_pW3Flags; pCeil = 0; }
+	if(!pCeil) return 1;
+	for(uint16_t j = 0; j < W3_COLS; ++j) {
+		if(!pCeil[j] && !pCeil[j + 1]) continue;
+		if(pFlags[j] & W3_FLAG_MASSIF) continue;
+		int16_t h = pHeight[j] > pHeight[j + 1] ? pHeight[j] : pHeight[j + 1];
+		int16_t base = pCeil[j] > pCeil[j + 1] ? pCeil[j] : pCeil[j + 1];
+		if(GROUND_Y - h - base < W3_MIN_GAP) return 0;
+	}
+	return 1;
+}
+
+// World 3's pilot scenery (SPEC 13.7): the lodge and the AA nest stand on their benches, the pad's slab top is the bed's floor (the
+// skids rest on its second row, as world 2's). The nest idles: its tell and fire frames are the behaviour slice's.
+COLD static uint8_t w3Draw(const tGame *g, tDraw *pOut, uint8_t n) {
+	int16_t cam = g->cam;
+	n = drawAddS(pOut, n, (int16_t)(W3_LODGE_X - cam), (int16_t)(logicW3SurfaceY(W3_LODGE_X + 26) - 32), BOB_W3_LODGE, 0);
+	n = drawAddS(pOut, n, (int16_t)(W3_NEST_X - cam), (int16_t)(logicW3SurfaceY(W3_NEST_X + 15) - 24), BOB_W3_NEST, 0);
+	n = drawAddS(pOut, n, (int16_t)(W3_PAD_X - cam), (int16_t)(logicW3SurfaceY(W3_PAD_X + W3_PAD_W / 2) - 2 - PAD_SLAB_ROW), BOB_PAD64, 0);
+	return n;
+}
+
+// World 3's picture: its scenery, then what the chopper shoots and what burns (no shadow, hangar or barracks yet)
+COLD static uint8_t logicDrawW3(const tGame *g, tDraw *pOut) {
+	uint8_t n = w3Draw(g, pOut, 0);
+	int16_t cam = g->cam;
+	for(uint8_t i = 0; i < SMOKE_MAX; ++i) {
+		const tSmoke *p = &g->pSmoke[i];
+		if(p->active) n = drawAdd(pOut, n, (int16_t)(p->x - 8 - cam), (int16_t)(p->y - 4), BOB_SMOKE,
+			p->age >= 16 ? SMOKE_THIN : p->age >= 8 ? SMOKE_BIG : SMOKE_SMALL);
+	}
+	for(uint8_t i = 0; i < SHOT_MAX; ++i) {
+		const tShot *s = &g->pShots[i];
+		if(!s->active) continue;
+		if(s->kind == SHOT_CANNON) n = drawAdd(pOut, n, (int16_t)(s->x - 4 - cam), (int16_t)(s->y - 1), BOB_SHOT, 0);
+		else n = drawAdd(pOut, n, (int16_t)(s->x - 2 - cam), (int16_t)(s->y - 3), BOB_BOMB, 0);
+	}
+	for(uint8_t i = 0; i < BOOM_MAX; ++i) {
+		const tBoom *b = &g->pBooms[i];
+		if(b->active) n = drawAdd(pOut, n, (int16_t)(b->x - 16 - cam), (int16_t)(b->y - 16), BOB_BOOM, b->frame);
+	}
+	return n;
+}
+
+// World 3's chopper against the terrain, after its moves (SPEC 13.5): a wall is solid from the side (the body stops, its speed goes,
+// nothing is damaged), a cloud deck or a tunnel roof stops the skids under it (eased down, never a pop). Out of line: the other
+// worlds' frames pay one test for it (jets runs at its own 97 % limit in world 1).
+__attribute__((noinline)) static void w3ChopperTerrain(tGame *g, int16_t wPrevX) {
+	tChopper *c = &g->chop;
+	if(c->vx) {
+		int8_t bDir = c->vx > 0 ? 1 : -1;
+		if(logicW3WallAt((int16_t)(c->x + (bDir > 0 ? W3_BODY_HALF : -W3_BODY_HALF)), c->y, bDir)) {
+			c->x = wPrevX;
+			c->fx = 0;
+			c->vx = 0;
+			g->events5 |= EV5_BUMP;
+		}
+	}
+	int16_t wCeil = logicW3CeilAt(c->x);
+	if(c->y < wCeil) {
+		c->y = (int16_t)(c->y + 3 > wCeil ? wCeil : c->y + 3);
+		c->fy = 0;
+		if(c->vy < 0) c->vy = 0;
+	}
 }

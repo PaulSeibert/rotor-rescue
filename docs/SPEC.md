@@ -1200,6 +1200,90 @@ writable disk.)
 | world 2's animated sea (v1.31) | WinUAE A500 (Kickstart 1.3 and 3.1, cycle-exact) and A1200, Ctrl+L, W, 4 / 5 / 6, hover over the sea and fly the map: the near water sways about 4 px and the swell runs toward the chopper, the glints brighten and fall back, no tear or jump on any line, no seam between the sea and the island strip (lines 207-208), the chopper, its shadow and the boats read over it, nothing flickers on a CRT or LCD; the frame meter stays clear of 100 % in the card's window | Paul in WinUAE (A500 and A1200); a real A500/A1200 shows the BPLCON1 steps on a CRT | **unproven**: vAmiga frames only (`tests/w2sea.agk`: the swell and the pen ramp move the sea's pixels, the same phase gives the same picture on all four profiles) |
 | the approved new art (landed 567e6c5) | the scrolled bands show no seam at 1x on a real display; the palette reads on all three missions | Paul after the art merge | pending: Paul on WinUAE/real display |
 
+## 13. World 3 Highlands: the terrain strip and the hardware pilot (v1.30)
+
+Added by the `w3-pilot` branch (the first slice of CONTENT-PLAN phase 3). It is a new section on purpose: it does not
+touch sections 1-12 and the version row is v1.30, so it merges beside the other branches' v1.19-v1.24. Status: the **hardware
+pilot** is built behind `W3_PILOT` (a debug entry, Ctrl+L, W, 7; mission 7's first screens); everything else in World 3 is
+*approved, not built*.
+
+### 13.1 Decisions (Paul, 2026-11-24)
+- Peaks stay **100 px** and the flyable height stays **192 px (44-236)**, with **no vertical scrolling**.
+- The **tunnel is in mission 8**: a lit rock-roof tunnel (a rock roof hanging from the cloud-ceiling strip, plus a portal BOB).
+  There is no dark fade.
+- The **cloud ceiling is in M8 and M9 only**; M7 has none.
+- The **perspective floor is dropped in World 3** (CONTENT-PLAN sections 2 and 6.2 are amended): the strip is the ground on all its lines.
+- The **valley haze** is as drawn (a COLOR00 gradient H to V behind the strip, lines 130-255).
+- The M9 enemy helicopter is drawn in one facing and the other is **flipped**; M8 has **no trucks and no AA guns** (the nests carry the ground fire).
+
+### 13.2 Level-design rule: the air gap under the cloud deck
+The deck (ceiling strip, lines 44-84) makes `ceilAt` 85 where it is present. A peak 100 px high leaves 51 px of air between the deck
+and the crest: less than the chopper (20 px high) can fly through in comfort. **Rule: no stretch with a deck may need the chopper to
+pass over terrain higher than 80 px (a gap of at least 70 px).** The route (a pass, a valley, a tunnel) must never force the 50 px
+gap. Taller peaks (up to 100 px) are allowed beside a deck stretch only as walls the route goes round or through (a pass lower than
+80 px, a tunnel). `logicW3GapOk` checks a height map against it; the pilot map and every future map carry this test.
+
+### 13.3 Display (band table; STYLE-world3 sections 2 and 3)
+One table per world drives the copper builder (`g_pBands`, logic.c: the band's first line, its rows, its camera speed as a shift
+or 1:1, its palette index; 7 pens per band, dark to light). World 3 in game lines:
+
+| lines | layer | speed | bitmap | palette |
+|---|---|---|---|---|
+| 24-129 | sky: COLOR00 gradient `sky_top` to H | n/a | none | n/a |
+| 44-84 | cloud-ceiling strip (M8, M9 only), 41 rows | 1:1 | ring of 16 px columns | ceiling pens 1-7, loaded at 43 |
+| 88-129 | far range, 42 rows | 1/4 | 320 x 42 loop | far pens 1-7, loaded at 87 |
+| 130-255 | terrain strip, 126 rows, rows 0-5 empty of rock | 1:1 | ring of 16 px columns, 3 planes | strip pens 1-7, loaded at 129 |
+| 130-255 behind | haze gradient H to V | n/a | COLOR00 per line | n/a |
+
+Per-mission pens 1-7 (12-bit): see STYLE-world3 section 3 (the table is the contract: M7 far `345 456 568 78A 9AC DDE FFF`, strip
+`112 435 765 C96 9AC DDE FFF`; M8 and M9 as there). Far pens 6, 7 equal strip pens 6, 7 in every mission.
+
+### 13.4 Memory
+- The floors stay **96 KB (a500, lowest chip free in play) and 64 KB (with WinUAE's 23 KB taken away)** in worlds 1, 2 and 3: never lowered.
+- **One tile bank** for all three missions, **at most 40 top tiles** (the pilot uses 27 of the art's 35); only the palette differs per mission.
+  16 rock fills, stored from row 21 (rows 0-20 are never visible: 630 B a fill).
+- **The arena** is one chip block made at boot at the size of the biggest world (today 69,832 B: world 2's file and its composed pads).
+  Loading a world **replaces** the previous one's art in it, never adds. World 3's content: the pilot is 51,394 B (the file 30,304 B, the
+  gradients 2,784 B, the strip's ring 18,306 B); the art pass's levered figures are M8 66,878 B and M9 67,262 B (STYLE-world3 section 13):
+  they fit the arena as it is, so **world 3 costs the game no chip**. (The older 62 KB / 71 KB targets were derived from world 2's figures
+  before the splash lever below; they are replaced by this derivation.)
+- **The ceiling for the arena** (a500, vAmiga, measured with `W3_KEEP_SPLASH` and without): the arena is made at boot, so every extra byte
+  comes off every world's chip free. World 1 keeps the boot splash's 47,840 B until a world loads: 105 KB lowest in play, 9 KB above the floor,
+  so **the arena may grow by about 9 KB (to about 79 KB) while the splash is freed only at the first world load**. Freeing the splash at the
+  first game start instead (a one-line move, not made here) would lift that to world 2's and 3's own headroom, **about 57 KB (to about
+  124 KB)** on the a500, and 66 KB on the squeezed run. Chip free in play in world 3 (bytes): a500 155,592 with the lever (107,752 without),
+  a500-ks31 190,912 (143,072), a500-aros 197,280 (149,440), a1200 1,287,632 (1,239,808); with the 23 KB squeeze 132,040 (84,200), 167,360
+  (119,520), 173,728 (125,888) and 1,264,080 (1,216,256). World 2 with the lever: 147,384 (a500).
+
+### 13.5 Height-map semantics (`floorAt` / `ceilAt`)
+A map is one byte per 16 px column: the surface height `h` (px above `GROUND_Y`, 0-100) at the column's left joint, plus a flag per
+column (pad). The surface between two joints is the straight line (the tile's profile is its art). Quantised rises per 16 px:
+0, 4, 9, 16, 28, 44 (0, 15, 30, 45, 60 and 70 degrees).
+- `floorAt(x)` is the highest surface under the skids (x - 10 .. x + 10), as a y; the skids stop there and the chopper never goes
+  below it. It lands only where the column is a **pad** (flat by construction, a bench tile); anywhere else the floor is a soft stop
+  (no damage, no landing), as water is in world 2.
+- **Slopes:** up to 45 degrees (a rise of 16 per 16 px) the chopper slides up the flank as the floor lifts it. **Walls:** a flank
+  of 60 degrees or more (a rise of 28 or more) is solid from the side: the chopper's body (half-width 16) stops at it, its vx goes
+  to 0, no damage (the wall bump costs speed only), and the bump sets an event for the puff.
+- `ceilAt(x)` is the highest y the skids can reach: `CEIL_Y` (44) with no ceiling; under a cloud deck or a tunnel roof, the deck's base
+  line plus the chopper's height (20), so its top stops at the base (eased down 3 px a frame, never a pop). The ceiling map is a height
+  map too (M8, M9; one base line per 16 px joint, 0 = none).
+- A barracks, pad or ledge stands on a bench tile: its y is `floorAt` of its column.
+
+### 13.6 Nest tells by skill
+The mountain AA nest raises its barrels (the tell frame: silhouette, a red lamp) before it fires: **26 / 22 / 18 / 16 / 14 frames
+at skill 1-5**. The fire frame is the tell held with a muzzle flash.
+
+### 13.7 The pilot (what is built)
+`W3_PILOT`: world index 2, mission 7's first screens (foothills with a low pass, a pad on a bench, a nest, the lodge, the pines): a
+1:1 terrain strip streamed a 16 px column at a time into a ring in PF2, the far range at 1/4, the haze, the strip fill under the world
+card, and the world's art loaded into the shared arena in place of the previous world's (`disk/world3.bin`, `art/tools/make_world3_disk.py`).
+Missions 8 and 9 show a "not built" card. No enemy behaviour yet (the nest and lodge are scenery): that is for amiga-game.
+Measured in vAmiga (docs/WORLD3-HANDOFF.md has all of it): chip in play as in 13.4 (the world adds none); copper entries 631 (OCS) and
+1,333 (AGA) against the lists' 661 and 1,340 (world 2's list is the bigger on the a500, so no growth); frame load 26-47 % average, worst
+74 % (the picture after the card's world load); `disk/world3.bin` 30.3 KB, 13 KB packed; the strip streams pixel-exact against the art's
+raster at 5 camera offsets (`tools/check_w3strip.py`, a500 and a1200).
+
 ## Open questions for Paul
 
 (Numbers are kept from before. Questions 2, 4, 5 and 7 are decided, decided by Paul, 2026-11-11: see v1.2.)
@@ -1251,5 +1335,6 @@ writable disk.)
 | v1.22 | 2026-11-21 | World 2 slice C (branch `w2-slice2`): the ship-deck winch rescue in mission 5 (section 11, "World 2, slice 2"): a moored cargo ship replaces the third island's barracks, 16 people climb a rope in a 24 x 20 px hover box at 1 a second, paused not reset when you drift out, the winch is a landed-class state for the ground grace, take-off grace, one-attack-at-a-time and the gusts; the card's map now made whole per mission; +7,632 bytes of chip, `tests/w2chip.agk` floor 130 -> 128 KB. Studio proposal pending Paul's playtest. |
 | v1.23 | 2026-11-21 | World 2 slice D (branch `w2-slice2`): the sinking freighter in mission 6 (section 11, "World 2, slice 2"): 16 people, a timer of 120 / 105 / 90 / 75 / 60 s by skill split into four sinking stages, the winch box follows the tilt, the people left when it sinks are lost, a pen 5 timer bar under the HUD radar, the card says what is out there; +14,688 bytes of chip (world 2 on the a500 116 KB free; the per-mission set lever measured, not taken), `tests/w2chip.agk` floor 128 -> 114 KB; a real mission clear -> next card scenario (`tests/w2clear.agk`, hook Ctrl+L, K). Studio proposal pending Paul's playtest. |
 | v1.24 | 2026-11-24 | World 2 slice E (branch `w2-slice2`): the strait destroyer in mission 6 (section 11, "World 2, slice 2"): two turrets of 6 HP and four AA guns, turret shells under the ground-threat rules with a tell of 28 / 24 / 20 / 18 / 16 frames, flak with a ranging puff, a barrage at 40 s (30 frame tell) and the turrets open at 90 s, the listing hull and 400 points when both turrets are down, the zone bonus (+100 when the last radar site falls), whitecaps in the Typhoon; one facing, decided by Paul; the per-mission BOB set (the SPEC v1.23 lever, taken: mission 6 113,800 bytes of chip free on the a500, 15,496 over the 96 KB floor), `TPL_MAX` 104, the hull whole or in pieces (no pop-in), the hull without a mask (mission 6 113,800 bytes of chip free). Studio proposal pending Paul's playtest. |
+| v1.30 | 2026-11-24 | decided by Paul, 2026-11-24 (World 3 questions): peaks 100 px and 192 px flyable, no vertical scroll; the tunnel in mission 8 (lit rock roof and a portal BOB, no dark fade); the cloud ceiling in M8 and M9 only; the perspective floor dropped in World 3; valley haze as drawn; the flipped second enemy-helicopter facing and no trucks or AA guns in M8 accepted. New section 13 (display band table, the 62 / 71 KB arena target, the 40-tile bank limit, `floorAt` / `ceilAt` semantics, the air-gap rule, nest tells by skill, the pilot behind `W3_PILOT`); CONTENT-PLAN sections 2 and 6.2 amended. Branch `w3-pilot`: the band layout table (T3), the height map (T4 slice), the terrain strip (T5), `disk/world3.bin` |
 | v1.31 | 2026-11-24 | world 2's sea is animated (Paul's native playtest 2026-11-24: "the sea layer could use some animation, to show movement in the water, more interesting and 3D"; studio decision, pending his playtest; branch `w2-sea-anim`, numbered v1.31 because other branches hold v1.19-v1.24 and v1.30). Section 11, "Sea animation": a per-line swell (the near water, lines 12-26, drifts up to 3.8 px, the camera's own 1/z ratio, a wave running toward the player; the far water is still) and a shimmer of the sea palette's pens 4-7, both pure functions of the frame counter (`logicSeaPhase`, `logicSeaDrift`, `logicSeaPen`; the 16-bit wrap is seamless), written into copper values the list already has: no new copper entry, no chip; budget rules (a blit-count gate for the swell alone, a hold after a list is written) in the section. World 1 unchanged. `logicSeaScroll` takes the phase; `tests/unit/test_logic.c`, `tests/w2sea.agk`; every world 2 golden that shows the sea changes |
 | v1.40 | 2026-11-24 | frame headroom for the skill-5 crash (section 11) and the boot logo's 46 KB freed after the splash (section 11, memory): not a design change, no golden changes (jetsload goldens recorded from the old build); `tests/jetsload.agk`, `tests/splashfree.agk`, `testDrawPeopleRunAndGroundFirst`. Other branches use v1.19-v1.24, v1.30, v1.31: expect docs conflicts, see `docs/JETS-HEADROOM-MERGE.md` |
