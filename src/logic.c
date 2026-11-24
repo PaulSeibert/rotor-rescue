@@ -3205,6 +3205,35 @@ uint16_t logicSeaPen(uint16_t uwBase, uint8_t ubPen, uint16_t uwFrame) {
 	return logicSeaLighten(uwBase, logicSeaPenLevel(ubPen, uwFrame));
 }
 
+uint8_t logicBaseStep(uint16_t uwFrame) {
+	return (uint8_t)((uwFrame >> BASE_STEP_SHIFT) & (BASE_STEPS - 1));
+}
+
+// 0-16 cosine, 0 at index 0 and 16 at 16; the weights a level 0-16 puts on light (from the dark) and on white (from the light)
+static const uint8_t s_pBaseCos[32] = {0, 0, 1, 1, 2, 4, 5, 6, 8, 10, 11, 12, 14, 15, 15, 16, 16, 16, 15, 15, 14, 12, 11, 10, 8, 6, 5, 4, 2, 1, 1, 0};
+static const uint8_t s_pBaseToLight[17] = {0, 2, 3, 5, 7, 8, 10, 12, 13, 15, 16, 16, 16, 16, 16, 16, 16};
+static const uint8_t s_pBaseToWhite[17] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 5, 7, 9, 11, 13};
+
+static uint16_t baseLerp(uint16_t a, uint16_t b, uint8_t t) {   // t 0-16 of the way from a to b, a channel at a time
+	uint16_t out = 0;
+	for(uint8_t s = 0; s < 12; s = (uint8_t)(s + 4)) {
+		int16_t ca = (int16_t)((a >> s) & 15), cb = (int16_t)((b >> s) & 15);
+		out |= (uint16_t)((ca + (((cb - ca) * t) >> 4)) << s);
+	}
+	return out;
+}
+
+uint16_t logicBaseWave(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint16_t uwFrame, uint8_t ubClass) {
+	static const uint8_t pOff[3] = {0, 11, 21}, pOff2[3] = {0, 17, 9};
+	uint8_t m = (uint8_t)((pOff[ubClass] - (uwFrame >> 1)) & 31);          // the swell, toward the player
+	uint8_t n = (uint8_t)((pOff2[ubClass] + (uwFrame >> 3)) & 31);         // the counter-wave, the other way, slower
+	uint8_t s = (uint8_t)((3 * s_pBaseCos[m] + s_pBaseCos[n]) >> 2);        // 0-16
+	uint8_t b = (uint8_t)((uwFrame >> 4) & 31);                             // the breathing: the dark's depth 3-7 sixteenths
+	uint8_t dw = (uint8_t)(3 + ((b < 16 ? b : 31 - b) >> 2));
+	uint16_t uwDk = baseLerp(uwDark, uwLight, dw);
+	return baseLerp(baseLerp(uwDk, uwLight, s_pBaseToLight[s]), uwWhite, s_pBaseToWhite[s]);
+}
+
 #if defined(__GNUC__) && !defined(__clang__)
 __attribute__((optimize("Os")))
 #endif

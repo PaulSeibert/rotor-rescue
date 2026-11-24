@@ -1363,6 +1363,50 @@ static void testSeaPens(void) {
 	}
 }
 
+// The base ocean's colour cycling (the terrain strip's water pens 1, 6, 7: classes 0-2)
+static int chan(uint16_t c, int s) { return (c >> s) & 15; }
+static void testBaseWave(void) {
+	// the step: every 2 frames, 32 of them, the 16-bit counter wraps with no jump
+	CHECK(logicBaseStep(0) == 0 && logicBaseStep(1) == 0 && logicBaseStep(2) == 1);
+	CHECK(logicBaseStep(63) == 31 && logicBaseStep(64) == 0 && logicBaseStep(65535) == 31);
+	// mission 4's island pens 1, 6, 7 and mission 6's storm pens
+	static const uint16_t pens[2][3] = {{0x023, 0x8DE, 0xFFF}, {0x012, 0x9BB, 0xDEE}};
+	for(int m = 0; m < 2; ++m) {
+		uint16_t d = pens[m][0], l = pens[m][1], w = pens[m][2];
+		int sumLo = 999, sumHi = -1, hiB = -1, loB = 99, loSum = 999, hiSum = -1;
+		for(uint32_t f = 0; f < 1024; ++f) {
+			int sum = 0;
+			for(uint8_t k = 0; k < 3; ++k) {
+				uint16_t c = logicBaseWave(d, l, w, (uint16_t)f, k);
+				uint16_t cn = logicBaseWave(d, l, w, (uint16_t)(f + 1), k);
+				CHECK(c == logicBaseWave(d, l, w, (uint16_t)(f + 512), k));           // a cycle of 512, a divisor of 65536
+				for(int ch = 0; ch < 3; ++ch) {
+					int v = chan(c, 4 * ch), a = chan(d, 4 * ch), b = chan(l, 4 * ch), e = chan(w, 4 * ch);
+					int mn = a < b ? a : b, mx = e > b ? e : b;
+					CHECK(v >= mn && v <= mx);                       // never darker than the dark, never past the white
+					CHECK(absi(v - chan(cn, 4 * ch)) <= 3);          // slow and smooth
+				}
+				if(chan(c, 0) > hiB) hiB = chan(c, 0);
+				if(chan(c, 0) < loB) loB = chan(c, 0);
+				sum += chan(c, 4);
+			}
+			if(sum < sumLo) sumLo = sum;
+			if(sum > sumHi) sumHi = sum;
+			(void)loSum; (void)hiSum;
+		}
+		CHECK(hiB - loB >= 6);                                       // a real wave
+		CHECK(sumHi - sumLo <= 10);                                  // the strip never flashes as a whole: the three pens' green sums alike
+	}
+	// the counter-wave and the breathing are real: pen 1's colour at the same swell step differs across the long cycle
+	int distinct = 0;
+	for(uint16_t f = 0; f < 512; f = (uint16_t)(f + 64))
+		if(logicBaseWave(0x023, 0x8DE, 0xFFF, f, 0) != logicBaseWave(0x023, 0x8DE, 0xFFF, 0, 0)) ++distinct;
+	CHECK(distinct >= 4);
+	// and the wrap: 65535 -> 0 is as smooth as any step
+	for(uint8_t k = 0; k < 3; ++k)
+		CHECK(absi(chan(logicBaseWave(0x023, 0x8DE, 0xFFF, 65535, k), 0) - chan(logicBaseWave(0x023, 0x8DE, 0xFFF, 0, k), 0)) <= 3);
+}
+
 // A 24-bit gradient: its ends exact, every channel monotonic between them
 static void testGrad24(void) {
 	CHECK(logicGrad24(0x2488CC, 0xCCFFEE, 0, 156) == 0x2488CC);
@@ -6196,6 +6240,7 @@ int main(void) {
 	testSeaSwell();
 	testSeaCameraAlone();
 	testSeaPens();
+	testBaseWave();
 	testGrad24();
 	testWorld2Start();
 	testTerrainFloor();

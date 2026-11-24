@@ -972,6 +972,29 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
       first and measured: +6 % average and +14 % in the swell's pictures, 12 points more worst load in
       `tests/w2play.agk` (82 -> 94, over its 85) and a dropped frame at the mission start; the far water is calm
       for that reason.
+  - **Base ocean animation** (v1.42; Paul's queued item: "animate the base ocean layer", the water of the terrain
+    strip, lines 208-255, where the islands and ships stand; world 2 only; `tests/unit/test_logic.c` `testBaseWave`,
+    `tests/w2base.agk`). The sea above the strip moves already (v1.31); the strip's water was still. **No new copper
+    entry, no chip byte, no bitplane or blitter work, no swell of the strip's lines** (a swell would shear the islands,
+    which are in the same bitmap; there is no clear water below them to swell). It is **colour cycling of the strip's
+    three water pens**: the art draws every water stroke (a horizontal run of pixels) in one of the pens 1, 6 and 7
+    (the three "classes"), chosen by the stroke's row on a perspective phase (`u = 2.2 ln(1 + y / 12)`: a wave about 5
+    rows long at the strip's top, about 25 at its foot, so the water is farther away at the top) plus a random
+    +-0.3 of a wave a stroke, so no row is a band and no two neighbours match; the island's own pixels use only pens
+    2-5 (the bush's and boulder's dark underside and the pebbles: pen 1 -> pen 2; the generator,
+    `art/tools/world2/w2tiles.py`, tells a water pixel from an island pixel by who drew it, not by colour). The copper
+    then lets the three pens' colours run through one wave of 32 steps (a step every 2 frames, a cycle of 64: a divisor of
+    65536, so the 16-bit counter wraps with no jump): pen 1 is class 0, pen 6 class 1 (11 steps on), pen 7 class 2 (21
+    steps on), colour = the wave at `offset - step`, so a crest of light rolls **toward the player** (down the strip),
+    the average colour of the three pens stays constant (the strip never flashes as a whole), and the wave is a cosine
+    from the mission's dark (pen 1 lightened a quarter of the way to pen 6) through its light (pen 6) to near-white
+    (pen 7: 4/5 of the way, never above it): `logicBaseStep`, `logicBaseWave` (integer, two 32-byte weight tables, no
+    divide). The three palette MOVEs of the island palette after line 207's WAIT are patched in place (`basePens`, per
+    list, every picture the step changed: 3 writes, a few hundredths of a frame, so unlike the sea's swell it is **not**
+    gated on the blit count and not held after a list is written: the pens are right from the first picture).
+    Deterministic from the frame counter (`g->frame`; Ctrl+L, S holds it, with the sea's). Chip and fast RAM: the tile bank
+    is the same size (art only). *Not done:* a swell of the strip's lines (above); shore foam or wave rings as BOBs (a blit
+    a picture, chip, Retro Diffusion art): not needed, the cycling reads as swell.
   - **The strip**: a pointer-creep ring (the spike's), 3 separate planes of 44-byte rows (2,734 bytes each, 8.2 KB),
     22 tile columns kept drawn (both pictures' fetches); a column coming into view is 3 queued blits (A -> D, 48 words
     a plane) from the 36-tile bank, one every ~5 pictures at 3 px a frame. After a camera jump (a mission's start)

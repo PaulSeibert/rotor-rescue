@@ -859,6 +859,18 @@ uint16_t logicSeaPen(uint16_t uwBase, uint8_t ubPen, uint16_t uwFrame);
 // the game builds its table of the three colours a pen has (startup) and looks the level up
 uint8_t logicSeaPenLevel(uint8_t ubPen, uint16_t uwFrame);
 uint16_t logicSeaLighten(uint16_t uwBase, uint8_t ubLevel);
+// The base ocean (SPEC 11, "Base ocean animation"): the terrain strip's water, lines 208-255, in colour
+// cycling. The art draws each water stroke in one of the island palette's pens 1, 6 or 7 (class 0, 1, 2).
+// A pen's colour is the sum of three slow movements, all powers of two of the 16-bit frame counter so it
+// wraps with no jump: the swell, a crest of light rolling toward the player (32 steps of 2 frames, a cycle
+// of 64; the classes sit 0, 11, 21 steps apart); a counter-wave running the other way, a third as strong
+// (32 steps of 8 frames, 256); and the deep water's breathing (the dark's depth, 32 steps of 16 frames, 512).
+// uwDark, uwLight, uwWhite are the mission's island pens 1, 6, 7 (0xRGB); the colour runs from the dark
+// (pen 1, 3 to 7 sixteenths of the way to pen 6) through the light to near-white (13/16 of the way to pen 7, never above it).
+#define BASE_STEPS 32
+#define BASE_STEP_SHIFT 1
+uint8_t logicBaseStep(uint16_t uwFrame);
+uint16_t logicBaseWave(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint16_t uwFrame, uint8_t ubClass);
 // pBase (SEA_LINES words) takes the undrifted left edge of line SEA_SWELL_FROM - 1 and nearer, for logicSeaSwell: the swell
 // alone, same camera, lines SEA_SWELL_FROM and nearer (the far water is still)
 #define SEA_SWELL_FROM 12
