@@ -1,7 +1,9 @@
-# World 2's BASE ocean (SPEC 11, "Base ocean animation"): the terrain strip's water, lines 208-255,
-# where the islands and ships stand. Ctrl+L, W, 4 starts mission 4 (Reef Run) on the base pad; the
-# chopper flies west over the sea between the base island and the next one and hovers there, so the
-# camera is still and only the animation moves the strip's water.
+# World 2s BASE ocean (SPEC 11, Base ocean animation): the terrain strip water, lines 208-255, where the islands and
+# ships stand, in colour cycling (a swell of 64 frames, a counter-wave of 256, a breathing of 512). Ctrl+L, W, 4 starts
+# mission 4 on the base pad, the chopper stays landed. Synced to the game frame (AGK frame=N prints, as tests/w2sea.agk),
+# so every profile shows the same step: a = frame 288, b = frame 352. The strip water pixels are pens 1, 6, 7 and
+# change colour from a to b; the old build's strip is still (this was shown red on main build: a pixel never changes).
+# Pixels picked from the a500 and a1200 shots (the AGA gradient behind differs, the pens do not).
 wait-serial "AGK t0" 1000
 key 0x63
 key 0x28
@@ -17,21 +19,16 @@ key 0x02
 wait 30
 press fire 2
 wait 60
-press left 130
-wait 100
+wait-serial "AGK frame=288" 300
 screenshot a
-wait 32
+wait-serial "AGK frame=352" 300
 screenshot b
-# The strip's water is colour cycled (SPEC 11, "Base ocean animation"): a swell of 64 frames, a counter-wave of 256 and a
-# breathing of 512 run through pens 1, 6 and 7, so a water pixel has one colour at a and another 32 frames later at b.
-# The old build's strip is still: a pixel never changes (this was shown red on main's build).
-# Pixels are in the open water west of the base island's beach (strip rows 4-9); the pens are the same on all profiles.
-expect-color a 8 212 0x267
-expect-color b 8 212 0x9DE
-expect-color a 90 214 0xBEE
-expect-color b 90 214 0x489
-expect-color a 55 221 0x267
-expect-color b 55 221 0x9DE
+expect-color a 8 212 0x59A
+expect-color b 8 212 0x367
+expect-color a 30 215 0xADE
+expect-color b 30 215 0xCEE
+expect-color a 124 221 0x59A
+expect-color b 124 221 0x367
 expect-serial "AGK start world=2 mission=4"
 expect-no-serial "ERR|missing"
 expect-no-dropped-frames
