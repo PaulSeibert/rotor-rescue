@@ -984,7 +984,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
     2-5 (the bush's and boulder's dark underside and the pebbles: pen 1 -> pen 2; the generator,
     `art/tools/world2/w2tiles.py`, tells a water pixel from an island pixel by who drew it, not by colour). The copper
     then lets the three pens' colours run through a wave that is the sum of three slow movements, every cycle a divisor
-    of 65536 so the 16-bit counter wraps with no jump (, , ): **the
+    of 65536 so the 16-bit counter wraps with no jump (`logicBaseWave`, `logicBaseColor`, `logicBaseWaveTab`): **the
     swell**, a crest of light rolling **toward the player** (32 steps of 2 frames, a cycle of 64; pen 1 is class 0, pen 6
     class 1 and pen 7 class 2, 11 and 21 steps on); **a counter-wave** a third as strong running the other way, slower (32
     steps of 8 frames, 256; so the crests do not all move one way at one speed: in the water they cross); and **the
@@ -995,12 +995,12 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
     by depth is in the art: a stroke's class jitter grows from +-0.2 of a wave at the top to +-0.4 at the foot, and the wave is
     5 rows long at the top and 25 at the foot. Drifting foam is the wave's white peak: only pen 7 reaches near-white, a
     fifth of the strokes at any time. The three palette MOVEs of the island palette after line 207's WAIT are patched in
-    place (, per list, when the step moved: 3 words from a 4 x 17 table per mission built at world 2's first
-    load, , 408 bytes of fast RAM; the first build computed the colours in full each picture and cost 2 to 8
-    points of the worst picture, w2play 82 -> 90 against its 85, so it was changed to the table and to the sea swell's
-    rule: **only in a picture that queued at most  blits**, at once in a list just written, the busy pictures
+    place (`basePens`, per list, when the step moved: 3 words from a 4 x 17 table per mission built at world 2's first
+    load, `s_pBaseTab`, 408 bytes of fast RAM; the first build computed the colours in full each picture and cost 2 to 5
+    points of the worst picture, w2play 85 -> 90 against its 85 and w2frtr over its 98, so it was changed to the table and to the sea swell's
+    rule: **only in a picture that queued at most `SEA_BLIT_MAX` blits**, at once in a list just written, the busy pictures
     take the step up in the next quiet one). Deterministic from the frame counter and the blit count, as the sea's
-    (; Ctrl+L, S holds it, with the sea's). Chip RAM: none (the tile bank is the same size, art only).
+    (`g->frame`; Ctrl+L, S holds it, with the sea's). Chip RAM: none (the tile bank is the same size, art only).
     *Not done:* a swell of the strip's lines (above); shore foam or wave rings as BOBs (a blit a picture, chip, Retro
     Diffusion art): not needed, the cycling reads as swell (RD spend: none).
   - **The strip**: a pointer-creep ring (the spike's), 3 separate planes of 44-byte rows (2,734 bytes each, 8.2 KB),
@@ -1404,3 +1404,4 @@ raster at 5 camera offsets (`tools/check_w3strip.py`, a500 and a1200).
 | v1.40 | 2026-11-24 | frame headroom for the skill-5 crash (section 11) and the boot logo's 46 KB freed after the splash (section 11, memory): not a design change, no golden changes (jetsload goldens recorded from the old build); `tests/jetsload.agk`, `tests/splashfree.agk`, `testDrawPeopleRunAndGroundFirst`. Other branches use v1.19-v1.24, v1.30, v1.31: expect docs conflicts, see `docs/JETS-HEADROOM-MERGE.md` |
 | v1.41 | 2026-11-24 | integration of v1.19-v1.31 with v1.40 (branch `integration`; section 11, "The merged build"): not a design change; the frame fixes above (typing plan in play and for erases, fix path, typing waits behind a radar redraw on a card, the freighter bar's shrink), world 3 kept apart from world 2's rules (`logicIsW2`), the splash free at `worldLoad` removed (the free at the title stands); goldens of 14 world 2 / world 3 scenarios re-recorded (the sea band, card text typing phase, a radar-row dot, w3load's card map); unproven on WinUAE or real hardware: see the PLAYTEST-integration checklist |
 | v1.42 | 2026-11-24 | the rotor's Paula channel is claimed in ptplayer (section 9, "Rotor channel claim"): a third effect at once (the HQ drop-off) no longer takes channel 2 and leaves the "saved" arpeggio looping where the rotor was; not a design change, no rotor number changes, +2 bytes of chip; `tests/hqsound.agk`, `sound/tools/check_rotor_back.py`, debug key Ctrl+L, J; `tests/w2patrol.agk` `expect-max-load` 85 -> 90 (decided by Paul, 2026-11-25): the claim adds about 4 points (83 -> 86-87 on the a500 and a500-ks31) to the first 50-frame window after world 2 loads, where `musicFor` stops the theme and re-claims the rotor channel; steady-state load and the average (40) are unchanged and no frame drops; deferring the re-claim was tried and broke the a500 world-2 load wait, so the limit moved instead |
+| v1.43 | 2026-11-25 | the base ocean animation (section 11, "Base ocean animation"): the terrain strip water in three colour-cycled pens (swell, counter-wave, breathing), art regenerated (terrain_tiles.txt, disk/world2.bin), 3 palette MOVEs patched in quiet pictures; no chip, no copper entry, no feel numbers; tests/w2base.agk, testBaseWave; goldens of the strip rows (208-255) re-recorded in world 2 scenarios on all four profiles |
