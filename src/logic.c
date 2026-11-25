@@ -3217,21 +3217,38 @@ static const uint8_t s_pBaseToWhite[17] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 5
 static uint16_t baseLerp(uint16_t a, uint16_t b, uint8_t t) {   // t 0-16 of the way from a to b, a channel at a time
 	uint16_t out = 0;
 	for(uint8_t s = 0; s < 12; s = (uint8_t)(s + 4)) {
-		int16_t ca = (int16_t)((a >> s) & 15), cb = (int16_t)((b >> s) & 15);
-		out |= (uint16_t)((ca + (((cb - ca) * t) >> 4)) << s);
+		int16_t ca = (int16_t)((a >> s) & 15), d = (int16_t)(((b >> s) & 15) - ca), tt = t;
+		d = (int16_t)(d * tt);   // (16-bit operands and result: one muls.w)
+		out |= (uint16_t)((ca + (d >> 4)) << s);
 	}
 	return out;
 }
 
-uint16_t logicBaseWave(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint16_t uwFrame, uint8_t ubClass) {
+// One colour of the wave: the dark's depth ubDw (0-3: 3 to 6 sixteenths of the way from pen 1 to pen 6) and the level ubS (0-16);
+// the game builds the 4 x 17 table of them once per mission (startup), the wave only looks it up
+uint16_t logicBaseColor(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint8_t ubDw, uint8_t ubS) {
+	uint16_t uwDk = baseLerp(uwDark, uwLight, (uint8_t)(3 + ubDw));
+	return baseLerp(baseLerp(uwDk, uwLight, s_pBaseToLight[ubS]), uwWhite, s_pBaseToWhite[ubS]);
+}
+
+// A class's table index at a frame: ubDw * 17 + the level
+static uint8_t baseIndex(uint16_t uwFrame, uint8_t ubClass) {
 	static const uint8_t pOff[3] = {0, 11, 21}, pOff2[3] = {0, 17, 9};
 	uint8_t m = (uint8_t)((pOff[ubClass] - (uwFrame >> 1)) & 31);          // the swell, toward the player
 	uint8_t n = (uint8_t)((pOff2[ubClass] + (uwFrame >> 3)) & 31);         // the counter-wave, the other way, slower
 	uint8_t s = (uint8_t)((3 * s_pBaseCos[m] + s_pBaseCos[n]) >> 2);        // 0-16
-	uint8_t b = (uint8_t)((uwFrame >> 4) & 31);                             // the breathing: the dark's depth 3-7 sixteenths
-	uint8_t dw = (uint8_t)(3 + ((b < 16 ? b : 31 - b) >> 2));
-	uint16_t uwDk = baseLerp(uwDark, uwLight, dw);
-	return baseLerp(baseLerp(uwDk, uwLight, s_pBaseToLight[s]), uwWhite, s_pBaseToWhite[s]);
+	uint8_t b = (uint8_t)((uwFrame >> 4) & 31);                             // the breathing: the dark's depth
+	uint8_t dw = (uint8_t)((b < 16 ? b : 31 - b) >> 2);                     // 0-3
+	return (uint8_t)((dw << 4) + dw + s);
+}
+
+uint16_t logicBaseWaveTab(const uint16_t *pTab, uint16_t uwFrame, uint8_t ubClass) {
+	return pTab[baseIndex(uwFrame, ubClass)];
+}
+
+uint16_t logicBaseWave(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint16_t uwFrame, uint8_t ubClass) {
+	uint8_t i = baseIndex(uwFrame, ubClass);
+	return logicBaseColor(uwDark, uwLight, uwWhite, (uint8_t)(i / 17), (uint8_t)(i % 17));   // (host reference)
 }
 
 #if defined(__GNUC__) && !defined(__clang__)

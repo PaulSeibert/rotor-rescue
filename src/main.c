@@ -298,6 +298,7 @@ static WORD s_wSeaBaseCam = -1;
 static UWORD s_pSeaPenCol[MISSION_COUNT][4][3];   // the sea's pens 4-7 per mission and level (world2Gradients)
 static UBYTE s_ubSeaHold;                         // pictures left that hold the swell and shimmer at frame 0 after a list is written or patched
 static UWORD s_pSeaPenStep[2] = {0xFFFF, 0xFFFF};
+static UWORD s_pBaseTab[MISSION_COUNT][BASE_TAB_N];   // the base ocean pens colours per mission (world2Gradients; logicBaseColor)
 static UWORD s_pBaseStep[2] = {0xFFFF, 0xFFFF};   // the base ocean pens step each list shows (logicBaseWave)
 static UWORD s_pPalSlot[2][4];   // its PF2 palettes: clouds, far band (mountains, far islands), land or sea, islands
 
@@ -888,11 +889,11 @@ __attribute__((noinline, optimize("Os"))) static void basePens(tCopCmd *pList, U
 	UWORD uwKey = (UWORD)(uwFrame >> BASE_STEP_SHIFT);
 	if(uwKey == s_pBaseStep[ubBfr]) return;
 	s_pBaseStep[ubBfr] = uwKey;
-	const UWORD *pIsl = g_pW2IslPal[ubMission];
+	const UWORD *pTab = s_pBaseTab[ubMission];
 	UWORD uwSlot = s_pPalSlot[ubBfr][3];
-	copSetMoveVal(&pList[uwSlot].sMove, logicBaseWave(pIsl[1], pIsl[6], pIsl[7], uwFrame, 0));
-	copSetMoveVal(&pList[uwSlot + 5].sMove, logicBaseWave(pIsl[1], pIsl[6], pIsl[7], uwFrame, 1));
-	copSetMoveVal(&pList[uwSlot + 6].sMove, logicBaseWave(pIsl[1], pIsl[6], pIsl[7], uwFrame, 2));
+	copSetMoveVal(&pList[uwSlot].sMove, logicBaseWaveTab(pTab, uwFrame, 0));
+	copSetMoveVal(&pList[uwSlot + 5].sMove, logicBaseWaveTab(pTab, uwFrame, 1));
+	copSetMoveVal(&pList[uwSlot + 6].sMove, logicBaseWaveTab(pTab, uwFrame, 2));
 }
 
 // The HUD panel (lines 0..PLAY_TOP-1), all from the copper: a brushed-steel
@@ -1533,7 +1534,9 @@ __attribute__((noinline, optimize("Os"))) static void stripUpdate(tCopCmd *pList
 __attribute__((noinline, optimize("Os"))) static void w2Update(tCopCmd *pList, UBYTE ubBfr, WORD wCam, WORD *pCamShown) {
 	stripUpdate(pList, ubBfr, wCam);
 	UWORD uwFrame = s_ubSeaStill ? 0 : s_sGame.frame;
-	basePens(pList, ubBfr, s_sGame.mission, uwFrame);
+	// (the base ocean's pens: at once in a list just written, else only in a picture that queued at most SEA_BLIT_MAX
+	// blits: the busy pictures are the frame budget's worst, and the wave is slow, it takes the step up in the next quiet one)
+	if(s_pBaseStep[ubBfr] == 0xFFFF || g_uwAgkBlitqCount <= SEA_BLIT_MAX) basePens(pList, ubBfr, s_sGame.mission, uwFrame);
 	// (a list just written or patched: a mission's first pictures are the budget's worst, so the
 	// swell and the shimmer wait a few pictures, the water as the camera alone puts it)
 	UBYTE ubPhase = s_ubSeaHold ? SEA_NO_SWELL : logicSeaPhase(uwFrame);
@@ -3532,6 +3535,9 @@ __attribute__((noinline, optimize("Os"))) static void world2Gradients(void) {
 		logicGradFill(g_pW2SkyH[m], g_pW2SeaC[m], SEA_LINES, s_pW2SeaBg[m]);
 		for(UBYTE k = 0; k < 4; ++k)
 			for(UBYTE lv = 0; lv < 3; ++lv) s_pSeaPenCol[m][k][lv] = logicSeaLighten(g_pW2SeaPal[m][4 + k], lv);
+		for(UBYTE dw = 0; dw < 4; ++dw)
+			for(UBYTE s = 0; s < 17; ++s)
+				s_pBaseTab[m][dw * 17 + s] = logicBaseColor(g_pW2IslPal[m][1], g_pW2IslPal[m][6], g_pW2IslPal[m][7], dw, s);
 		for(UBYTE y = 0; s_isAga && y < FLOOR_Y - PLAY_TOP; ++y) {
 			ULONG c = logicGrad24(g_pW2SkyTop24[m], g_pW2SkyH24[m], y, FLOOR_Y - PLAY_TOP);
 			s_pW2Sky[m][y] = (UWORD)(((c >> 12) & 0xF00) | ((c >> 8) & 0x0F0) | ((c >> 4) & 0x00F));

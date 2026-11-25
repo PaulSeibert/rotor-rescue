@@ -871,6 +871,11 @@ uint16_t logicSeaLighten(uint16_t uwBase, uint8_t ubLevel);
 #define BASE_STEP_SHIFT 1
 uint8_t logicBaseStep(uint16_t uwFrame);
 uint16_t logicBaseWave(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint16_t uwFrame, uint8_t ubClass);
+// ...as the game runs it: the table of one mission's colours (BASE_TAB_N words, built once from logicBaseColor) and a lookup that
+// costs a few shifts; logicBaseWave is the same thing computed in full (the host's reference)
+#define BASE_TAB_N (4 * 17)
+uint16_t logicBaseColor(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint8_t ubDw, uint8_t ubS);
+uint16_t logicBaseWaveTab(const uint16_t *pTab, uint16_t uwFrame, uint8_t ubClass);
 // pBase (SEA_LINES words) takes the undrifted left edge of line SEA_SWELL_FROM - 1 and nearer, for logicSeaSwell: the swell
 // alone, same camera, lines SEA_SWELL_FROM and nearer (the far water is still)
 #define SEA_SWELL_FROM 12

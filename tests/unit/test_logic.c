@@ -1402,6 +1402,15 @@ static void testBaseWave(void) {
 	for(uint16_t f = 0; f < 512; f = (uint16_t)(f + 64))
 		if(logicBaseWave(0x023, 0x8DE, 0xFFF, f, 0) != logicBaseWave(0x023, 0x8DE, 0xFFF, 0, 0)) ++distinct;
 	CHECK(distinct >= 4);
+	// the table the game looks up is the full computation, at every frame of the cycle, for every class and mission
+	for(int m = 0; m < 2; ++m) {
+		uint16_t tab[BASE_TAB_N];
+		for(uint8_t dw = 0; dw < 4; ++dw)
+			for(uint8_t s = 0; s < 17; ++s) tab[dw * 17 + s] = logicBaseColor(pens[m][0], pens[m][1], pens[m][2], dw, s);
+		for(uint32_t f = 0; f < 1100; ++f)
+			for(uint8_t k = 0; k < 3; ++k)
+				CHECK(logicBaseWaveTab(tab, (uint16_t)f, k) == logicBaseWave(pens[m][0], pens[m][1], pens[m][2], (uint16_t)f, k));
+	}
 	// and the wrap: 65535 -> 0 is as smooth as any step
 	for(uint8_t k = 0; k < 3; ++k)
 		CHECK(absi(chan(logicBaseWave(0x023, 0x8DE, 0xFFF, 65535, k), 0) - chan(logicBaseWave(0x023, 0x8DE, 0xFFF, 0, k), 0)) <= 3);

@@ -983,18 +983,26 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
     +-0.3 of a wave a stroke, so no row is a band and no two neighbours match; the island's own pixels use only pens
     2-5 (the bush's and boulder's dark underside and the pebbles: pen 1 -> pen 2; the generator,
     `art/tools/world2/w2tiles.py`, tells a water pixel from an island pixel by who drew it, not by colour). The copper
-    then lets the three pens' colours run through one wave of 32 steps (a step every 2 frames, a cycle of 64: a divisor of
-    65536, so the 16-bit counter wraps with no jump): pen 1 is class 0, pen 6 class 1 (11 steps on), pen 7 class 2 (21
-    steps on), colour = the wave at `offset - step`, so a crest of light rolls **toward the player** (down the strip),
-    the average colour of the three pens stays constant (the strip never flashes as a whole), and the wave is a cosine
-    from the mission's dark (pen 1 lightened a quarter of the way to pen 6) through its light (pen 6) to near-white
-    (pen 7: 4/5 of the way, never above it): `logicBaseStep`, `logicBaseWave` (integer, two 32-byte weight tables, no
-    divide). The three palette MOVEs of the island palette after line 207's WAIT are patched in place (`basePens`, per
-    list, every picture the step changed: 3 writes, a few hundredths of a frame, so unlike the sea's swell it is **not**
-    gated on the blit count and not held after a list is written: the pens are right from the first picture).
-    Deterministic from the frame counter (`g->frame`; Ctrl+L, S holds it, with the sea's). Chip and fast RAM: the tile bank
-    is the same size (art only). *Not done:* a swell of the strip's lines (above); shore foam or wave rings as BOBs (a blit
-    a picture, chip, Retro Diffusion art): not needed, the cycling reads as swell.
+    then lets the three pens' colours run through a wave that is the sum of three slow movements, every cycle a divisor
+    of 65536 so the 16-bit counter wraps with no jump (, , ): **the
+    swell**, a crest of light rolling **toward the player** (32 steps of 2 frames, a cycle of 64; pen 1 is class 0, pen 6
+    class 1 and pen 7 class 2, 11 and 21 steps on); **a counter-wave** a third as strong running the other way, slower (32
+    steps of 8 frames, 256; so the crests do not all move one way at one speed: in the water they cross); and **the
+    breathing** (32 steps of 16 frames, 512): how deep the dark goes, 3 to 6 sixteenths of the way from pen 1 to pen 6,
+    so the whole strip slowly deepens and clears. A colour is the dark, through the mission's light (pen 6), to near-white
+    (pen 7: 13/16 of the way, never above it). The average colour of the three pens is nearly constant (the strip never
+    flashes as a whole: the mean luminance of open strip water moves +-6 % over the cycle, measured). Crest density
+    by depth is in the art: a stroke's class jitter grows from +-0.2 of a wave at the top to +-0.4 at the foot, and the wave is
+    5 rows long at the top and 25 at the foot. Drifting foam is the wave's white peak: only pen 7 reaches near-white, a
+    fifth of the strokes at any time. The three palette MOVEs of the island palette after line 207's WAIT are patched in
+    place (, per list, when the step moved: 3 words from a 4 x 17 table per mission built at world 2's first
+    load, , 408 bytes of fast RAM; the first build computed the colours in full each picture and cost 2 to 8
+    points of the worst picture, w2play 82 -> 90 against its 85, so it was changed to the table and to the sea swell's
+    rule: **only in a picture that queued at most  blits**, at once in a list just written, the busy pictures
+    take the step up in the next quiet one). Deterministic from the frame counter and the blit count, as the sea's
+    (; Ctrl+L, S holds it, with the sea's). Chip RAM: none (the tile bank is the same size, art only).
+    *Not done:* a swell of the strip's lines (above); shore foam or wave rings as BOBs (a blit a picture, chip, Retro
+    Diffusion art): not needed, the cycling reads as swell (RD spend: none).
   - **The strip**: a pointer-creep ring (the spike's), 3 separate planes of 44-byte rows (2,734 bytes each, 8.2 KB),
     22 tile columns kept drawn (both pictures' fetches); a column coming into view is 3 queued blits (A -> D, 48 words
     a plane) from the 36-tile bank, one every ~5 pictures at 3 px a frame. After a camera jump (a mission's start)
