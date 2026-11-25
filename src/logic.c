@@ -3242,6 +3242,16 @@ static uint8_t baseIndex(uint16_t uwFrame, uint8_t ubClass) {
 	return (uint8_t)((dw << 4) + dw + s);
 }
 
+uint8_t logicBaseIndex(uint16_t uwFrame, uint8_t ubClass) {
+	return baseIndex(uwFrame, ubClass);
+}
+
+// ...and the colour a table index stands for (no divide: the index is ubDw * 17 + ubS)
+uint16_t logicBaseColorAt(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint8_t ubIdx) {
+	uint8_t dw = (uint8_t)((ubIdx >= 17) + (ubIdx >= 34) + (ubIdx >= 51));
+	return logicBaseColor(uwDark, uwLight, uwWhite, dw, (uint8_t)(ubIdx - (dw << 4) - dw));
+}
+
 uint16_t logicBaseWaveTab(const uint16_t *pTab, uint16_t uwFrame, uint8_t ubClass) {
 	return pTab[baseIndex(uwFrame, ubClass)];
 }

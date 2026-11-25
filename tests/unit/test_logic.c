@@ -1411,6 +1411,11 @@ static void testBaseWave(void) {
 			for(uint8_t k = 0; k < 3; ++k)
 				CHECK(logicBaseWaveTab(tab, (uint16_t)f, k) == logicBaseWave(pens[m][0], pens[m][1], pens[m][2], (uint16_t)f, k));
 	}
+	for(uint8_t i = 0; i < BASE_TAB_N; ++i)   // a table index's colour (the game fills its table as it needs each)
+		CHECK(logicBaseColorAt(0x023, 0x8DE, 0xFFF, i) == logicBaseColor(0x023, 0x8DE, 0xFFF, (uint8_t)(i / 17), (uint8_t)(i % 17)));
+	for(uint32_t f = 0; f < 1100; ++f)
+		for(uint8_t k = 0; k < 3; ++k)
+			CHECK(logicBaseIndex((uint16_t)f, k) < BASE_TAB_N);
 	// and the wrap: 65535 -> 0 is as smooth as any step
 	for(uint8_t k = 0; k < 3; ++k)
 		CHECK(absi(chan(logicBaseWave(0x023, 0x8DE, 0xFFF, 65535, k), 0) - chan(logicBaseWave(0x023, 0x8DE, 0xFFF, 0, k), 0)) <= 3);

@@ -876,6 +876,8 @@ uint16_t logicBaseWave(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint
 #define BASE_TAB_N (4 * 17)
 uint16_t logicBaseColor(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint8_t ubDw, uint8_t ubS);
 uint16_t logicBaseWaveTab(const uint16_t *pTab, uint16_t uwFrame, uint8_t ubClass);
+uint8_t logicBaseIndex(uint16_t uwFrame, uint8_t ubClass);   // the table index a class has at a frame
+uint16_t logicBaseColorAt(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint8_t ubIdx);   // the colour an index stands for
 // pBase (SEA_LINES words) takes the undrifted left edge of line SEA_SWELL_FROM - 1 and nearer, for logicSeaSwell: the swell
 // alone, same camera, lines SEA_SWELL_FROM and nearer (the far water is still)
 #define SEA_SWELL_FROM 12
