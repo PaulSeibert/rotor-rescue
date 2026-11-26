@@ -357,6 +357,7 @@ COLD void logicChopperRespawn(tGame *g) {
 	c->prevFire2 = 1;
 	g->unloadTimer = UNLOAD_FRAMES;
 	g->winch = 0;
+	g->winchSlip = 0;
 }
 
 // World 2's boats, placed by the map (docs/CONTENT-PLAN.md 4.2: a garrison is fixed and seen
@@ -423,6 +424,7 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->deckLeft = g->deckOn ? DECK_PEOPLE : 0;
 	g->deckTimer = 0;
 	g->winch = 0;
+	g->winchSlip = 0;
 	g->sinkTimer = 0;
 	g->sinkStage = 0;
 	g->sunk = 0;
@@ -540,6 +542,13 @@ static const uint8_t s_pAaTell[DIFFICULTY_MAX + 1] = {18, 26, 22, 18, 15, 12};
 static const uint8_t s_pAaGap[DIFFICULTY_MAX + 1] = {85, 120, 100, 85, 70, 60};
 static const uint8_t s_pAaLive[DIFFICULTY_MAX + 1] = {1, 1, 1, 1, 2, 2};
 
+// The winch window by skill (SPEC 11, "Winch and loading polish"; skill 5 is slice C's 24 x 20 box, 0.5 px/frame, no grace); GODMODE as normal
+const uint8_t g_pWinchGrow[DIFFICULTY_MAX + 1] = {8, 16, 12, 8, 4, 0};      // px added to each side of the 24 px box: 56 / 48 / 40 / 32 / 24 wide
+const uint8_t g_pWinchUp[DIFFICULTY_MAX + 1] = {28, 36, 32, 28, 24, 20};    // the box's height above its floor
+const uint8_t g_pWinchTol[DIFFICULTY_MAX + 1] = {16, 24, 20, 16, 12, 8};    // the hover speed limit, 1/16 px a frame (1.5 / 1.25 / 1 / 0.75 / 0.5 px)
+const uint8_t g_pWinchGrace[DIFFICULTY_MAX + 1] = {12, 24, 18, 12, 6, 0};   // frames the rope stays down out of the box
+const uint8_t g_pWinchCatch[DIFFICULTY_MAX + 1] = {8, 12, 12, 8, 0, 0};     // the capture ring (px); 0: no pull and no settle (skill 4-5)
+
 // Every per-difficulty table, for the unit test that index 0 (GODMODE) equals
 // index 3 (normal) in each. A new table goes in this list.
 static const tDiffTable s_pDiffTables[] = {
@@ -570,6 +579,11 @@ static const tDiffTable s_pDiffTables[] = {
 	{"aaTell", s_pAaTell, sizeof(s_pAaTell[0])},
 	{"aaGap", s_pAaGap, sizeof(s_pAaGap[0])},
 	{"aaLive", s_pAaLive, sizeof(s_pAaLive[0])},
+	{"winchGrow", g_pWinchGrow, sizeof(g_pWinchGrow[0])},
+	{"winchUp", g_pWinchUp, sizeof(g_pWinchUp[0])},
+	{"winchTol", g_pWinchTol, sizeof(g_pWinchTol[0])},
+	{"winchGrace", g_pWinchGrace, sizeof(g_pWinchGrace[0])},
+	{"winchCatch", g_pWinchCatch, sizeof(g_pWinchCatch[0])},
 };
 
 const tDiffTable *logicDiffTables(uint8_t *pCount) {
@@ -717,6 +731,19 @@ static inline int16_t siteLeft(const tGame *g) { return g->mission == 2 ? FRTR_X
 static inline int16_t siteFloor(const tGame *g) { return g->mission == 2 ? (int16_t)g_pFrtrFloor[g->sinkStage] : DECK_Y; }
 static inline int16_t siteBoxX0(const tGame *g) { return g->mission == 2 ? FRTR_X + FRTR_BOX_DX : DECK_BOX_X0; }
 
+void logicWinchBox(const tGame *g, int16_t *pX0, int16_t *pX1, int16_t *pTopY) {
+	*pX0 = (int16_t)(siteBoxX0(g) - g_pWinchGrow[g->difficulty]);
+	*pX1 = (int16_t)(siteBoxX0(g) + 23 + g_pWinchGrow[g->difficulty]);
+	*pTopY = (int16_t)(siteFloor(g) - g_pWinchUp[g->difficulty]);
+}
+
+// The people drawn waving on the deck: ceil(waiting * DECK_GROUP_MAX / DECK_PEOPLE), the one on the rope not counted (SPEC 11, "Winch and loading polish")
+_Static_assert(DECK_PEOPLE == 16, "the group's count is a shift by 4");
+uint8_t logicDeckGroup(const tGame *g) {
+	uint8_t ubWaiting = (uint8_t)(g->deckLeft - (g->deckLeft && g->winch >= DECK_ROPE_SET ? 1 : 0));
+	return (uint8_t)((ubWaiting * DECK_GROUP_MAX + DECK_PEOPLE - 1) >> 4);
+}
+
 uint8_t logicGustsOn(const tGame *g) {
 	return logicIsW2(g) && g->mission >= 1 && g->difficulty != 1;
 }
@@ -782,14 +809,33 @@ static void frtrTick(tGame *g) {
 }
 
 __attribute__((noinline)) static void winchUpdate(tGame *g) {
-	const tChopper *c = &g->chop;
+	tChopper *c = &g->chop;
 	if(g->mission == 2) frtrTick(g);
-	int16_t wX0 = siteBoxX0(g), wFloor = siteFloor(g);
-	uint8_t isIn = c->alive && !c->landed && g->deckLeft && !g->sunk && g->aboard < CABIN_MAX && c->x >= wX0 && c->x <= wX0 + 23 &&
-		c->y >= wFloor - 20 && c->y <= wFloor && absw(c->vx) <= DECK_HOVER_SPEED && absw(c->vy) <= DECK_HOVER_SPEED;
-	if(!isIn) { g->winch = 0; return; }
+	if(!(c->alive && !c->landed && g->deckLeft && !g->sunk && g->aboard < CABIN_MAX)) { g->winch = g->winchSlip = 0; return; }   // (nothing to winch: no grace)
+	uint8_t ubSkill = g->difficulty;
+	int16_t wX0, wX1, wTop, wFloor = siteFloor(g);
+	logicWinchBox(g, &wX0, &wX1, &wTop);
+	int16_t wTol = g_pWinchTol[ubSkill];
+	uint8_t isLow = c->y >= wTop && c->y <= wFloor;
+	uint8_t isIn = isLow && c->x >= wX0 && c->x <= wX1 && absw(c->vx) <= wTol && absw(c->vy) <= wTol;
+	if(!isIn) {
+		// skill 1-3: the capture ring pulls a slow chopper beside the box in, half a pixel a frame (the pad guide's nudge)
+		if(g_pWinchCatch[ubSkill] && isLow && (g->frame & 1) && absw(c->vx) <= 2 * wTol) {
+			if(c->x < wX0 && c->x >= wX0 - g_pWinchCatch[ubSkill]) ++c->x;
+			else if(c->x > wX1 && c->x <= wX1 + g_pWinchCatch[ubSkill]) --c->x;
+		}
+		// the rope stays down for the skill's grace (the climb is paused), then it is drawn up
+		if(g->winch && g->winchSlip < g_pWinchGrace[ubSkill]) ++g->winchSlip;
+		else g->winch = g->winchSlip = 0;
+		return;
+	}
+	g->winchSlip = 0;
 	if(!g->winch) g->events3 |= EV3_WINCHSTART;
 	if(g->winch < 255) ++g->winch;
+	if(g_pWinchCatch[ubSkill] && g->winch >= DECK_ROPE_SET) {   // skill 1-3: settle, a released stick stops twice as fast (less than the stick's push: it never holds)
+		if(c->vx > 0) --c->vx;
+		else if(c->vx < 0) ++c->vx;
+	}
 	if(g->winch < DECK_ROPE_SET || ++g->deckTimer < DECK_PERSON_FRAMES) return;
 	g->deckTimer = 0;
 	g->pHostages[DECK_BARRACKS * HOSTAGES_PER_BARRACKS + (DECK_PEOPLE - g->deckLeft)].state = HS_ABOARD;
@@ -2782,21 +2828,41 @@ COLD static uint8_t deckDraw(const tGame *g, tDraw *pOut, uint8_t n) {
 		if(g->sinkStage) n = drawAddS(pOut, n, (int16_t)(FRTR_X + 3 - cam), FRTR_TOP + 23, BOB_SPRAY, (uint8_t)(g->sinkStage - 1));
 	}
 	else n = drawAddS(pOut, n, (int16_t)(DECK_X - cam), DECK_TOP, BOB_DECK, (uint8_t)((g->frame / 14) & 1));
+	// the lamps at the ends of the box (the skill's box: wider on skill 1-4) say what the winch does: red blinking outside it, yellow blinking
+	// fast (4 on, 4 off) over it but too fast or too high, yellow steady while the winch holds (red again while the rope is slipping)
+	int16_t wBx0, wBx1, wBtop;
+	logicWinchBox(g, &wBx0, &wBx1, &wBtop);
 	int16_t wMid = (int16_t)(wX0 + 12);
-	if(c->alive && absw((int16_t)(c->x - wMid)) < 150 && ((g->frame >> 3) & 3) != 3) {
-		uint8_t isIn = c->x >= wX0 && c->x <= wX0 + 23 && c->y >= wFloor - 20 && c->y <= wFloor;
-		n = drawAddS(pOut, n, (int16_t)(wX0 - 5 - cam), (int16_t)(wFloor - 5), BOB_PAD_LAMP, isIn ? PAD_LAMP_YELLOW : PAD_LAMP_RED);
-		n = drawAddS(pOut, n, (int16_t)(wX0 + 24 - cam), (int16_t)(wFloor - 5), BOB_PAD_LAMP, isIn ? PAD_LAMP_YELLOW : PAD_LAMP_RED);
+	if(c->alive && absw((int16_t)(c->x - wMid)) < 150) {
+		uint8_t isCol = c->x >= wBx0 && c->x <= wBx1;
+		uint8_t isHold = g->winch && !g->winchSlip;
+		uint8_t isShown = isHold ? 1 : isCol ? (uint8_t)((g->frame >> 2) & 1) : (uint8_t)(((g->frame >> 3) & 3) != 3);
+		if(isShown) {
+			uint8_t ubLamp = isHold || isCol ? PAD_LAMP_YELLOW : PAD_LAMP_RED;
+			n = drawAddS(pOut, n, (int16_t)(wBx0 - 5 - cam), (int16_t)(wFloor - 5), BOB_PAD_LAMP, ubLamp);
+			n = drawAddS(pOut, n, (int16_t)(wBx1 + 1 - cam), (int16_t)(wFloor - 5), BOB_PAD_LAMP, ubLamp);
+		}
 	}
-	static const uint8_t s_pMenX[2][3] = {{28, 76, 82}, {86, 92, 98}};
-	for(uint8_t i = 0; i < g->deckLeft && i < 3; ++i) {
-		n = drawAddS(pOut, n, (int16_t)(wLeft + s_pMenX[isFrtr][i] - cam), (int16_t)(wFloor - 12), BOB_HOSTAGE, (uint8_t)(((g->frame >> 3) + i) & 1 ? MAN_WAVE1 : MAN_WAVE0));
+	// the group on deck waves, thinning as the count falls; the person on the rope runs out of it for DECK_WALK_FRAMES, then climbs
+	static const uint8_t s_pMusterX[2][DECK_GROUP_MAX] = {{104, 96, 88, 80, 72}, {104, 98, 92, 86, 80}};   // (aft, slot 0 the far end)
+	uint8_t ubGroup = logicDeckGroup(g);
+	for(uint8_t i = 0; i < ubGroup; ++i) {
+		n = drawAddS(pOut, n, (int16_t)(wLeft + s_pMusterX[isFrtr][i] - cam), (int16_t)(wFloor - 12), BOB_HOSTAGE, (uint8_t)(((g->frame >> 3) + i) & 1 ? MAN_WAVE1 : MAN_WAVE0));
 	}
-	if(g->winch >= DECK_ROPE_SET) {   // the climber: from the deck up to the belly in DECK_PERSON_FRAMES
-		int16_t wRise = (int16_t)(wFloor + 8 - c->y);   // (the rungs to climb: 8 px with the skids on the floor, 28 at the top of the box)
-		if(wRise < 0) wRise = 0;
-		int16_t wY = (int16_t)(wFloor - 12 - (int16_t)(((uint16_t)g->deckTimer * (uint16_t)wRise * 41u) >> 11));
-		n = drawAddS(pOut, n, (int16_t)(c->x - 7 - cam), wY, BOB_CLIMB, (uint8_t)((g->frame / 6) & 1));
+	if(g->winch >= DECK_ROPE_SET) {
+		if(g->deckTimer < DECK_WALK_FRAMES) {   // the run: from the slot the group lost to the rope's foot (the chopper's x as it is)
+			int16_t wFrom = (int16_t)(wLeft + s_pMusterX[isFrtr][ubGroup < DECK_GROUP_MAX - 1 ? ubGroup : DECK_GROUP_MAX - 1]);
+			int16_t wDist = (int16_t)(c->x - 8 - wFrom);
+			int16_t wMove = (int16_t)divu16((uint32_t)(uint16_t)(absw(wDist) * g->deckTimer), DECK_WALK_FRAMES);
+			n = drawAddS(pOut, n, (int16_t)(wFrom + (wDist < 0 ? -wMove : wMove) - cam), (int16_t)(wFloor - 12), BOB_HOSTAGE,
+				(uint8_t)((wDist < 0 ? MAN_RUNL0 : MAN_RUN0) + ((g->frame >> 2) & 1)));
+		}
+		else {   // the climb: from the deck up to the belly in the rest of the person's frames
+			int16_t wRise = (int16_t)(wFloor + 8 - c->y);   // (the rungs to climb: 8 px with the skids on the floor, 8 + the box's height at the top of it)
+			if(wRise < 0) wRise = 0;
+			int16_t wY = (int16_t)(wFloor - 12 - (int16_t)divu16((uint32_t)(uint16_t)(wRise * (g->deckTimer - DECK_WALK_FRAMES)), DECK_PERSON_FRAMES - DECK_WALK_FRAMES));
+			n = drawAddS(pOut, n, (int16_t)(c->x - 7 - cam), wY, BOB_CLIMB, (uint8_t)((g->frame / 6) & 1));
+		}
 	}
 	return n;
 }

@@ -4809,7 +4809,7 @@ static void testW2DeckIsDrawn(void) {
 		uint8_t isHook = 0, isRope = 0, isClimb = 0;
 		for(uint8_t i = 0; i < n; ++i) { isHook |= d[i].bob == BOB_HOOK; isRope |= d[i].bob == BOB_ROPE; isClimb |= d[i].bob == BOB_CLIMB; }
 		if(g.winch && g.winch < DECK_ROPE_SET) CHECK(isHook && !isRope && !isClimb);
-		if(g.winch >= DECK_ROPE_SET + 2) CHECK(isRope && isClimb && !isHook);
+		if(g.winch >= DECK_ROPE_SET + 2) CHECK(isRope && !isHook && isClimb == (g.deckTimer >= DECK_WALK_FRAMES));   // (v1.43: a person runs to the rope first, then climbs)
 	}
 	newWorld2(0);
 	g.cam = (int16_t)(DECK_X - 100);
@@ -4911,10 +4911,10 @@ static void testW2FreighterBoxFollowsTheTilt(void) {
 			if(g.events3 & EV3_WINCHBOARD) iBoard = f;
 		}
 		CHECK(iBoard >= DECK_ROPE_SET + DECK_PERSON_FRAMES - 3 && iBoard <= DECK_ROPE_SET + DECK_PERSON_FRAMES + 1);
-		frtrWorld(1);
+		frtrWorld(5);   // (skill 5 keeps slice D's 24 x 20 box; the wider boxes of skill 1-4 are in testW2Winch*)
 		g.sinkStage = s;
 		for(int f = 0; f < 80; ++f) { frtrHold(s, 0, -22); step(NONE, 1); CHECK(!g.winch); }
-		frtrWorld(1);
+		frtrWorld(5);
 		g.sinkStage = s;
 		for(int f = 0; f < 80; ++f) { frtrHold(s, 30, 0); step(NONE, 1); CHECK(!g.winch); }   // (beside the box)
 	}
@@ -5006,6 +5006,321 @@ static void testW2ClearThenTheFreighterMission(void) {
 	CHECK(g.deckOn && g.deckLeft == DECK_PEOPLE && g.sinkTimer == 0 && g.sinkTotal == 4500 && !g.sunk && g.killed == 0 && g.saved == 0);
 	step(NONE, INTRO_FRAMES + 1);
 	CHECK(g.state == GS_PLAY);
+}
+
+// ---- winch and loading polish (v1.43; SPEC 11 "Winch and loading polish"): the ship deck (mission 5) and the freighter (mission 6) ----
+// the tables as the spec says them (GODMODE, entry 0, plays as 3)
+static const uint8_t s_pWchW[6] = {40, 56, 48, 40, 32, 24};     // box width, px
+static const uint8_t s_pWchH[6] = {28, 36, 32, 28, 24, 20};     // box height above the floor, px
+static const uint8_t s_pWchSpd[6] = {16, 24, 20, 16, 12, 8};    // hover speed limit, 1/16 px a frame
+static const uint8_t s_pWchGr[6] = {12, 24, 18, 12, 6, 0};      // frames the rope is kept out of the box
+static const uint8_t s_pWchCt[6] = {8, 12, 12, 8, 0, 0};        // the capture ring, px
+static const uint8_t s_pMusterX[2][DECK_GROUP_MAX] = {{104, 96, 88, 80, 72}, {104, 98, 92, 86, 80}};   // (the group stands aft: slot 0 the far end, slot 4 the end nearest the rope)
+
+static void siteWorld(uint8_t m, uint8_t skill) { if(m == 2) frtrWorld(skill); else deckWorld(skill); }
+static void siteHold(uint8_t m, int16_t wDx, int16_t wDy) { if(m == 2) frtrHold(0, wDx, wDy); else deckHold(wDx, wDy); }
+static int16_t siteFloorY(uint8_t m) { return m == 2 ? 230 : DECK_Y; }
+static int16_t siteBoxCx(uint8_t m) { return m == 2 ? FRTR_X + FRTR_BOX_DX + 12 : DECK_BOX_X0 + 12; }   // slice C's box is cx - 12 .. cx + 11
+static int16_t siteLeftX(uint8_t m) { return m == 2 ? FRTR_X : DECK_X; }
+static int16_t siteBoxX0For(uint8_t m, uint8_t d) { return (int16_t)(siteBoxCx(m) - 12 - (s_pWchW[d] - 24) / 2); }
+
+static void testW2WinchTablesBySkill(void) {
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		CHECK(24 + 2 * g_pWinchGrow[d] == s_pWchW[d]);
+		CHECK(g_pWinchUp[d] == s_pWchH[d]);
+		CHECK(g_pWinchTol[d] == s_pWchSpd[d]);
+		CHECK(g_pWinchGrace[d] == s_pWchGr[d]);
+		CHECK(g_pWinchCatch[d] == s_pWchCt[d]);
+	}
+	for(uint8_t d = 2; d <= DIFFICULTY_MAX; ++d) {   // a harder skill never gets a bigger window or more help
+		CHECK(s_pWchW[d] < s_pWchW[d - 1] && s_pWchH[d] <= s_pWchH[d - 1] && s_pWchSpd[d] < s_pWchSpd[d - 1]);
+		CHECK(s_pWchGr[d] < s_pWchGr[d - 1] && s_pWchCt[d] <= s_pWchCt[d - 1]);
+	}
+	// skill 5 is slice C: 24 x 20, 0.5 px a frame, no grace, no pull (and the old constants still say so)
+	CHECK(s_pWchW[5] == DECK_BOX_X1 - DECK_BOX_X0 + 1 && g_pWinchUp[5] == DECK_Y - DECK_BOX_Y0 && g_pWinchTol[5] == DECK_HOVER_SPEED);
+	CHECK(g_pWinchGrace[5] == 0 && g_pWinchCatch[5] == 0);
+}
+
+// The box is centred on slice C's and grows by skill; its edges and its top are exact, on the ship and on the freighter
+static void testW2WinchBoxWidthBySkill(void) {
+	for(uint8_t m = 1; m <= 2; ++m) {
+		for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+			siteWorld(m, d);
+			int16_t x0, x1, wTop;
+			logicWinchBox(&g, &x0, &x1, &wTop);
+			CHECK(x0 == siteBoxX0For(m, d) && x1 - x0 + 1 == s_pWchW[d] && wTop == siteFloorY(m) - s_pWchH[d]);
+			int16_t wX[4] = {x0, x1, (int16_t)(x0 - 1), (int16_t)(x1 + 1 + g_pWinchCatch[d] + 8)};   // (in, in, out, out beyond the capture ring)
+			int16_t wY[4] = {(int16_t)(siteFloorY(m) - 4), (int16_t)(siteFloorY(m) - 4), (int16_t)(siteFloorY(m) - 4), (int16_t)(siteFloorY(m) - 4)};
+			for(int k = 0; k < 4; ++k) {
+				siteWorld(m, d);
+				for(int f = 0; f < 6; ++f) { siteHold(m, 0, 0); g.chop.x = wX[k]; g.chop.y = wY[k]; step(NONE, 1); }
+				CHECK((g.winch > 0) == (k < 2));
+			}
+			// the top: exactly H above the floor is in, one more is out (no nudge: the band is the same)
+			for(int k = 0; k < 2; ++k) {
+				siteWorld(m, d);
+				for(int f = 0; f < 6; ++f) { siteHold(m, 0, 0); g.chop.y = (int16_t)(siteFloorY(m) - s_pWchH[d] - k); step(NONE, 1); }
+				CHECK((g.winch > 0) == (k == 0));
+			}
+		}
+	}
+}
+
+// The hover speed limit: the limit itself is hovering, one more is not (the chopper's drag takes 1/16 off before the winch looks)
+static void testW2WinchSpeedLimitBySkill(void) {
+	for(uint8_t m = 1; m <= 2; ++m) {
+		for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+			for(int k = 0; k < 2; ++k) {
+				siteWorld(m, d);
+				for(int f = 0; f < 4; ++f) { siteHold(m, 0, 0); g.chop.vx = (int16_t)(s_pWchSpd[d] + 1 + k); step(NONE, 1); }
+				CHECK((g.winch > 0) == (k == 0));
+			}
+		}
+	}
+}
+
+// Out of the box the rope stays down for the skill's grace frames (the climb is paused: deckTimer is kept), then it is drawn up
+static void testW2WinchGraceKeepsTheRope(void) {
+	for(uint8_t m = 1; m <= 2; ++m) {
+		for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+			siteWorld(m, d);
+			for(int f = 0; f < DECK_ROPE_SET + 10; ++f) { siteHold(m, 0, 0); step(NONE, 1); }
+			CHECK(g.winch >= DECK_ROPE_SET && g.deckTimer == 11);
+			for(int f = 0; f < s_pWchGr[d]; ++f) {   // (80 px out: beyond the capture ring too)
+				siteHold(m, 80, 0); step(NONE, 1);
+				CHECK(g.winch > 0 && g.deckTimer == 11 && g.aboard == 0);
+			}
+			siteHold(m, 80, 0); step(NONE, 1);
+			CHECK(g.winch == 0 && g.deckTimer == 11);
+			// back in: the rope is set again (12 frames), the climb goes on from the kept frame
+			for(int f = 0; f < DECK_ROPE_SET; ++f) { siteHold(m, 0, 0); step(NONE, 1); }
+			CHECK(g.winch == DECK_ROPE_SET && g.deckTimer == 12);
+			// a return inside the grace restarts the grace, not the rope
+			if(s_pWchGr[d]) {
+				for(int r = 0; r < 2; ++r) {
+					for(int f = 0; f < s_pWchGr[d]; ++f) { siteHold(m, 80, 0); step(NONE, 1); }
+					siteHold(m, 0, 0); step(NONE, 1);
+					CHECK(g.winch > DECK_ROPE_SET && g.winchSlip == 0);
+				}
+			}
+			// a full cabin ends it at once, whatever the grace
+			g.aboard = CABIN_MAX;
+			siteHold(m, 80, 0); step(NONE, 1);
+			CHECK(g.winch == 0);
+		}
+	}
+}
+
+// Skill 1-3: beside the box, inside the ring and the box's height, the chopper is pulled in, half a pixel a frame; never inside, never beyond
+static void testW2WinchCaptureRing(void) {
+	for(uint8_t m = 1; m <= 2; ++m) {
+		for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+			int16_t x0 = siteBoxX0For(m, d), x1 = (int16_t)(x0 + s_pWchW[d] - 1), wRing = s_pWchCt[d];
+			for(int side = 0; side < 2; ++side) {
+				int16_t wStart = side ? (int16_t)(x1 + (wRing ? wRing : 6)) : (int16_t)(x0 - (wRing ? wRing : 6));
+				siteWorld(m, d);
+				siteHold(m, 0, 0); g.chop.x = wStart; g.chop.y = (int16_t)(siteFloorY(m) - 6);
+				int16_t wPrev = g.chop.x;
+				for(int f = 0; f < 4 * 12 + 4; ++f) {
+					int16_t wY = g.chop.y; g.chop.vx = g.chop.vy = 0; g.chop.y = wY;
+					step(NONE, 1);
+					CHECK(side ? g.chop.x <= wPrev : g.chop.x >= wPrev);   // (never away from the box)
+					wPrev = g.chop.x;
+				}
+				int isInside = g.chop.x >= x0 && g.chop.x <= x1;
+				CHECK(isInside == (wRing > 0));
+				if(wRing) CHECK(g.winch > 0 || g.chop.x == (side ? x1 : x0));   // (pulled to the edge, then it hovers)
+				else CHECK(g.chop.x == wStart);
+				// half a pixel a frame: 8 frames of the pull move it 4 px, not 8
+				if(wRing) {
+					siteWorld(m, d);
+					siteHold(m, 0, 0); g.chop.x = side ? (int16_t)(x1 + wRing) : (int16_t)(x0 - wRing); g.chop.y = (int16_t)(siteFloorY(m) - 6);
+					int16_t wFrom = g.chop.x;
+					for(int f = 0; f < 8; ++f) { g.chop.vx = g.chop.vy = 0; step(NONE, 1); }
+					int16_t wMoved = (int16_t)(wFrom > g.chop.x ? wFrom - g.chop.x : g.chop.x - wFrom);
+					CHECK(wMoved >= 3 && wMoved <= 5);
+				}
+			}
+			if(wRing) {   // one pixel beyond the ring, or above the box: nothing pulls
+				siteWorld(m, d);
+				siteHold(m, 0, 0); g.chop.x = (int16_t)(x1 + wRing + 1); g.chop.y = (int16_t)(siteFloorY(m) - 6);
+				for(int f = 0; f < 20; ++f) { g.chop.vx = g.chop.vy = 0; step(NONE, 1); }
+				CHECK(g.chop.x == x1 + wRing + 1);
+				siteWorld(m, d);
+				siteHold(m, 0, 0); g.chop.x = (int16_t)(x1 + wRing); g.chop.y = (int16_t)(siteFloorY(m) - s_pWchH[d] - 6);
+				for(int f = 0; f < 20; ++f) { g.chop.vx = g.chop.vy = 0; g.chop.y = (int16_t)(siteFloorY(m) - s_pWchH[d] - 6); step(NONE, 1); }
+				CHECK(g.chop.x == x1 + wRing);
+			}
+		}
+	}
+}
+
+// Skill 1-3 settle: with the rope out a released stick stops twice as fast; the stick still moves the chopper out of the box; skill 4-5 as before
+static void testW2WinchSettles(void) {
+	for(uint8_t m = 1; m <= 2; ++m) {
+		for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+			siteWorld(m, d);
+			for(int f = 0; f < DECK_ROPE_SET + 4; ++f) { siteHold(m, 0, 0); step(NONE, 1); }
+			CHECK(g.winch > 0);
+			g.chop.vx = 8;
+			for(int f = 0; f < 4; ++f) step(NONE, 1);
+			CHECK(g.chop.vx == (s_pWchCt[d] ? 0 : 4));
+			// the stick wins over the settle
+			siteWorld(m, d);
+			for(int f = 0; f < DECK_ROPE_SET + 4; ++f) { siteHold(m, 0, 0); step(NONE, 1); }
+			for(int f = 0; f < 60; ++f) step((tInput){.dx = -1}, 1);
+			CHECK(g.chop.x < siteBoxCx(m) - 40);
+		}
+	}
+}
+
+// The lamps: red blinking outside the box, yellow blinking fast in the box too fast or too high, yellow steady while the winch holds
+static void lampCount(uint8_t m, uint8_t d, int16_t wDx, int16_t wDy, int16_t wVx, int *pYellow, int *pRed, uint8_t *pEverySteady) {
+	tDraw dr[DRAW_MAX];
+	*pYellow = *pRed = 0;
+	*pEverySteady = 1;
+	int16_t wCam = (int16_t)(siteLeftX(m) - 100);
+	for(int f = 0; f < 32; ++f) {
+		siteHold(m, wDx, wDy); g.chop.vx = wVx; g.cam = wCam;
+		step(NONE, 1);
+		g.cam = wCam;
+		uint8_t n = logicDraw(&g, dr), iLamps = 0;
+		for(uint8_t i = 0; i < n; ++i) {
+			if(dr[i].bob != BOB_PAD_LAMP) continue;
+			int16_t wWx = (int16_t)(dr[i].x + wCam);
+			int16_t x0 = siteBoxX0For(m, d), x1 = (int16_t)(x0 + s_pWchW[d] - 1);
+			CHECK(wWx == x0 - 5 || wWx == x1 + 1);   // (at the box's ends, whatever its width)
+			++iLamps;
+			if(dr[i].frame == PAD_LAMP_YELLOW) ++*pYellow; else ++*pRed;
+		}
+		if(iLamps != 2) *pEverySteady = 0;
+	}
+}
+
+static void testW2DeckLampsSayWhatTheWinchDoes(void) {
+	for(uint8_t m = 1; m <= 2; ++m) {
+		for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+			int iY, iR;
+			uint8_t isSteady;
+			siteWorld(m, d);
+			lampCount(m, d, 100, -30, 0, &iY, &iR, &isSteady);   // out: red, the blink hides them a quarter of the time
+			CHECK(iY == 0 && iR == 2 * 24 && !isSteady);
+			siteWorld(m, d);
+			lampCount(m, d, 0, 0, (int16_t)(s_pWchSpd[d] + 12), &iY, &iR, &isSteady);   // in the box, too fast: yellow, 4 frames on, 4 off
+			CHECK(g.winch == 0 && iR == 0 && iY == 2 * 16 && !isSteady);
+			siteWorld(m, d);
+			lampCount(m, d, 0, -(int16_t)(s_pWchH[d] - 10 + 6), 0, &iY, &iR, &isSteady);   // in the box's column but above it: not ready, not red (the way in)
+			CHECK(g.winch == 0 && iR == 0 && iY == 2 * 16 && !isSteady);
+			siteWorld(m, d);
+			lampCount(m, d, 0, 0, 0, &iY, &iR, &isSteady);   // winching: yellow, steady
+			CHECK(g.winch > 0 && iR == 0 && iY == 2 * 32 && isSteady);
+		}
+	}
+}
+
+// The deck group: ceil(waiting * 5 / 16) people waving; the one on the rope is not in it
+static uint8_t groupWant(uint8_t ubWaiting) { return (uint8_t)((ubWaiting * DECK_GROUP_MAX + DECK_PEOPLE - 1) / DECK_PEOPLE); }
+
+static uint8_t wavingDrawn(uint8_t m, int16_t *pX) {
+	tDraw dr[DRAW_MAX];
+	g.cam = (int16_t)(siteLeftX(m) - 100);
+	uint8_t n = logicDraw(&g, dr), iWave = 0;
+	for(uint8_t i = 0; i < n; ++i) {
+		if(dr[i].bob == BOB_HOSTAGE && (dr[i].frame == MAN_WAVE0 || dr[i].frame == MAN_WAVE1)) {
+			if(pX) pX[iWave] = (int16_t)(dr[i].x + g.cam - siteLeftX(m));
+			++iWave;
+		}
+	}
+	return iWave;
+}
+
+static void testW2DeckGroupThinsOut(void) {
+	for(uint8_t m = 1; m <= 2; ++m) {
+		siteWorld(m, 3);
+		siteHold(m, 100, -60);   // (away from the box: no winch)
+		uint8_t ubLast = 255;
+		for(int8_t left = DECK_PEOPLE; left >= 0; --left) {
+			g.deckLeft = (uint8_t)left;
+			uint8_t ubWant = groupWant((uint8_t)left);
+			CHECK(logicDeckGroup(&g) == ubWant);
+			int16_t pX[DRAW_MAX];
+			CHECK(wavingDrawn(m, pX) == ubWant);
+			for(uint8_t i = 0; i < ubWant; ++i) CHECK(pX[i] >= s_pMusterX[m - 1][DECK_GROUP_MAX - 1] && pX[i] <= s_pMusterX[m - 1][0]);
+			CHECK(ubWant <= ubLast);
+			ubLast = ubWant;
+		}
+		CHECK(groupWant(16) == 5 && groupWant(13) == 5 && groupWant(12) == 4 && groupWant(9) == 3 && groupWant(6) == 2 && groupWant(3) == 1 && groupWant(0) == 0);
+	}
+}
+
+// One person's 50 frames: the first DECK_WALK_FRAMES he runs from the group to the rope's foot (run frames, no climber), then he climbs (no runner)
+static void testW2DeckPersonRunsToTheRopeThenClimbs(void) {
+	tDraw dr[DRAW_MAX];
+	for(uint8_t m = 1; m <= 2; ++m) {
+		siteWorld(m, 3);
+		int16_t wCam = (int16_t)(siteLeftX(m) - 100);
+		int16_t wLast = 0, wStartX = 0;
+		uint8_t isFirst = 1, isSawClimb = 0;
+		for(int f = 0; f < DECK_ROPE_SET + DECK_PERSON_FRAMES - 2; ++f) {
+			siteHold(m, 10, 0); g.cam = wCam;
+			step(NONE, 1);
+			g.cam = wCam;
+			if(g.winch < DECK_ROPE_SET) continue;
+			uint8_t n = logicDraw(&g, dr), iRun = 0, iClimb = 0, iWave = 0;
+			int16_t wRunX = 0;
+			for(uint8_t i = 0; i < n; ++i) {
+				if(dr[i].bob == BOB_CLIMB) ++iClimb;
+				if(dr[i].bob == BOB_HOSTAGE) {
+					if(dr[i].frame == MAN_WAVE0 || dr[i].frame == MAN_WAVE1) ++iWave;
+					else { ++iRun; wRunX = (int16_t)(dr[i].x + wCam); CHECK(dr[i].frame == MAN_RUN0 || dr[i].frame == MAN_RUN1 || dr[i].frame == MAN_RUNL0 || dr[i].frame == MAN_RUNL1); }
+				}
+			}
+			CHECK(iWave == groupWant((uint8_t)(g.deckLeft - 1)));   // (the one on the rope is not in the group)
+			if(g.deckTimer < DECK_WALK_FRAMES) {
+				CHECK(iRun == 1 && iClimb == 0);
+				int16_t wTarget = (int16_t)(g.chop.x - 8);
+				if(isFirst) { wStartX = wRunX; isFirst = 0; wLast = (int16_t)(wTarget > wRunX ? wTarget - wRunX : wRunX - wTarget); }
+				int16_t wDist = (int16_t)(wTarget > wRunX ? wTarget - wRunX : wRunX - wTarget);
+				CHECK(wDist <= wLast);   // (he only gets closer)
+				CHECK(wLast - wDist <= 6);   // (a run, not a jump)
+				wLast = wDist;
+			}
+			else {
+				CHECK(iRun == 0 && iClimb == 1);
+				isSawClimb = 1;
+			}
+		}
+		CHECK(isSawClimb && !isFirst);
+		// he started in the group's line, at the slot it lost
+		int16_t wLo = (int16_t)(siteLeftX(m) + s_pMusterX[m - 1][DECK_GROUP_MAX - 1] - 4), wHi = (int16_t)(siteLeftX(m) + s_pMusterX[m - 1][DECK_GROUP_MAX - 1] + 4);
+		CHECK(wStartX >= wLo && wStartX <= wHi);   // (the full group: he steps out of its near end)
+	}
+}
+
+// One board per person, the count and the board event together; over a whole load the group thins in five steps to nothing
+static void testW2DeckLoadingCountsOnePerPerson(void) {
+	for(uint8_t m = 1; m <= 2; ++m) {
+		siteWorld(m, 3);
+		int iBoards = 0, iLastBoard = -1;
+		uint8_t ubShown = 255;
+		int iDrops = 0;
+		for(int f = 0; f < DECK_ROPE_SET + DECK_PEOPLE * DECK_PERSON_FRAMES + 30; ++f) {
+			siteHold(m, 0, 0);
+			step(NONE, 1);
+			if(g.events & EV_BOARD) {
+				++iBoards;
+				CHECK(g.aboard == iBoards && g.deckLeft == DECK_PEOPLE - iBoards);
+				CHECK(iLastBoard < 0 || f - iLastBoard == DECK_PERSON_FRAMES);   // (one every second)
+				iLastBoard = f;
+			}
+			uint8_t ubNow = wavingDrawn(m, 0);
+			CHECK(ubNow <= ubShown || ubShown == 255);
+			if(ubShown != 255 && ubNow < ubShown) ++iDrops;
+			ubShown = ubNow;
+		}
+		CHECK(iBoards == DECK_PEOPLE && g.aboard == DECK_PEOPLE && g.deckLeft == 0);
+		CHECK(iDrops == 5 && ubShown == 0);
+	}
 }
 
 // ---- the strait destroyer and the zone bonus (world 2 slice E, mission 6; SPEC 11 "World 2, slice 2", v1.24) ----
@@ -6423,6 +6738,16 @@ int main(void) {
 	testW2FreighterSinksAndLosesThePeopleLeft();
 	testW2FreighterBarAndStop();
 	testW2FreighterIsDrawn();
+	testW2WinchTablesBySkill();
+	testW2WinchBoxWidthBySkill();
+	testW2WinchSpeedLimitBySkill();
+	testW2WinchGraceKeepsTheRope();
+	testW2WinchCaptureRing();
+	testW2WinchSettles();
+	testW2DeckLampsSayWhatTheWinchDoes();
+	testW2DeckGroupThinsOut();
+	testW2DeckPersonRunsToTheRopeThenClimbs();
+	testW2DeckLoadingCountsOnePerPerson();
 	testW2ClearThenTheFreighterMission();
 	testW2DestroyerIsMission6Only();
 	testW2DestroyerTables();

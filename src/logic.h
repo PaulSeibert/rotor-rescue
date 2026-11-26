@@ -291,6 +291,8 @@ typedef struct { int16_t lo, hi; } tZone;
 #define DECK_HOVER_SPEED 8       // the most the chopper may move (1/16 px a frame, each axis) and still be hovering
 #define DECK_ROPE_SET 12         // frames of hover before the rope is down and a person starts to climb (the hook falls 2 px a frame)
 #define DECK_PERSON_FRAMES 50    // a person's climb: 8 people take 8 s
+#define DECK_WALK_FRAMES 22      // of those 50, the run from the group to the rope's foot (the rest is the climb)
+#define DECK_GROUP_MAX 5         // people drawn waving on deck, for all those waiting
 // World 2's sinking freighter (mission 6; SPEC 11, "World 2, slice 2", slice D): in the same sea gap, in place of the third barracks. A timer
 // (SINK_SECONDS by skill, in four stages: the BOB's frames) runs from the start of play; the winch box is the ship's hold, 20 px above the
 // coaming, and follows the tilt; when it sinks the people still aboard are lost
@@ -455,6 +457,7 @@ typedef struct {
 	uint8_t deckLeft;    // people still on it
 	uint8_t deckTimer;   // frames of the current person's climb (kept when the chopper drifts out)
 	uint8_t winch;       // frames the chopper has hovered in the box (0: not winching): a landed-class state
+	uint8_t winchSlip;   // frames the chopper has been out of the box with the rope still down (the skill's grace)
 	uint16_t sinkTimer, sinkTotal;   // the freighter: frames of play so far, and the whole timer (fixed at the mission's start)
 	uint8_t sinkStage;   // 0-3, a quarter of the timer each
 	uint8_t sunk;        // it has gone down
@@ -728,6 +731,12 @@ uint8_t logicGustsOn(const tGame *g);
 // The freighter's timer bar: 0 .. SINK_BAR_PX px for the time left (0 when there is no freighter or nobody aboard); the timer in seconds by skill
 uint8_t logicSinkBar(const tGame *g);
 uint8_t logicSinkSeconds(uint8_t ubDifficulty);
+// The winch window by skill (SPEC 11, "Winch and loading polish"; entry 0 = GODMODE = entry 3): px added to each side of slice C's 24 px box, px the
+// box's top is above its floor (20 on skill 5), the hover speed limit (1/16 px a frame), the frames the rope is kept out of the box, the capture
+// ring (px; 0 = no pull and no settle)
+extern const uint8_t g_pWinchGrow[6], g_pWinchUp[6], g_pWinchTol[6], g_pWinchGrace[6], g_pWinchCatch[6];
+void logicWinchBox(const tGame *g, int16_t *pX0, int16_t *pX1, int16_t *pTopY);   // the box at this skill: x0 .. x1 (the chopper's x) and its top y (its floor is the site's)
+uint8_t logicDeckGroup(const tGame *g);   // the people drawn waving on the deck: ceil(waiting * DECK_GROUP_MAX / DECK_PEOPLE)
 // The zones of the live sites (ubAll: of every site, for the card), cut to 0 .. W2_JET_SAFE_X: how many, in pOut (RADAR_MAX)
 uint8_t logicRadarZones(const tGame *g, tZone *pOut, uint8_t ubAll);
 // A mission's sites (0-2 within world 2: the x of each, up to RADAR_MAX; how many) and the zone of a site at x: for the card's
