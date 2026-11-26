@@ -1399,6 +1399,13 @@ art pass's planner (round 4, `w3-style` 24fbd28); the converter writes `src/worl
   way between the lodge and its pad; they run to the hangar at 2 px a frame. Landing is on a **pad bed** only (13.5); a pad that is not
   the base pad boards people but does not unload and does not repair. A lodge's roof (28 px above its bench) and the hangar's (40) are
   floors to stop on, not landings. The mission ends when 64 are saved or dead and nobody is aboard.
+- **Altitude above the floor.** `logicAltitude(g)`: the chopper's height over the floor under it (`GROUND_Y - y` in worlds 1 and 2,
+  the terrain's surface under the skids in world 3), never negative. The shadow's size and every world 3 rule below use it.
+- **Shadow on the terrain.** The chopper's shadow (`BOB_SHADOW`, size by altitude in 16 px steps as world 1's) is drawn on the surface
+  under the chopper (`logicW3SurfaceY(x) + 1`), not on `SHADOW_Y`; never on the card. **It is built and OFF by default** (`g->w3Shadow`;
+  Ctrl+L, V toggles it): in vAmiga (a500) one more BOB on a picture costs about 7 points of frame load (the shadow: 64 -> 57 % average at
+  rest, flight peaks 81 -> 90 %), and `tests/w3pilot.agk`'s flight is held to 85 %. Whether the shadow is worth that (or the world 3 limits
+  move) is Paul's call (open question 17); until then the gated build draws none.
 - **The card's first pictures** are the heaviest of the game (the strip fills under the card, every BOB is drawn for the first time, the HUD
   types): only the base pad is drawn at first (the radar's redraw is 6 pictures in, as before), then one thing at a time: the hangar at
   picture 9, the nests at 12, the radar's nest dots at 15, the strip map at 18 (`W3_CARD_*`; a BOB costs about 5 points of an A500
@@ -1420,6 +1427,13 @@ art pass's planner (round 4, `w3-style` 24fbd28); the converter writes `src/worl
   the site is cleared. The home nest is not a site (no bonus).
 - **Not built in this cut** (no art in the world 3 set; CONTENT-PLAN 4.3): missile trucks, AA guns on the benches, jets, wind, the
   radar peak, winch ledges. Mission 7 therefore has **one threat, the nest** (5 of them).
+- **Radar.** The HUD radar maps 4096 px at 3 / 64 (`logicRadarX3`: 192 px for the whole map): people, lodges (red when open), the
+  chopper, the camera, the hangar; the nests are red dots on the tank row.
+- **Card.** "FOOTHILLS", "64 HELD AT 4 HEIGHTS", the brief "A NEST WATCHES EACH LODGE"; the strip map shows the land (x / 16, exactly the
+  256 px), the base, the four lodges and pads and the chopper's marker.
+- **Hall of fame.** `reached` is the mission 1-9 (world * 3 + mission + 1); **all done is `HI_VICTORY` = 10** (it was `MISSIONS_TOTAL + 1`
+  = 7, which now collides with mission 7). `ubReachedMax` 10; a table saved with 7 meaning "all done" reads as mission 7 (a game
+  that could end in victory was never released). The table shows "MSN 7"-"MSN 9" and "ALL" for 10.
 - **Budgets.** No new chip beyond the lodge, nest, pad and shadow BOBs already loaded; frame load is the pilot's (26-47 % average on the
   a500), the worst picture is the first after the card's world load. Chip floors unchanged (13.4).
 
@@ -1444,6 +1458,8 @@ art pass's planner (round 4, `w3-style` 24fbd28); the converter writes `src/worl
     `W2_JET_FIRST`.) (Original question, v1.16: from the second trip? "AND JETS" on the card? skill 1-2 none or one a trip?)
 16. **The strait destroyer** (v1.24, slice E; studio defaults for Paul's playtest, decided by Paul 2026-11-24: the hull edit, one facing, the list frame kept, no destroyed state for the AA): it keeps station (no patrol: one facing is drawn); both turrets down disables the ship and silences the AA and the barrage (the plan says only "disable both turrets to open the way"); the AA is under its own limits (air only, one or two flak shots live) and not under the landed-chopper token; the barrage is 40 s of the chopper within 360 px, then every 30 s, and the turrets open (cut to 2 HP) at 90 s but keep firing; the turret's rest between shells 170 / 140 / 120 / 100 / 85 frames; a turret pays 150, the disabled ship 100 more (400); the zone bonus is +100 when the last radar site falls (no medal yet); the strait's two mission 6 gunboat slots are the destroyer's. Are the guns and the barrage fair and readable? Is the barrage too early or too soon repeated?
 10. Studio defaults awaiting a playtest gate (v1.5): the upgrade list and currency (4.5); the field pad on maps over 4000 px; world and mission names; the ending thresholds (90% / 60%) and tone, no named villain; music (own themes on cards, ending, credits); the tunnel; the scoring caps (first 6 kills a mission for trucks, AA and boats).
+
+17. **World 3 mission 7** (v1.43; studio defaults for Paul's playtest): (a) the shadow on the terrain is built but OFF: one more BOB costs about 7 points of a500 frame load and `tests/w3pilot.agk`'s flight is held to 85 % (peaks 90 % with it): turn it on and move the world 3 limits, or keep it off? (b) mission 7 has ONE threat, the nest (5 of them); missile trucks, AA guns on the benches and jets need art the world 3 set does not have: add them, or is the nest enough for the first world 3 mission? (c) the pad is the one 64 px width at every skill (world 2 scales it 96 -> 48 by skill; the art has one width). (d) the hangar is world 1's and 2's (white, a red cross): fine in the Highlands? (e) the nest never fires at a chopper landed on the base pad ("home is safe"): wanted?
 
 ## Version history
 

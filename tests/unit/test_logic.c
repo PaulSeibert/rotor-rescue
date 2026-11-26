@@ -3512,7 +3512,7 @@ static void testW2MissionsFollowWorld1(void) {
 	step(NONE, CLEAR_FRAMES + 1);
 	CHECK(g.state == GS_VICTORY);
 	// the hall of fame knows six missions and "all done"
-	CHECK(g_sHiConfig.ubReachedMax == MISSIONS_TOTAL + 1);
+	CHECK(g_sHiConfig.ubReachedMax == HI_VICTORY);
 	logicInit(&g);
 	logicStartAt(&g, 1, 1);
 	step(NONE, INTRO_FRAMES + 1);
@@ -6894,6 +6894,9 @@ static void testW3M7CardFirstPicturesAreLight(void) {
 		if(d[i].bob == BOB_HANGAR || d[i].bob == BOB_W3_NEST || d[i].bob == BOB_SHADOW) ++nOther;
 	}
 	CHECK(nPad >= 1 && nOther == 0);
+	g.w3Shadow = 1;   // (and the shadow too, if it is on)
+	n = logicDraw(&g, d);
+	for(uint8_t i = 0; i < n; ++i) CHECK(d[i].bob != BOB_SHADOW);
 	g.stateTimer = INTRO_FRAMES - W3_CARD_HANGAR;   // the hangar first, the nests a few pictures later
 	n = logicDraw(&g, d);
 	uint8_t nHangar = 0, nNest = 0;
@@ -6916,6 +6919,112 @@ static void testW3M7RespawnClearsTheAir(void) {
 	CHECK(g.state == GS_PLAY && g.chop.alive);
 	for(int i = 0; i < W3_NEST_MAX; ++i) CHECK(g.nestTell[i] == 0 && g.nestHp[i] == NEST_HP);
 	for(int k = 0; k < FLAK_MAX; ++k) CHECK(!g.pFlak[k].active);
+}
+
+// The altitude over the floor under the chopper: worlds 1 and 2 are GROUND_Y - y, world 3's is over its terrain
+static void testAltitudeAboveTheFloor(void) {
+	newGame();
+	flyAt(1000, 150);
+	CHECK(logicAltitude(&g) == GROUND_Y - 150);
+	g.chop.y = GROUND_Y + 5;
+	CHECK(logicAltitude(&g) == 0);
+	logicInit(&g);
+	logicStartAt(&g, 1, 0);
+	step(NONE, INTRO_FRAMES + 1);
+	flyAt(1000, 120);
+	CHECK(logicAltitude(&g) == GROUND_Y - 120);
+	m7Game(3);
+	int16_t x = m7PadCx(3);
+	m7Hold(x, (int16_t)(logicW3FloorAt(x) - 40), (int16_t)(x - 160));
+	CHECK(logicAltitude(&g) == 40);
+	m7Hold(2900, 100, 2740);   // over the valley before the summit
+	CHECK(logicAltitude(&g) == logicW3FloorAt(2900) - 100);
+	g.chop.y = (int16_t)(logicW3FloorAt(2900) + 3);
+	CHECK(logicAltitude(&g) == 0);
+}
+
+// The shadow falls on the terrain under the chopper (world 3), not on world 1's ground line
+static void testW3M7ShadowOnTheTerrain(void) {
+	m7Game(3);
+	CHECK(!g.w3Shadow);   // off by default: it costs about 7 points of frame load (SPEC 13.8)
+	{
+		int16_t x0 = m7PadCx(0);
+		m7Hold(x0, (int16_t)(logicW3FloorAt(x0) - 40), (int16_t)(x0 - 160));
+		tDraw d0[DRAW_MAX];
+		uint8_t n0 = logicDraw(&g, d0);
+		for(uint8_t i = 0; i < n0; ++i) CHECK(d0[i].bob != BOB_SHADOW);
+	}
+	g.w3Shadow = 1;
+	for(int b = 0; b < 4; ++b) {
+		int16_t x = m7PadCx((uint8_t)b);
+		m7Hold(x, (int16_t)(logicW3FloorAt(x) - 40), (int16_t)(x - 160));
+		tDraw d[DRAW_MAX];
+		uint8_t n = logicDraw(&g, d), iS = 0;
+		for(uint8_t i = 0; i < n; ++i) {
+			if(d[i].bob != BOB_SHADOW) continue;
+			++iS;
+			CHECK(d[i].y == logicW3SurfaceY(x) + 1);
+			CHECK((d[i].frame >> 1) == 1);   // 40 px up: size 1 (altitude / 16 = 2)
+		}
+		CHECK(iS == 1);
+	}
+	// world 1 keeps SHADOW_Y
+	newGame();
+	flyAt(1000, 180);
+	tDraw d[DRAW_MAX];
+	uint8_t n = logicDraw(&g, d), iS = 0;
+	for(uint8_t i = 0; i < n; ++i) if(d[i].bob == BOB_SHADOW) { ++iS; CHECK(d[i].y == SHADOW_Y); }
+	CHECK(iS == 1);
+}
+
+static void testW3M7RadarMapsTheWholeMap(void) {
+	CHECK(logicRadarX3(0) == 0 && logicRadarX3(W3_W - 1) == RADAR_W - 1 && logicRadarX3(2048) == 96);
+	uint8_t ubPrev = 0;
+	for(int x = 0; x < W3_W; ++x) { uint8_t r = logicRadarX3((int16_t)x); CHECK(r >= ubPrev && r < RADAR_W); ubPrev = r; }
+}
+
+static void testW3M7CardAndMap(void) {
+	m7Game(3);
+	CHECK(!strcmp(logicBrief(&g), "A NEST WATCHES EACH LODGE"));
+	tRouteMark pM[ROUTE_MARKS];
+	uint8_t n = logicRouteMap(&g, pM), nB = 0, nH = 0, nHere = 0, nP = 0, nLand = 0;
+	CHECK(n > 0 && n <= ROUTE_MARKS);
+	int xPrev = -1;
+	for(uint8_t i = 0; i < n; ++i) {
+		CHECK(pM[i].x + pM[i].w <= ROUTE_W);
+		if(pM[i].kind == ROUTE_BARRACKS) { ++nB; CHECK(pM[i].x > xPrev); xPrev = pM[i].x; CHECK(pM[i].x == (g.pBarracks[nB - 1].x >> 4) - 3); }
+		if(pM[i].kind == ROUTE_HANGAR) { ++nH; CHECK(pM[i].x == W3_HANGAR_X >> 4); }
+		if(pM[i].kind == ROUTE_HERE) { ++nHere; CHECK(pM[i].x == g.chop.x >> 4); }
+		if(pM[i].kind == ROUTE_PAD) ++nP;
+		if(pM[i].kind == ROUTE_ISLAND) { ++nLand; CHECK(pM[i].x == 0 && pM[i].w == ROUTE_W - 1); }
+	}
+	CHECK(nB == 4 && nH == 1 && nHere == 1 && nP == 5 && nLand == 1);
+}
+
+// The hall of fame: the mission reached is 1-9 and "all done" is 10 (it was 7: the same number as mission 7)
+static void testW3M7HallOfFameIndex(void) {
+	CHECK(HI_VICTORY == 10 && g_sHiConfig.ubReachedMax == HI_VICTORY);
+	m7Game(3);
+	g.score = 99999;
+	g.state = GS_OVER; g.stateTimer = 1;
+	step(NONE, 2);
+	CHECK(g.state == GS_ENTRY && g.hi.pEntries[g.newRank].reached == 7);
+	logicInit(&g);
+	logicStartAt(&g, W3_WORLD, 2);
+	step(NONE, INTRO_FRAMES + 1);
+	g.score = 99999;
+	g.state = GS_VICTORY; g.stateTimer = 1;
+	step(NONE, 2);
+	CHECK(g.state == GS_ENTRY && g.hi.pEntries[g.newRank].reached == HI_VICTORY);
+	// the file takes 7 (mission 7) and 10 (all done) and refuses 11
+	uint8_t pDisk[HI_BYTES];
+	logicInit(&g);
+	g.hi.pEntries[0].reached = 7; g.hi.pEntries[1].reached = HI_VICTORY;
+	hiPack(&g.hi, &g_sHiConfig, pDisk);
+	CHECK(hiUnpack(&g.hi, &g_sHiConfig, pDisk) && g.hi.pEntries[0].reached == 7 && g.hi.pEntries[1].reached == HI_VICTORY);
+	g.hi.pEntries[1].reached = HI_VICTORY + 1;
+	hiPack(&g.hi, &g_sHiConfig, pDisk);
+	CHECK(!hiUnpack(&g.hi, &g_sHiConfig, pDisk));
 }
 
 // World 3 mission 7 is a mission: 64 saved or dead, nobody aboard, clears it (the next card is mission 8's "not built")
@@ -7173,6 +7282,11 @@ int main(void) {
 	testW3M7NestHitPointsAndZone();
 	testW3M7RespawnClearsTheAir();
 	testW3M7CardFirstPicturesAreLight();
+	testAltitudeAboveTheFloor();
+	testW3M7ShadowOnTheTerrain();
+	testW3M7RadarMapsTheWholeMap();
+	testW3M7CardAndMap();
+	testW3M7HallOfFameIndex();
 	testW3M7ClearsAndGoesOn();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);

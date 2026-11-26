@@ -2596,6 +2596,7 @@ static void radarCreate(void) {
 	}
 }
 
+static void radarUpdate3(UBYTE ubBfr);
 static inline void radarClear(UBYTE ubBfr) {
 	agkBlitClear(agkBlitqSlot(), &s_pRadarArea[ubBfr]);
 	agkBlitqPush();
@@ -2792,7 +2793,7 @@ static void msgCentre(char *szOut, const char *szText) {
 __attribute__((noinline, optimize("Os"))) static void scoreRow(char *p, UBYTE i) {
 	const tHiScore *s = &s_sGame.hi.pEntries[i];
 	char szReached[HI_REACHED_W + 1] = "ALL";
-	if(s->reached <= MISSIONS_TOTAL) {
+	if(s->reached <= HI_MISSIONS) {
 		szReached[0] = 'M'; szReached[1] = 'S'; szReached[2] = 'N'; szReached[3] = ' ';
 		szReached[4] = (char)('0' + s->reached);
 		szReached[5] = 0;
@@ -3035,7 +3036,7 @@ __attribute__((noinline)) static void msgUpdateBody(UBYTE ubBfr, UWORD uwKey, UB
 				szA[8] = (char)('7' + g->mission);
 				szA[9] = 0;
 				pText[1] = pW3Name[g->mission];
-				pText[2] = "HARDWARE PILOT: THE TERRAIN STRIP";
+				pText[2] = g->mission ? "HARDWARE PILOT: THE TERRAIN STRIP" : "64 HELD AT 4 HEIGHTS";
 			}
 			else if(g->world) {
 				// world 2: its islands (the strip map goes between lines 1 and 2, as world 1's)
@@ -4383,11 +4384,12 @@ void genericProcess(void) {
 		(g_uwAgkBlitqNext <= uwRadarBlit || ((void)g_pCustom->dmaconr, g_pCustom->dmaconr & DMAF_BLTDONE))) {
 		agkBlitqPoll();
 	}
-	radarUpdate(ubBfr);
+	if(s_ubWorld == W3_WORLD) radarUpdate3(ubBfr);   // (world 3's radar: its 4096 px at 3 / 64; worlds 1 and 2 keep their own, as it was)
+	else radarUpdate(ubBfr);
 	hudDraw(ubBfr);
 
 	agkBlitqFinish();
-	if(s_sGame.state == GS_INTRO && !s_pRouteLit[ubBfr]) routeShow(ubBfr);
+	if(s_sGame.state == GS_INTRO && !s_pRouteLit[ubBfr] && !(s_ubWorld == W3_WORLD && s_sGame.stateTimer > INTRO_FRAMES - W3_CARD_MAP)) routeShow(ubBfr);   // (world 3: its map some pictures into the card, after the radar's redraw, the hangar and the nests)
 	else msgUpdate(ubBfr);   // (not both in one picture)
 	msgCoverAll(ubBfr);
 	if(s_ubOverrun) {
@@ -4459,8 +4461,145 @@ void genericDestroy(void) {
 	keyDestroy();
 }
 
+// ------------------------------------------------------------------------------------------------------ world 3's radar
+// radarUpdate for world 3 (SPEC 13.8): the same strip, x at 3 / 64 (RADAR_W for the whole 4096 px), the nests as red dots. A copy, here at the end: world 1 and 2 frames are at their limits
+__attribute__((noinline)) static void radarUpdate3(UBYTE ubBfr) {
+	const tGame *g = &s_sGame;
+	UBYTE *pTop = s_pRadarArea[ubBfr].pD;   // (a row is its top plus a constant: no table of the eight)
+#define ROW(y) (pTop + (y) * HUD_ROW_BYTES)
+	UBYTE isW2 = g->world;   // (its 4608 px at a 24th, not a 16th)
+	UBYTE isW3 = g->world == W3_WORLD;   // (world 3: its 4096 px at 3 / 64)
+#define RXW(x) (isW3 ? logicRadarX3(x) : isW2 ? logicRadarX2(x) : logicRadarX(x))
+	// the buildings (rows 5-6): only when a barracks has opened since
+	_Static_assert(BARRACKS_COUNT == 4, "radarUpdate: the open barracks, unrolled (a picture's cycles count)");
+	UBYTE ubOpen = (UBYTE)((g->pBarracks[0].hp == 0) | ((g->pBarracks[1].hp == 0) << 1) | ((g->pBarracks[2].hp == 0) << 2) |
+		((g->pBarracks[3].hp == 0) << 3) | (isW2 << 4) | (isW3 << 5));
+	// (a new mission's barracks are closed again: that redraw waits six pictures of its card, as the sites' below: the picture that starts a mission is the heaviest of the game)
+	if(ubOpen != s_pRadarBuildings[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {
+		s_ubRadarHeavy = 1;
+		s_pRadarBuildings[ubBfr] = ubOpen;
+		s_pRadarZones[ubBfr] = 0xFF;   // (rows 5-6 are cleared: the radar sites' dots are drawn again with the zones)
+		for(UBYTE y = 5; y < 7; ++y) {
+			UBYTE *p = ROW(y);
+			for(UBYTE i = 0; i < FB_BPP * RADAR_P1; i += RADAR_P1)
+				for(UBYTE k = 0; k < RADAR_W / 8 + 1; ++k) p[i + k] = 0;
+		}
+		UBYTE ubBase = isW3 ? logicRadarX3(W3_HANGAR_X) : isW2 ? logicRadarX2(W2_HANGAR_X) : logicRadarX(HANGAR_X);
+		radarDot(ROW(6), ubBase, 7);
+		radarDot(ROW(6), (UBYTE)(ubBase + 1), 7);
+		if(!isW2) {
+			radarDot(ROW(5), logicRadarX(BORDER_X), 3);
+			radarDot(ROW(6), logicRadarX(BORDER_X), 3);
+		}
+		for(UBYTE b = 0; b < BARRACKS_COUNT; ++b) {
+			UBYTE x = RXW(g->pBarracks[b].x);
+			UBYTE pen = (ubOpen >> b) & 1 ? 5 : 7;
+			radarDot(ROW(5), x, pen);
+			radarDot(ROW(5), (UBYTE)(x + 1), pen);
+			radarDot(ROW(6), x, pen);
+			radarDot(ROW(6), (UBYTE)(x + 1), pen);
+		}
+	}
+	// World 2's radar sites (missions 5-6): each standing site a white dot (pen 3, two wide, row 6) and, on the ground line (row 7,
+	// pen 2), each live jet zone in red (pen 5), cut where the base's approach begins. Drawn when a site falls or the mission changes,
+	// not in the first pictures of a card: the picture that starts a mission is the heaviest of the game, and these a few pictures
+	// later are not seen to lag
+	UBYTE ubZoneKey = 0;   // (world 1: nothing to draw, one test a picture)
+	if(isW2) {
+		ubZoneKey = (UBYTE)(0x40 | ((g->mission + 1) << 3));
+		for(UBYTE i = 0; i < g->radarCount; ++i) ubZoneKey |= (UBYTE)(g->pRadars[i].alive << i);
+		UBYTE ubBar = logicSinkBar(g);   // (mission 6: the freighter's time left, 0 when there is none or nobody aboard)
+		if(ubBar != s_pSinkBar[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {   // (not in the first pictures of the card, as the sites')
+			UBYTE ubOldBar = s_pSinkBar[ubBfr];
+			if(ubBar > ubOldBar) s_ubRadarHeavy = 1;   // (a shrinking bar is two pixels' work)
+			s_pSinkBar[ubBfr] = ubBar;
+			sinkBarDraw(pTop, ubBar, ubOldBar);
+		}
+	}
+	if(ubZoneKey != s_pRadarZones[ubBfr] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - 6)) {
+		s_ubRadarHeavy = 1;
+		s_pRadarZones[ubBfr] = ubZoneKey;
+		for(UBYTE i = 0; i < g->radarCount; ++i) {
+			UBYTE x = logicRadarX2(g->pRadars[i].x);
+			for(UBYTE d = 0; d < 2; ++d) {
+				UWORD uwX = (UWORD)(((RADAR_X0 + 16) & 7) + x + d);
+				UBYTE *pD = ROW(6) + (uwX >> 3);
+				UBYTE ubBit = (UBYTE)(0x80 >> (uwX & 7));
+				pD[0] &= (UBYTE)~ubBit; pD[RADAR_P1] &= (UBYTE)~ubBit; pD[RADAR_P2] &= (UBYTE)~ubBit;
+				if(g->pRadars[i].alive) radarDot(ROW(6), (UBYTE)(x + d), 3);
+			}
+		}
+		UBYTE *p = ROW(RADAR_H - 1);
+		for(UBYTE k = 0; k < RADAR_W / 8; ++k) { p[k] = 0; p[RADAR_P1 + k] = 0xFF; p[RADAR_P2 + k] = 0; }
+		tZone sZone[RADAR_MAX];
+		for(UBYTE i = 0, n = logicRadarZones(g, sZone, 0); i < n; ++i) radarBar(p, logicRadarX2(sZone[i].lo), logicRadarX2(sZone[i].hi));
+	}
+	UBYTE ubCam = RXW(g->cam);
+	radarDot(ROW(0), ubCam, 3);
+	radarDot(ROW(0), (UBYTE)(ubCam + (isW3 ? SCREEN_W * 3 / 64 : isW2 ? SCREEN_W / 24 : SCREEN_W / 16)), 3);
+	UBYTE *pPeople = ROW(3) + RADAR_P2;   // pen 4: plane 3 only
+	for(UBYTE k = 0; k < g->outCount; ++k) {
+		const tHostage *h = &g->pHostages[g->pOut[k]];
+		if(h->state != HS_DEAD) {
+			UWORD uwX = (UWORD)(((RADAR_X0 + 16) & 7) + RXW(h->x));
+			pPeople[uwX >> 3] |= (UBYTE)(0x80 >> (uwX & 7));
+		}
+	}
+	for(UBYTE i = 0; !isW2 && i < TANK_MAX; ++i) {
+		if(g->pTanks[i].active) radarDot(ROW(4), logicRadarX(g->pTanks[i].x), 5);
+	}
+	for(UBYTE i = 0; isW2 && i < BOAT_MAX; ++i) {
+		const tBoat *b = &g->pBoats[i];   // (world 2's boats: a gunboat red, a patrol boat stone)
+		if(b->active) radarDot(ROW(4), logicRadarX2(b->x), b->kind == BOAT_GUN ? 5 : 3);
+	}
+	for(UBYTE i = 0; isW3 && i < W3_NEST_MAX; ++i) {   // (world 3's nests: red dots on the tank row)
+		if(g->nestHp[i] && !(g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - W3_CARD_DOTS)) radarDot(ROW(4), logicRadarX3(logicW3NestCx(i)), 5);
+	}
+	WORD wRadarW = isW2 ? W2_W : WORLD_W;   // (world 2's jets: the same blips on its 4608 px)
+	for(UBYTE i = 0; i < JET_MAX; ++i) {
+		const tJet *pJet = &g->pJets[i];
+		WORD x = pJet->x;
+		if(!pJet->active) continue;
+		if(pJet->warn) {
+			// the incoming-jet warning (its first 2 s): the blip, wider and a row taller, flashes white,
+			// and holds at the radar's edge while the jet is still beyond the battlefield
+			x = x < 0 ? 0 : x >= wRadarW ? wRadarW - 1 : x;
+			if(g->frame & 8) {
+				UBYTE ubX = RXW(x);
+				radarDot(ROW(1), ubX, 7);
+				radarDot(ROW(2), ubX, 7);
+				radarDot(ROW(1), (UBYTE)(ubX + 1), 7);
+				radarDot(ROW(2), (UBYTE)(ubX + 1), 7);
+				continue;
+			}
+		}
+		if(x >= 0 && x < wRadarW) radarDot(ROW(1), RXW(x), 5);
+	}
+	for(UBYTE i = 0; !isW2 && i < MINE_MAX; ++i) {
+		WORD x = g->pMines[i].x;
+		if(g->pMines[i].active && x >= 0 && x < WORLD_W) radarDot(ROW(1), logicRadarX(x), 3);
+	}
+	if(!logicIsMenu(g) && g->state != GS_ENTRY) {
+		UBYTE x = RXW(g->chop.x);
+		UBYTE y = (UBYTE)((g->chop.y - CEIL_Y) >> 5);   // 0..6
+		if(y > RADAR_DYN_H - 1) y = RADAR_DYN_H - 1;
+		radarDot(ROW(y), x, 6);
+		radarDot(ROW(y), (UBYTE)(x + 1), 6);
+	}
+}
+#undef ROW
+#undef RXW
+
 // Ctrl+L, then V / J (the window skillKeys opened): the shadow on and off, and tests/w3m7.agk's hover over the next pad; 1: the key was one of them
 __attribute__((noinline, optimize("Os"))) static UBYTE skillKeysW3(void) {
+	if(keyUse(KEY_V)) {
+		// world 3's shadow on the terrain, off by default (SPEC 13.8: it costs about 7 points of frame load); on, to look at it and its cost
+		s_sGame.w3Shadow = !s_sGame.w3Shadow;
+		s_ubSkillKeyWait = 0;
+		agkState("w3 shadow", s_sGame.w3Shadow);
+		agkEnd();
+		return 1;
+	}
 	if(keyUse(KEY_J)) {
 		// world 3 (tests/w3m7.agk): hovering 30 px over the next pad, facing left: the four sites' pads, then the base pad, round again
 		static UBYTE s_ubJump;

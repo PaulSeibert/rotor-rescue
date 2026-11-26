@@ -78,6 +78,10 @@
 #define W3_CARD_DOTS 15
 #define W3_CARD_MAP 18
 #define MISSIONS_TOTAL (WORLD_COUNT * MISSION_COUNT)
+// The hall of fame knows the missions of all three worlds (1-9: world 3's are reached by the debug entry until it joins the game) and "all
+// done", which is no mission: HI_VICTORY (SPEC 13.8; it was MISSIONS_TOTAL + 1 = 7, which is mission 7 now)
+#define HI_MISSIONS 9
+#define HI_VICTORY (HI_MISSIONS + 1)
 #define W2_W 4608            // 288 tile columns of 16 px
 #define W2_START_X 4136      // on the base island's pad (art/world2/tilemap.txt: pad column 256, 80 px)
 #define W2_MAP_COLS (W2_W / 16)
@@ -525,6 +529,7 @@ typedef struct {
 	uint8_t nestCool[W3_NEST_MAX];   // frames to the next tell
 	uint8_t nestFlash[W3_NEST_MAX];  // frames of muzzle flash
 	uint8_t siteClear;               // a bit a site: its nest is down (the zone bonus was paid)
+	uint8_t w3Shadow;                // world 3's shadow on the terrain: OFF until Paul decides (SPEC 13.8: about 7 points of frame load); Ctrl+L, V toggles it
 } tGame;
 
 // events bits
@@ -734,6 +739,7 @@ static inline int16_t logicHangarX(const tGame *g) { return g->world ? (g->world
 uint8_t logicOnBasePad(const tGame *g, int16_t x);
 // World 3 (SPEC 13.8): the chopper's height over the floor under it (GROUND_Y - y in worlds 1 and 2; the terrain's surface under the skids in
 // world 3), never negative; x is over the base pad's bed; the nests' tell by skill (13.6) and where a nest stands (its centre x, its top y)
+int16_t logicAltitude(const tGame *g);
 uint8_t logicW3OnBasePad(int16_t x);
 uint8_t logicNestTell(const tGame *g);
 int16_t logicW3NestCx(uint8_t i);
@@ -981,7 +987,8 @@ void logicStripNew(int16_t wLo, int16_t wOldLo, uint8_t ubSpan, int16_t *pFrom, 
 static inline uint8_t logicRadarX(int16_t x) { return (uint8_t)(x >> 4); }
 // The same for world 2's 4608 px (x / 24, as a 16 x 16 multiply): x in 0..W2_W-1
 static inline uint8_t logicRadarX2(int16_t x) { return (uint8_t)(((uint32_t)(uint16_t)x * 2731u) >> 16); }
-
+// And world 3's 4096 px at 3 / 64 (192 px for the whole map; x * 3 fits 16 bits): x in 0..W3_W-1
+static inline uint8_t logicRadarX3(int16_t x) { return (uint8_t)(((uint16_t)x * 3u) >> 6); }
 
 // Mission palettes: sky gradient and band colours (copper)
 #define SKY_LINES 172

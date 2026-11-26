@@ -253,7 +253,7 @@ COLD void logicInit(tGame *g) {
 // The file keeps the table it always had: "RRH1", per entry the initials,
 // mission, hostages saved (2), score (4), a 16-bit sum: an old disk's table
 // reads as it is (tests/unit/test_logic.c has one)
-const tHiConfig g_sHiConfig = {"RRH1", MISSIONS_TOTAL + 1, "rrscores"};
+const tHiConfig g_sHiConfig = {"RRH1", HI_VICTORY, "rrscores"};
 
 COLD void logicScoresDefault(tGame *g) {
 	static const tHiScore pDefaults[HI_COUNT] = {
@@ -276,7 +276,7 @@ COLD static void gameEnded(tGame *g) {
 		g->titleArmed = 0;
 		return;
 	}
-	r = hiInsert(&g->hi, g->score, (uint8_t)(g->state == GS_VICTORY ? MISSIONS_TOTAL + 1 : g->world * MISSION_COUNT + g->mission + 1), g->savedTotal);
+	r = hiInsert(&g->hi, g->score, (uint8_t)(g->state == GS_VICTORY ? HI_VICTORY : g->world * MISSION_COUNT + g->mission + 1), g->savedTotal);
 	g->hiScore = hiTop(&g->hi);
 	g->newRank = r;
 	hiEditBegin(&g->edit, r, ENTRY_FRAMES);   // (fire held from the end screen doesn't choose a letter)
@@ -367,6 +367,7 @@ COLD static void padsSet(tGame *g);
 COLD static void w3Place(tGame *g);
 COLD static void w3Respawn(tGame *g);
 static void w3WorldUpdate(tGame *g);
+COLD static uint8_t routeMap3(const tGame *g, tRouteMark *pOut);
 COLD static void radarsPlace(tGame *g);
 COLD static void destroyerPlace(tGame *g);
 static uint16_t gustGap(tGame *g);
@@ -3592,7 +3593,7 @@ static const char *const s_pW2BriefJets[MISSION_COUNT] = {
 };
 
 COLD const char *logicBrief(const tGame *g) {
-	if(logicIsW3(g)) return g->mission ? "NOT BUILT: PILOT PALETTE" : "A PASS, A PAD, A NEST";
+	if(logicIsW3(g)) return g->mission ? "NOT BUILT: PILOT PALETTE" : "A NEST WATCHES EACH LODGE";
 	if(g->world) return logicJetsPossible(g) ? s_pW2BriefJets[g->mission] : s_pW2Brief[g->mission];
 	// the threats this mission starts with (trip 0, this difficulty)
 	if(logicMinesOn(g)) return "TANKS, JETS AND AIR MINES";
@@ -3643,7 +3644,7 @@ COLD uint8_t logicRouteMapFor(const tGame *g, uint8_t ubMission, tRouteMark *pOu
 }
 
 COLD uint8_t logicRouteMap(const tGame *g, tRouteMark *pOut) {
-	if(logicIsW3(g)) return 0;   // (the pilot's card has no map)
+	if(logicIsW3(g)) return routeMap3(g, pOut);
 	if(logicIsW2(g)) return routeMap2(g, g->mission, pOut);
 	uint8_t n = 0, ubFence = routeX(BORDER_X);
 	pOut[n++] = (tRouteMark){ROUTE_ENEMY, 0, ubFence};
@@ -3756,6 +3757,13 @@ static inline int16_t w3NestCx(uint8_t i) { return (int16_t)(g_pW3NestX[i] + NES
 int16_t logicW3NestCx(uint8_t i) { return i < W3_NEST_MAX ? w3NestCx(i) : 0; }
 int16_t logicW3NestTop(uint8_t i) { return i < W3_NEST_MAX ? (int16_t)(logicW3SurfaceY(w3NestCx(i)) - NEST_H_PX) : 0; }
 uint8_t logicW3OnBasePad(int16_t x) { return (uint8_t)(x >= W3_PAD_X && x < W3_PAD_X + W3_PAD_W && logicW3IsPad(x)); }
+
+// The chopper's height over the floor under it: the shadow's size, and the world 3 rules (worlds 1 and 2: the ground line)
+int16_t logicAltitude(const tGame *g) {
+	int16_t wFloor = g->world == W3_WORLD ? logicW3FloorAt(g->chop.x) : GROUND_Y;
+	int16_t wAlt = (int16_t)(wFloor - g->chop.y);
+	return wAlt < 0 ? 0 : wAlt;
+}
 
 // The nest's wind-up before a burst (SPEC 13.6: 26 / 22 / 18 / 16 / 14 on skill 1-5; GODMODE as normal)
 static const uint8_t s_pNestTell[DIFFICULTY_MAX + 1] = {18, 26, 22, 18, 16, 14};
@@ -3978,6 +3986,19 @@ __attribute__((noinline)) static void w3WorldUpdate(tGame *g) {
 	boomsUpdate(g);
 }
 
+// The card's map (x / 16: the whole 256 px): the land, the base, the lodges, the pads, the hangar, the chopper
+COLD static uint8_t routeMap3(const tGame *g, tRouteMark *pOut) {
+	uint8_t n = 0;
+	pOut[n++] = (tRouteMark){ROUTE_ISLAND, 0, ROUTE_W - 1};
+	pOut[n++] = (tRouteMark){ROUTE_HOME, (uint8_t)(W3_PAD_X >> 4), (uint8_t)((W3_HANGAR_X + 64 - W3_PAD_X) >> 4)};
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) pOut[n++] = (tRouteMark){ROUTE_BARRACKS, (uint8_t)((g->pBarracks[b].x >> 4) - 3), 7};
+	pOut[n++] = (tRouteMark){ROUTE_PAD, (uint8_t)(W3_PAD_X >> 4), (uint8_t)(W3_PAD_W >> 4)};
+	for(uint8_t b = 0; b < W3_SITES; ++b) pOut[n++] = (tRouteMark){ROUTE_PAD, (uint8_t)(g_pW3SitePadX[b] >> 4), (uint8_t)(W3_PAD_W >> 4)};
+	pOut[n++] = (tRouteMark){ROUTE_HANGAR, (uint8_t)(W3_HANGAR_X >> 4), 64 >> 4};
+	pOut[n++] = (tRouteMark){ROUTE_HERE, (uint8_t)(g->chop.x >> 4), 1};
+	return n;
+}
+
 // World 3's scenery (SPEC 13.8), the plain copies first (a building is drawn onto an empty buffer): the pads (the slab top is the bed's
 // floor, the skids rest on its second row), the lodges (intact, shot, burning), the hangar; then the nests
 COLD static uint8_t w3Draw(const tGame *g, tDraw *pOut, uint8_t n) {
@@ -3996,6 +4017,13 @@ COLD static uint8_t w3Draw(const tGame *g, tDraw *pOut, uint8_t n) {
 COLD static uint8_t logicDrawW3(const tGame *g, tDraw *pOut) {
 	uint8_t n = w3Draw(g, pOut, 0);
 	int16_t cam = g->cam;
+	if(g->w3Shadow && logicChopperVisible(g) && g->state != GS_INTRO) {   // (off by default: a BOB costs about 7 points of an A500 frame here; not on the card either: its first picture is the heaviest of the game)
+		static const uint8_t pSize[13] = {0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3};   // by altitude / 16, as world 1's
+		int16_t wAlt = logicAltitude(g);
+		if(wAlt > 12 * 16) wAlt = 12 * 16;
+		int16_t sx = (int16_t)(g->chop.x - cam - 16 + (wAlt >> 4));
+		n = drawAdd(pOut, n, sx, (int16_t)(logicW3SurfaceY(g->chop.x) + 1), BOB_SHADOW, (uint8_t)((pSize[wAlt >> 4] << 1) | (sx & 1)));
+	}
 	for(uint8_t i = 0; i < W3_NEST_MAX; ++i) {
 		if(!g->nestHp[i] || (g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - W3_CARD_NESTS)) continue;   // (the card's first pictures: the pad and the HUD only; see logic.h)
 		int16_t sx = (int16_t)(g_pW3NestX[i] - cam);
