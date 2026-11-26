@@ -59,9 +59,9 @@ def main(argv):
         diff = (exp != part).any(axis=2) & m
         # the scenery's and the chopper's boxes are not the strip: leave them out
         for o in objects:
-            if o["kind"] in ("pad", "nest", "lodge"):
+            if o["kind"] in ("pad", "nest", "lodge", "hangar"):
                 x0 = o["x"] - cam
-                w = o.get("w", 64) if o["kind"] == "pad" else (30 if o["kind"] == "nest" else 52)
+                w = o.get("w", 64) if o["kind"] == "pad" else (30 if o["kind"] == "nest" else 64 if o["kind"] == "hangar" else 52)
                 diff[:, max(0, x0):max(0, min(320, x0 + w))] = False
         # the chopper flies in the upper part: its box is at most 40 x 30 px, in these rows only when it is low
         total = int(m.sum())

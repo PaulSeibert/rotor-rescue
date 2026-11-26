@@ -6406,7 +6406,7 @@ static void testW3WallIsSolidFromTheSide(void) {
 	// a 70 degree flank: 44 px per 16, then 88, then the 100 px crest (columns 20-22), rock behind it
 	s_pH[20] = 0; s_pH[21] = 44; s_pH[22] = 88; s_pH[23] = 100;
 	for(int j = 24; j <= 40; ++j) s_pH[j] = 100;
-	w3Game(200, 200);                                       // flying right at y 200: the flank's toe is at y 236, its face above 200
+	w3Game(200, 180);                                       // flying right at y 180 (above the hangar's roof, y 196): the flank's toe is at y 236, its face above 180
 	tInput in = {0};
 	in.dx = 1;
 	uint8_t bumped = 0;
@@ -6420,7 +6420,7 @@ static void testW3WallIsSolidFromTheSide(void) {
 	CHECK(g.chop.x == wX150);                               // and stays there with the stick held: each frame's step is undone
 	CHECK(bumped);
 	CHECK(g.chop.alive && g.state == GS_PLAY);              // the bump costs speed, never damage
-	CHECK(g.chop.y == 200);                                 // it did not ride up the face
+	CHECK(g.chop.y == 180);                                 // it did not ride up the face
 }
 
 static void testW3GentleSlopeCarriesTheChopperUp(void) {
@@ -6540,6 +6540,392 @@ static void testStripStreamsEveryColumn(void) {
 			}
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// World 3, mission 7 as a mission (SPEC 13.8): the map's sites, the rescue loop, the roofs, the nests and their fairness, the shadow, the
+// altitude, the radar, the card and the hall of fame's mission index.
+
+static void m7Game(uint8_t ubSkill) {
+	logicW3UseMap(0, 0, 0);
+	logicInit(&g);
+	logicStartAt(&g, W3_WORLD, 0);
+	logicSetDifficulty(&g, ubSkill);
+	step(NONE, INTRO_FRAMES + 1);
+	g.spawnTimer = 60000;
+}
+
+// Airborne and still at (x, y) with the camera at cam: the nests see exactly this
+static void m7Hold(int16_t x, int16_t y, int16_t cam) {
+	g.chop.x = x; g.chop.y = y; g.chop.landed = 0; g.chop.vx = g.chop.vy = 0; g.chop.fx = g.chop.fy = 0;
+	g.cam = cam; g.spawnTimer = 60000;
+}
+static void m7Land(int16_t x, int16_t cam) {
+	g.chop.x = x; g.chop.y = logicW3FloorAt(x); g.chop.landed = 1; g.chop.vx = g.chop.vy = 0;
+	g.cam = cam; g.spawnTimer = 60000;
+}
+static int16_t m7PadCx(uint8_t b) { return (int16_t)(g.pBarracks[b].x + 64); }   // a pad's centre: 64 px right of its lodge's
+static int m7SurfaceH(int16_t x) { return GROUND_Y - logicW3SurfaceY(x); }
+static void m7NoNests(void) { for(int i = 0; i < W3_NEST_MAX; ++i) g.nestHp[i] = 0; }
+
+static void testW3M7MapHasFourSites(void) {
+	m7Game(3);
+	CHECK(g.world == W3_WORLD && g.mission == 0 && g.state == GS_PLAY);
+	CHECK(logicW3IsPad(W3_START_X) && logicW3GapOk(0, 0, 0));
+	CHECK(logicHangarX(&g) == W3_HANGAR_X && W3_HANGAR_X == W3_PAD_X + W3_PAD_W);
+	int h0 = m7SurfaceH(W3_START_X);
+	for(int x = W3_HANGAR_X; x <= W3_HANGAR_X + 64; x += 8) CHECK(m7SurfaceH((int16_t)x) == h0);   // the hangar's bench is level with the base pad
+	int hPrev = -100;
+	for(int b = 0; b < BARRACKS_COUNT; ++b) {
+		const tBarracks *pB = &g.pBarracks[b];
+		CHECK(pB->x > 0 && pB->x < W3_W && pB->hp == 2 && pB->released == 0);
+		int h = m7SurfaceH(pB->x);
+		CHECK(m7SurfaceH((int16_t)(pB->x - 26)) == h && m7SurfaceH((int16_t)(pB->x + 26)) == h);   // the lodge stands on a level bench
+		CHECK(logicW3IsPad(m7PadCx((uint8_t)b)) && m7SurfaceH(m7PadCx((uint8_t)b)) == h);          // and its pad bed is level with it
+		CHECK(!logicW3IsPad(pB->x));                                                                // the lodge is not a bed
+		CHECK(h >= hPrev + 25);                                                                     // four heights, each at least 25 px above the last
+		hPrev = h;
+		CHECK(pB->wx > pB->x && pB->wx < m7PadCx((uint8_t)b));                                      // the people wander between the lodge and its pad
+	}
+	CHECK(m7SurfaceH(g.pBarracks[0].x) < 10 && m7SurfaceH(g.pBarracks[3].x) > 90);                  // the valley floor and the summit
+	for(int i = 0; i < HOSTAGE_COUNT; ++i) CHECK(g.pHostages[i].home == i / HOSTAGES_PER_BARRACKS && g.pHostages[i].state == HS_INSIDE);
+	// the nests: the home nest left of the base pad, one a site, each on its flat tile
+	for(int i = 0; i < W3_NEST_MAX; ++i) {
+		CHECK(g.nestHp[i] == NEST_HP);
+		int16_t cx = logicW3NestCx((uint8_t)i);
+		CHECK(cx > 0 && cx < W3_W && logicW3NestTop((uint8_t)i) == logicW3SurfaceY(cx) - NEST_H_PX);
+		CHECK(logicW3SurfaceY((int16_t)(cx - 14)) == logicW3SurfaceY((int16_t)(cx + 14)));          // flat under it
+		if(i) CHECK(cx > logicW3NestCx((uint8_t)(i - 1)));
+	}
+	CHECK(logicW3NestCx(0) < W3_PAD_X);
+	// no other enemy in this cut
+	for(int i = 0; i < TANK_MAX; ++i) CHECK(!g.pTanks[i].active);
+	for(int i = 0; i < JET_MAX; ++i) CHECK(!g.pJets[i].active);
+	for(int i = 0; i < MINE_MAX; ++i) CHECK(!g.pMines[i].active);
+}
+
+// The loop: land on a site's pad, the people come out (at most 6 at once) and board; home on the base pad they unload and run into the hangar
+static void testW3M7RescueLoop(void) {
+	m7Game(3);
+	g.ghost = 1;
+	m7NoNests();
+	g.pBarracks[1].hp = 0;                       // the mid shelf's lodge is open
+	int iMaxOut = 0;
+	m7Land(m7PadCx(1), (int16_t)(m7PadCx(1) - 160));
+	for(int f = 0; f < 900 && g.aboard < CABIN_MAX; ++f) {
+		m7Land(m7PadCx(1), (int16_t)(m7PadCx(1) - 160));
+		step(NONE, 1);
+		if(g.outCount > iMaxOut) iMaxOut = g.outCount;
+	}
+	CHECK(g.aboard == CABIN_MAX && g.saved == 0);
+	CHECK(iMaxOut <= W3_OUT_MAX && iMaxOut >= 1);
+	// a site's pad is not home: nothing unloads, a hurt chopper is not mended
+	g.chop.damaged = 1;
+	for(int f = 0; f < 300; ++f) { m7Land(m7PadCx(1), (int16_t)(m7PadCx(1) - 160)); step(NONE, 1); }
+	CHECK(g.aboard == CABIN_MAX && g.saved == 0 && g.chop.damaged);
+	// the base pad: unloads, mends, and the people reach the hangar
+	for(int f = 0; f < 1200 && g.saved < CABIN_MAX; ++f) { m7Land(W3_START_X, (int16_t)(W3_START_X - 160)); step(NONE, 1); }
+	CHECK(g.saved == CABIN_MAX && g.aboard == 0 && !g.chop.damaged && g.trip == 1);
+	CHECK(logicW3OnBasePad(W3_START_X) && !logicW3OnBasePad(m7PadCx(1)) && !logicW3OnBasePad(W3_HANGAR_X + 30));
+	// all four lodges' people make the mission: 64 saved ends it
+	g.saved = HOSTAGE_COUNT;
+	step(NONE, 2);
+	CHECK(g.state == GS_CLEAR);
+}
+
+static void testW3M7PeopleOutAtOnce(void) {
+	m7Game(3);
+	g.ghost = 1;
+	m7NoNests();
+	for(int b = 0; b < BARRACKS_COUNT; ++b) g.pBarracks[b].hp = 0;
+	int iMax = 0, iEver = 0;
+	for(int f = 0; f < 500; ++f) {
+		m7Hold(g.pBarracks[3].x, 60, (int16_t)(g.pBarracks[3].x - 160));
+		step(NONE, 1);
+		if(g.outCount > iMax) iMax = g.outCount;
+		if(g.outCount == W3_OUT_MAX) iEver = 1;
+	}
+	CHECK(iMax <= W3_OUT_MAX && iEver);
+	// the people stand on the terrain: drawn on the bench, 12 px above its surface
+	tDraw d[DRAW_MAX];
+	g.cam = (int16_t)(g.pBarracks[3].x - 160);
+	uint8_t n = logicDraw(&g, d), iMen = 0;
+	for(uint8_t i = 0; i < n; ++i) {
+		if(d[i].bob != BOB_HOSTAGE) continue;
+		++iMen;
+		CHECK(d[i].y == logicW3SurfaceY((int16_t)(d[i].x + 8 + g.cam)) - 12);
+	}
+	CHECK(iMen >= 1);
+}
+
+// A lodge's roof and the hangar's are floors to stop on, at their own bench's height (not world 1's FEET_Y)
+static void testW3M7RoofsAreFloors(void) {
+	m7Game(3);
+	g.ghost = 1;
+	m7NoNests();
+	for(int b = 0; b < BARRACKS_COUNT; ++b) {
+		int16_t x = g.pBarracks[b].x;
+		int16_t wRoof = (int16_t)(logicW3SurfaceY(x) - W3_LODGE_ROOF);
+		m7Hold(x, (int16_t)(wRoof - 40), (int16_t)(x - 160));
+		for(int f = 0; f < 80; ++f) { g.cam = (int16_t)(x - 160); step((tInput){.dy = 1}, 1); }
+		CHECK(!g.chop.landed && g.chop.y == wRoof);
+	}
+	int16_t x = W3_HANGAR_X + 32, wRoof = (int16_t)(logicW3SurfaceY(x) - W3_HANGAR_ROOF);
+	m7Hold(x, (int16_t)(wRoof - 40), (int16_t)(x - 160));
+	for(int f = 0; f < 80; ++f) { g.cam = (int16_t)(x - 160); step((tInput){.dy = 1}, 1); }
+	CHECK(!g.chop.landed && g.chop.y == wRoof);
+	// and a bomb stops on a roof, where it blows
+	g.chop.alive = 1;
+	int16_t xL = g.pBarracks[2].x;
+	g.pBarracks[2].hp = 2;
+	g.pShots[0] = (tShot){.x = xL, .y = (int16_t)(logicW3SurfaceY(xL) - 80), .vy = 0, .active = 1, .kind = SHOT_BOMB, .life = 200};
+	for(int f = 0; f < 60 && g.pShots[0].active; ++f) { m7Hold((int16_t)(xL - 100), 100, (int16_t)(xL - 260)); step(NONE, 1); }
+	CHECK(!g.pShots[0].active && g.pBarracks[2].hp == 0);
+}
+
+// A wreck falls to the ground under it, not through the mountain to y 236
+static void testW3M7WreckLandsOnTheTerrain(void) {
+	m7Game(3);
+	int16_t x = m7PadCx(3);   // the summit
+	int16_t wFloor = logicW3FloorAt(x);
+	g.chop.x = x; g.chop.y = (int16_t)(wFloor - 50); g.chop.landed = 0; g.chop.alive = 0; g.chop.crashTimer = CRASH_FRAMES;
+	g.state = GS_LOST; g.stateTimer = LOST_FRAMES; g.lives = 2;
+	step(NONE, 60);
+	CHECK(g.chop.y > wFloor - 50 && g.chop.y <= wFloor);
+}
+
+static void testW3M7NestTables(void) {
+	static const uint8_t pWant[DIFFICULTY_MAX + 1] = {18, 26, 22, 18, 16, 14};
+	m7Game(3);
+	for(uint8_t d = 0; d <= DIFFICULTY_MAX; ++d) {
+		logicSetDifficulty(&g, d);
+		CHECK(logicNestTell(&g) == pWant[d]);
+		CHECK(logicNestTell(&g) >= 14);   // R4 (CONTENT-PLAN 4.1): a tell of at least 12 frames, with room for the ranging puff
+	}
+	logicSetDifficulty(&g, 0);
+	uint8_t a = logicNestTell(&g);
+	logicSetDifficulty(&g, DIFFICULTY_NORMAL);
+	CHECK(a == logicNestTell(&g));   // GODMODE plays as normal
+}
+
+// The nest tells (barrels up), then the ranging puff at the chopper (at least 12 frames), then the burst: tell frames after the tell began
+static void testW3M7NestTellsPuffsThenBursts(void) {
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		m7Game(d);
+		g.ghost = 1;
+		int16_t cx = logicW3NestCx(1), x = (int16_t)(cx - 130), y = 150;
+		int iTell = -1, iBurst = -1, iPuff = 0;
+		int16_t wPx = 0, wPy = 0;
+		for(int f = 0; f < 800 && iBurst < 0; ++f) {
+			m7Hold(x, y, (int16_t)(x - 140));
+			step(NONE, 1);
+			if(g.events3 & EV4_AATELL) { if(iTell < 0) iTell = f; }
+			uint8_t iAct = 0;
+			for(uint8_t k = 0; k < FLAK_MAX; ++k) if(g.pFlak[k].active) { ++iAct; wPx = g.pFlak[k].x; wPy = g.pFlak[k].y; }
+			if(iAct && iBurst < 0) ++iPuff;
+			if(g.events3 & EV4_AABURST) iBurst = f;
+		}
+		CHECK(iTell >= 0 && iBurst == iTell + logicNestTell(&g));
+		CHECK(iPuff >= 12 && iPuff <= AA_PUFF_MAX + 1);
+		CHECK(absi(wPx - x) <= 1 && absi(wPy - (y - 7)) <= 1);
+	}
+	// a burst on a chopper that sat still hurts it; one that moved away from the puff does not
+	m7Game(3);
+	g.ghost = 0;
+	int16_t cx = logicW3NestCx(1), x = (int16_t)(cx - 130);
+	int iBurst = -1;
+	for(int f = 0; f < 800 && iBurst < 0; ++f) { m7Hold(x, 150, (int16_t)(x - 140)); step(NONE, 1); if(g.events3 & EV4_AABURST) iBurst = f; }
+	CHECK(iBurst >= 0 && (g.chop.damaged || !g.chop.alive));
+	m7Game(3);
+	iBurst = -1;
+	int16_t wX = x;
+	for(int f = 0; f < 800 && iBurst < 0; ++f) {
+		m7Hold(wX, 150, (int16_t)(wX - 140));
+		step(NONE, 1);
+		for(uint8_t k = 0; k < FLAK_MAX; ++k) if(g.pFlak[k].active) wX = (int16_t)(x - 50);
+		if(g.events3 & EV4_AABURST) iBurst = f;
+	}
+	CHECK(iBurst >= 0 && !g.chop.damaged && g.chop.alive);
+}
+
+// How many frames until the first tell with the chopper held (landed or in the air), up to iMax (-1: none)
+static int m7FirstTell(int iMax, int iLanded, int16_t x, int16_t y, int16_t cam) {
+	for(int f = 0; f < iMax; ++f) {
+		if(iLanded) m7Land(x, cam); else m7Hold(x, y, cam);
+		step(NONE, 1);
+		if(g.events3 & EV4_AATELL) return f;
+	}
+	return -1;
+}
+
+// R1: a landed chopper is a target only after the dwell (never on skill 1-2); the base pad is safe at any dwell
+static void testW3M7NestGroundGrace(void) {
+	int16_t cx = logicW3NestCx(1);
+	int16_t xPad;
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		m7Game(d);
+		xPad = m7PadCx(0);
+		CHECK(xPad < cx && cx - xPad >= AA_MIN_DIST && cx - xPad < NEST_RANGE);
+		int i = m7FirstTell(1500, 1, xPad, 0, (int16_t)(xPad - 120));
+		uint16_t uwDwell = logicGroundDwell(&g);
+		if(uwDwell == GROUND_NEVER) CHECK(i < 0);
+		else CHECK(i >= (int)uwDwell - 2 && i <= (int)uwDwell + 130);
+	}
+	// home is safe: landed on the base pad, the home nest 80 px away on screen, at the hardest skill, a minute of it
+	m7Game(5);
+	CHECK(logicW3NestCx(0) < W3_START_X && W3_START_X - logicW3NestCx(0) >= AA_MIN_DIST);
+	CHECK(m7FirstTell(3000, 1, W3_START_X, 0, (int16_t)(W3_START_X - 120)) < 0);
+}
+
+// R2: no new tell inside the take-off grace; and the other limits: range, point-blank, on screen
+static void testW3M7NestOtherRules(void) {
+	int16_t cx = logicW3NestCx(1);
+	// the take-off grace: landed on a pad for 400 frames on skill 1 (the nest leaves it alone), then up
+	m7Game(1);
+	int16_t xPad = m7PadCx(0);
+	m7FirstTell(400, 1, xPad, 0, (int16_t)(xPad - 120));
+	CHECK(g.landFrames >= 399);
+	int iFirst = -1;
+	for(int f = 0; f < 400 && iFirst < 0; ++f) {
+		m7Hold(xPad, 150, (int16_t)(xPad - 120));
+		step(NONE, 1);
+		if(g.events3 & EV4_AATELL) iFirst = f;
+	}
+	CHECK(iFirst >= JET_TAKEOFF_GRACE - 2);
+	// range: 230 px away (the camera keeps it on screen): none; 55 px: none (point-blank); 60 px: yes
+	m7Game(3);
+	CHECK(m7FirstTell(700, 0, (int16_t)(cx - 230), 150, (int16_t)(cx - 230 - 60)) < 0);
+	m7Game(3);
+	CHECK(m7FirstTell(700, 0, (int16_t)(cx - 55), 150, (int16_t)(cx - 55 - 160)) < 0);
+	m7Game(3);
+	CHECK(m7FirstTell(700, 0, (int16_t)(cx - 60), 150, (int16_t)(cx - 60 - 160)) >= 0);
+	// off screen: 150 px away with the camera looking the other way: none
+	m7Game(3);
+	CHECK(m7FirstTell(700, 0, (int16_t)(cx - 150), 150, (int16_t)(cx - 150 - 300)) < 0);
+	// dead: a chopper that is down is not a target
+	m7Game(3);
+	g.chop.alive = 0;
+	CHECK(m7FirstTell(300, 0, (int16_t)(cx - 130), 150, (int16_t)(cx - 270)) < 0);
+}
+
+// R3: one attack at a time: a tell against a landed chopper takes the token for BOAT_ATTACK_GAP frames; another nest waits for it
+static void testW3M7NestOneAttackAtATime(void) {
+	m7Game(3);
+	int16_t xPad = m7PadCx(0);
+	g.landFrames = 400;
+	g.atkWait = 100;
+	g.atkLast = (uint8_t)(ATK_NEST + 4);
+	int iTell = -1;
+	for(int f = 0; f < 300 && iTell < 0; ++f) {
+		m7Land(xPad, (int16_t)(xPad - 120));
+		g.landFrames = 400;
+		step(NONE, 1);
+		if(g.events3 & EV4_AATELL) iTell = f;
+	}
+	CHECK(iTell >= 99 && iTell <= 100 + 70);
+	CHECK(g.atkWait > BOAT_ATTACK_GAP - 10 && g.atkLast == ATK_NEST + 1);
+	// the live tells never exceed the skill's limit
+	for(uint8_t d = 1; d <= DIFFICULTY_MAX; ++d) {
+		m7Game(d);
+		g.ghost = 1;
+		int16_t x = (int16_t)(logicW3NestCx(1) - 130);
+		int iMax = 0;
+		for(int f = 0; f < 1500; ++f) {
+			m7Hold(x, 150, (int16_t)(x - 140));
+			step(NONE, 1);
+			int n = 0;
+			for(int i = 0; i < W3_NEST_MAX; ++i) n += g.nestTell[i] != 0;
+			if(n > iMax) iMax = n;
+		}
+		CHECK(iMax >= 1 && iMax <= (d >= 4 ? 2 : 1));
+	}
+}
+
+static void m7Cannon(int16_t x, int16_t y) {
+	g.pShots[0] = (tShot){.x = x, .y = y, .vx = 0, .vy = 0, .active = 1, .kind = SHOT_CANNON, .life = 30};
+	g.chop.alive = 1;
+	m7Hold(g.chop.x, g.chop.y, g.cam);
+	step(NONE, 1);
+}
+
+static void testW3M7NestHitPointsAndZone(void) {
+	m7Game(3);
+	g.ghost = 1;
+	for(int i = 0; i < W3_NEST_MAX; ++i) g.nestCool[i] = 250;
+	g.chop.x = 3000; g.chop.y = 100; g.cam = 2840;
+	int16_t cx = logicW3NestCx(2);
+	int16_t cy = (int16_t)(logicW3NestTop(2) + NEST_H_PX / 2);
+	uint32_t ulScore = g.score;
+	m7Cannon(cx, cy);
+	CHECK(g.nestHp[2] == NEST_HP - 1 && g.score == ulScore && !g.pShots[0].active);
+	m7Cannon(cx, cy);
+	CHECK(g.nestHp[2] == NEST_HP - 2);
+	m7Cannon(cx, cy);
+	CHECK(g.nestHp[2] == 0 && g.score == ulScore + NEST_SCORE + ZONE_CLEAR_SCORE);
+	CHECK(g.bonusKind == BONUS_ZONE && g.bonusMsg > 0 && (g.siteClear & 2) && (g.events3 & EV4_ZONE));
+	// a dead nest is not hit again, and its zone pays once
+	m7Cannon(cx, cy);
+	CHECK(g.score == ulScore + NEST_SCORE + ZONE_CLEAR_SCORE);
+	// a bomb on a nest kills it at once (the third site's, 4 px beside it, on the ground it stands on)
+	int16_t cx3 = logicW3NestCx(3);
+	g.chop.x = (int16_t)(cx3 - 120); g.cam = (int16_t)(cx3 - 260);
+	g.pShots[0] = (tShot){.x = (int16_t)(cx3 + 4), .y = (int16_t)(logicW3NestTop(3) - 30), .vy = 0, .active = 1, .kind = SHOT_BOMB, .life = 200};
+	for(int f = 0; f < 80 && g.pShots[0].active; ++f) { m7Hold(g.chop.x, 60, g.cam); step(NONE, 1); }
+	CHECK(g.nestHp[3] == 0 && (g.siteClear & 4));
+	// the home nest pays its 100 and no zone
+	uint32_t ulS = g.score;
+	g.chop.x = 300; g.cam = 140;
+	int16_t cx0 = logicW3NestCx(0), cy0 = (int16_t)(logicW3NestTop(0) + NEST_H_PX / 2);
+	for(int k = 0; k < NEST_HP; ++k) m7Cannon(cx0, cy0);
+	CHECK(g.nestHp[0] == 0 && g.score == ulS + NEST_SCORE && !(g.siteClear & 1));
+}
+
+// The card's first pictures are the heaviest of the game (the strip fills, the BOBs are drawn for the first time, the HUD types): the base pad
+// alone is in them, the hangar, the nests and the shadow join some pictures in (w3pilot measured 100 % with them, 74 % without)
+static void testW3M7CardFirstPicturesAreLight(void) {
+	logicW3UseMap(0, 0, 0);
+	logicInit(&g);
+	logicStartAt(&g, W3_WORLD, 0);
+	CHECK(g.state == GS_INTRO && g.stateTimer == INTRO_FRAMES);
+	tDraw d[DRAW_MAX];
+	uint8_t n = logicDraw(&g, d), nPad = 0, nOther = 0;
+	for(uint8_t i = 0; i < n; ++i) {
+		if(d[i].bob == BOB_PAD64) ++nPad;
+		if(d[i].bob == BOB_HANGAR || d[i].bob == BOB_W3_NEST || d[i].bob == BOB_SHADOW) ++nOther;
+	}
+	CHECK(nPad >= 1 && nOther == 0);
+	g.stateTimer = INTRO_FRAMES - W3_CARD_HANGAR;   // the hangar first, the nests a few pictures later
+	n = logicDraw(&g, d);
+	uint8_t nHangar = 0, nNest = 0;
+	for(uint8_t i = 0; i < n; ++i) { nHangar += d[i].bob == BOB_HANGAR; nNest += d[i].bob == BOB_W3_NEST; }
+	CHECK(nHangar == 1 && nNest == 0);
+	g.stateTimer = INTRO_FRAMES - W3_CARD_NESTS;
+	n = logicDraw(&g, d);
+	nNest = 0;
+	for(uint8_t i = 0; i < n; ++i) nNest += d[i].bob == BOB_W3_NEST;
+	CHECK(nNest >= 1);   // the home nest is on the first screen
+}
+
+// A respawn starts clean: no tell running, no puff on the screen
+static void testW3M7RespawnClearsTheAir(void) {
+	m7Game(3);
+	g.nestTell[1] = 5;
+	g.pFlak[0].active = 1; g.pFlak[0].life = 3;
+	g.chop.alive = 0; g.state = GS_LOST; g.stateTimer = 1; g.lives = 2;
+	step(NONE, 2);
+	CHECK(g.state == GS_PLAY && g.chop.alive);
+	for(int i = 0; i < W3_NEST_MAX; ++i) CHECK(g.nestTell[i] == 0 && g.nestHp[i] == NEST_HP);
+	for(int k = 0; k < FLAK_MAX; ++k) CHECK(!g.pFlak[k].active);
+}
+
+// World 3 mission 7 is a mission: 64 saved or dead, nobody aboard, clears it (the next card is mission 8's "not built")
+static void testW3M7ClearsAndGoesOn(void) {
+	m7Game(3);
+	g.saved = HOSTAGE_COUNT - 1; g.killed = 1;
+	step(NONE, 2);
+	CHECK(g.state == GS_CLEAR);
+	step(NONE, CLEAR_FRAMES + 1);
+	CHECK(g.state == GS_INTRO && g.world == W3_WORLD && g.mission == 1);
 }
 
 int main(void) {
@@ -6774,6 +7160,20 @@ int main(void) {
 	testHintCappedAndSpaced();
 	testHintOffAfterThreeBombs();
 	testHintCountsKeptThroughAContinueResetByANewGame();
+	testW3M7MapHasFourSites();
+	testW3M7RescueLoop();
+	testW3M7PeopleOutAtOnce();
+	testW3M7RoofsAreFloors();
+	testW3M7WreckLandsOnTheTerrain();
+	testW3M7NestTables();
+	testW3M7NestTellsPuffsThenBursts();
+	testW3M7NestGroundGrace();
+	testW3M7NestOtherRules();
+	testW3M7NestOneAttackAtATime();
+	testW3M7NestHitPointsAndZone();
+	testW3M7RespawnClearsTheAir();
+	testW3M7CardFirstPicturesAreLight();
+	testW3M7ClearsAndGoesOn();
 	if(s_failures) {
 		printf("%d check(s) failed\n", s_failures);
 		return 1;

@@ -72,25 +72,63 @@ def header(L, world=""):
             + world + "\n\n" + palettes_header(L) + "\n\n#endif // _WORLD3_ART_H_\n")
 
 
-PILOT_COLS = 256          # the pilot map: 4096 px (W3_W); the art's M7 scene is its first 80 columns, then the land runs out flat
+PILOT_COLS = 256          # the map: 4096 px (W3_W)
 PEAK = 100
+PAD_PX = 64               # a pad: 4 columns (world 3's art has the one width)
+BASE_PAD_X = 144          # the base pad: columns 9-12
+HANGAR_COL = 13           # the base: pad columns 9-12, the hangar bench 13-16 (the people run in at its left edge)
+
+# Mission 7 (Foothills, SPEC 13.8): the base, then four sites at four heights, each a lodge bench (4 columns, the lodge 52 px in it), a pad
+# bench (4 columns) and a nest on a rise or a shelf beside them. Heights are the polyline's target y (GROUND_Y 236 is the valley floor):
+# the valley floor (y 232), a mid shelf (192), a plateau (164) and the summit (140). The art's own planner turns the polyline into columns
+# (it never gets lower than SUMMIT_Y + 4 = 138); the forced columns are flat benches, the pad beds are flagged.
+M7_SITES = [   # first column of the site's 8-column bench, the bench's y, the nest's first column (2 columns), snow tiles
+    dict(c0=40, y=232, nest=52, snow=False),
+    dict(c0=84, y=192, nest=96, snow=False),
+    dict(c0=136, y=164, nest=148, snow=True),
+    dict(c0=198, y=140, nest=210, snow=True),
+]
+M7_HOME_NEST_COL = 5      # the art's first-screens nest (x 81): the home nest, left of the base pad
+M7_PTS = [
+    (0, 168), (16, 150), (30, 140), (46, 142), (62, 162), (78, 170), (94, 170), (110, 196), (136, 212), (144, 214), (272, 214),
+    (320, 196), (368, 172), (400, 168), (432, 176), (500, 210), (580, 232), (640, 232), (784, 232),
+    (832, 212), (864, 212), (930, 222), (1010, 236), (1100, 236), (1180, 222), (1260, 200), (1344, 192), (1488, 192),
+    (1536, 172), (1568, 172), (1640, 190), (1720, 214), (1800, 230), (1900, 232), (2000, 215), (2090, 190), (2176, 164), (2320, 164),
+    (2368, 146), (2400, 146), (2460, 170), (2540, 200), (2640, 228), (2760, 232), (2880, 212), (2980, 180), (3080, 150), (3168, 140),
+    (3312, 140), (3392, 140), (3460, 160), (3560, 190), (3680, 215), (3800, 232), (3900, 236), (PILOT_COLS * 16 + 64, 236),
+]
 
 
 def pilot_terrain(art):
-    """The pilot's column plan: the style pass's own M7 scene (its polyline, its forced benches, its seed), extended to 256 columns.
-    -> (Terrain, objects of the scene). Keeping the art's planner means new art or a new M7 line drops in on the next run."""
+    """Mission 7's column plan: the art's own planner (Terrain), a polyline of ours, forced benches for the base and the four sites.
+    -> (Terrain, objects). Object kinds: pad (x, w, site: -1 the base), lodge (x, site), nest (x, site: -1 the home nest), hangar (x)."""
     sys.path.insert(0, os.path.join(art, "tools"))
     import w3compose as C   # noqa: E402
     import w3scenes as S    # noqa: E402
     sc = S.build(0, with_far=False)
     t0 = sc["terrain"]
-    pts = list(t0.pts)
-    x1, y1 = pts[-1]
-    for dx, y in ((120, 226), (220, 236)):          # down to the lowest ground, then flat to the end
-        pts.append((x1 + dx, y))
-    pts.append((PILOT_COLS * 16 + 64, 236))
-    ter = C.Terrain(t0.M, pts, t0.forced, ncols=PILOT_COLS, seed=t0.seed, pines=t0.pines)
-    return ter, sc["objects"]
+    forced = {M7_HOME_NEST_COL: "rock-flat", M7_HOME_NEST_COL + 1: "rock-flat"}
+    for c in range(9, 17):
+        forced[c] = "rock-bench"
+    objects = [dict(kind="pad", x=BASE_PAD_X, w=PAD_PX, site=-1), dict(kind="hangar", x=HANGAR_COL * 16),
+               dict(kind="nest", x=81, site=-1)]
+    for i, st in enumerate(M7_SITES):
+        bench, flat = ("snow-bench", "snow-flat") if st["snow"] else ("rock-bench", "rock-flat")
+        for c in range(st["c0"], st["c0"] + 8):
+            forced[c] = bench
+        forced[st["nest"]] = forced[st["nest"] + 1] = flat
+        objects.append(dict(kind="lodge", x=st["c0"] * 16 + 6, site=i))
+        objects.append(dict(kind="pad", x=(st["c0"] + 4) * 16, w=PAD_PX, site=i))
+        objects.append(dict(kind="nest", x=st["nest"] * 16 + 1, site=i))
+    ter = C.Terrain(t0.M, list(M7_PTS), forced, ncols=PILOT_COLS, seed=t0.seed, pines=t0.pines)
+    # the contract the game relies on: a bench is flat, a lodge and its pad stand level, a nest's two columns are flat
+    for c in sorted(forced):
+        col = ter.cols[c]
+        assert col["tile"]["lrow"] == col["tile"]["rrow"], "column %d is not flat" % c
+    for i, st in enumerate(M7_SITES):
+        ys = {ter.cols[c]["yl"] for c in range(st["c0"], st["c0"] + 8)}
+        assert len(ys) == 1, "site %d's bench is not level: %s" % (i, sorted(ys))
+    return ter, objects
 
 
 def map_header(ter, objects, L):
@@ -105,16 +143,21 @@ def map_header(ter, objects, L):
     for o in pads:
         for c in range(o["x"] // 16, (o["x"] + o["w"]) // 16):
             flags[c] |= 1
-    out = ["// Generated by art/tools/make_world3_disk.py from art/world3/ (the M7 scene's column plan) - do not edit.",
-           "// World 3's pilot map: the surface height (px above GROUND_Y) at each 16 px joint, a flag a column (bit 0: a pad bed),",
-           "// and the scenery (left edge x, in world px).",
+    base = [o for o in pads if o["site"] < 0][0]
+    sites = sorted([o for o in pads if o["site"] >= 0], key=lambda o: o["site"])
+    lodges = sorted([o for o in objects if o["kind"] == "lodge"], key=lambda o: o["site"])
+    nests = [o for o in objects if o["kind"] == "nest"]
+    hangar = [o for o in objects if o["kind"] == "hangar"][0]
+    out = ["// Generated by art/tools/make_world3_disk.py from art/world3/ (mission 7's column plan) - do not edit.",
+           "// World 3's map: the surface height (px above GROUND_Y) at each 16 px joint, a flag a column (bit 0: a pad bed),",
+           "// and mission 7's sites: lodges, pads, nests (left edge x, in world px; a pad's width is W3_PAD_W).",
            "#ifndef _WORLD3_MAP_H_", "#define _WORLD3_MAP_H_", "", "#include <stdint.h>", ""]
-    pad = pads[0]
-    out.append("#define W3_START_X %d      // the chopper's start: the middle of the first pad" % (pad["x"] + pad["w"] // 2))
-    for o in objects:
-        if o["kind"] in ("pad", "nest", "lodge"):
-            out.append("#define W3_%s_X %d" % (o["kind"].upper(), o["x"]))
-    out.append("#define W3_PAD_W %d" % pad["w"])
+    out.append("#define W3_SITES %d" % len(sites))
+    out.append("#define W3_NESTS %d          // the home nest first, then one a site" % len(nests))
+    out.append("static const int16_t g_pW3LodgeX[%d] = {%s};" % (len(lodges), ", ".join(str(o["x"]) for o in lodges)))
+    out.append("static const int16_t g_pW3SitePadX[%d] = {%s};" % (len(sites), ", ".join(str(o["x"]) for o in sites)))
+    out.append("static const int16_t g_pW3NestX[%d] = {%s};" % (len(nests), ", ".join(str(o["x"]) for o in nests)))
+    out.append("static const int8_t g_pW3NestSite[%d] = {%s};" % (len(nests), ", ".join(str(o["site"]) for o in nests)))
     out.append("static const uint8_t g_pW3Height[%d] = {" % (PILOT_COLS + 1))
     for i in range(0, len(heights), 16):
         out.append("\t" + ", ".join(str(v) for v in heights[i:i + 16]) + ",")
@@ -272,7 +315,10 @@ def world_header(offs, facts, L):
     o = ["#define W3_FAR_W %d" % FAR_W, "#define W3_FAR_H %d" % FAR_H, "#define W3_FAR_LOOP_W %d" % FAR_LOOP,
          "#define W3_STRIP_ROWS %d" % STRIP_ROWS, "#define W3_TILE_COUNT %d" % facts["tiles"], "#define W3_FILL_COUNT %d" % facts["fills"],
          "#define W3_FILL_ROW0 %d" % FILL_ROW0, "#define W3_FILL_ROWS %d" % (STRIP_ROWS - FILL_ROW0),
-         "#define W3_MAP_COLS %d" % PILOT_COLS]
+         "#define W3_MAP_COLS %d" % PILOT_COLS,
+         "#define W3_PAD_X %d          // the base pad's left edge (a bed of W3_PAD_W px)" % BASE_PAD_X, "#define W3_PAD_W %d" % PAD_PX,
+         "#define W3_START_X %d      // the chopper's start: the middle of the base pad" % (BASE_PAD_X + PAD_PX // 2),
+         "#define W3_HANGAR_X %d      // the hangar stands right of the base pad" % (HANGAR_COL * 16)]
     for k in ("far", "tiletab", "tiles", "fills", "plan"):
         o.append("#define WORLD3_%s_OFFS %d" % (k.upper(), offs[k][0]))
     o.append("#define WORLD3_FILLS_BYTES %d" % offs["fills"][1])

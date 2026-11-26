@@ -10,34 +10,38 @@
 #define W3_FAR_H 42
 #define W3_FAR_LOOP_W 320
 #define W3_STRIP_ROWS 126
-#define W3_TILE_COUNT 27
+#define W3_TILE_COUNT 25
 #define W3_FILL_COUNT 16
 #define W3_FILL_ROW0 21
 #define W3_FILL_ROWS 105
 #define W3_MAP_COLS 256
+#define W3_PAD_X 144          // the base pad's left edge (a bed of W3_PAD_W px)
+#define W3_PAD_W 64
+#define W3_START_X 176      // the chopper's start: the middle of the base pad
+#define W3_HANGAR_X 208      // the hangar stands right of the base pad
 #define WORLD3_FAR_OFFS 0
 #define WORLD3_TILETAB_OFFS 10080
-#define WORLD3_TILES_OFFS 10192
-#define WORLD3_FILLS_OFFS 14320
-#define WORLD3_PLAN_OFFS 24400
+#define WORLD3_TILES_OFFS 10184
+#define WORLD3_FILLS_OFFS 13768
+#define WORLD3_PLAN_OFFS 23848
 #define WORLD3_FILLS_BYTES 10080
 #define ART_W3_LODGE_W 52
 #define ART_W3_LODGE_H 32
 #define ART_W3_LODGE_FRAMES 3
 #define ART_W3_LODGE_BITMAP_W 64
-#define WORLD3_LODGE_OFFS 25168
+#define WORLD3_LODGE_OFFS 24616
 #define ART_W3_NEST_W 30
 #define ART_W3_NEST_H 24
 #define ART_W3_NEST_FRAMES 3
 #define ART_W3_NEST_BITMAP_W 32
-#define WORLD3_NEST_OFFS 27472
-#define WORLD3_NESTMASK_OFFS 28336
+#define WORLD3_NEST_OFFS 26920
+#define WORLD3_NESTMASK_OFFS 27784
 #define ART_W3_PAD64_W 64
 #define ART_W3_PAD64_H 46
 #define ART_W3_PAD64_FRAMES 1
 #define ART_W3_PAD64_BITMAP_W 64
-#define WORLD3_PAD64_OFFS 29200
-#define WORLD3_BYTES 30304
+#define WORLD3_PAD64_OFFS 28648
+#define WORLD3_BYTES 29752
 
 static const uint16_t g_pW3FarPal[3][8] = {
 	{0x000, 0x345, 0x456, 0x568, 0x78A, 0x9AC, 0xDDE, 0xFFF},

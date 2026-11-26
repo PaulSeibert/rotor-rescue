@@ -60,6 +60,23 @@
 #define W3_MIN_GAP 70            // the least air between a deck and the crest under it on the route (SPEC 13.2)
 #define W3_FLAG_PAD 1            // a column flag: a pad bed (flat, landable)
 #define W3_FLAG_MASSIF 2         // a column flag: a mass the route goes round (exempt from the air-gap rule)
+// World 3 mission 7 (SPEC 13.8): four sites (a lodge, its pad) at four heights, a nest beside each and one at home
+#define W3_NEST_MAX 5            // the home nest and one a site (world3_map.h asserts it)
+#define NEST_HP 3                // a cannon hit is 1, a bomb within NEST_BOMB_R kills
+#define NEST_SCORE 100
+#define NEST_RANGE 220           // its sight on x: no longer than a gunboat's
+#define NEST_W_PX 30             // its box (the BOB is 30 x 24); it stands on its flat tile
+#define NEST_H_PX 24
+#define NEST_BOMB_R 30
+#define W3_LODGE_ROOF 28         // a lodge's roof: a floor to stop on this far above its bench
+#define W3_HANGAR_ROOF 40
+#define ATK_NEST 0xE0            // atkLast when a nest started the attack (+ its index)
+// The card's first pictures are the heaviest of the game: the base pad only at first (the radar's redraw is 6 pictures in, main.c), then the
+// hangar, the nests, the radar's nest dots and the strip map one after another (pictures into the card: each BOB costs about 5 points of an A500 frame)
+#define W3_CARD_HANGAR 9
+#define W3_CARD_NESTS 12
+#define W3_CARD_DOTS 15
+#define W3_CARD_MAP 18
 #define MISSIONS_TOTAL (WORLD_COUNT * MISSION_COUNT)
 #define W2_W 4608            // 288 tile columns of 16 px
 #define W2_START_X 4136      // on the base island's pad (art/world2/tilemap.txt: pad column 256, 80 px)
@@ -88,6 +105,8 @@ extern const tIsland g_pIslands[W2_ISLANDS];
 // out as those boarded or killed leave the list. Every person on screen costs about 1.5 % of an A500
 // frame (draw, erase, update, the radar dot), and 16 on a beach beside a pad dropped frames.
 #define W2_OUT_MAX 6
+// World 3 mission 7: 4 out at once (SPEC 13.8): the world 3 base frame is heavier than world 2's, and six people boarding on a pad took a500 frames to 89 %
+#define W3_OUT_MAX 4
 // World 2's jets (SPEC 6, v1.16): none appear while the chopper is right of this x (the base island's approach: 336 px before its pad),
 // as world 1's stop at BORDER_X + 120
 #define W2_JET_SAFE_X 3800
@@ -500,6 +519,12 @@ typedef struct {
 	uint8_t zoneDone;    // the radar zone bonus was paid this mission
 	uint8_t quotaKind;   // what the HUD's quota line says while quotaMsg runs: 0 QUOTA 10, BONUS_ZONE, BONUS_DEST
 	uint8_t bonusMsg, bonusKind;     // the HUD line for a bonus: frames left, BONUS_*
+	// world 3 mission 7 (SPEC 13.8): the nests (index 0 the home nest, then one a site)
+	uint8_t nestHp[W3_NEST_MAX];     // 3 .. 0
+	uint8_t nestTell[W3_NEST_MAX];   // frames left of the wind-up before a burst (0: none)
+	uint8_t nestCool[W3_NEST_MAX];   // frames to the next tell
+	uint8_t nestFlash[W3_NEST_MAX];  // frames of muzzle flash
+	uint8_t siteClear;               // a bit a site: its nest is down (the zone bonus was paid)
 } tGame;
 
 // events bits
@@ -705,8 +730,14 @@ uint8_t logicPadAt(const tGame *g, int16_t x);
 // when the skill changes (it is asked every frame, by the landing, the unloading and the drawing)
 static inline uint8_t logicPadPx(const tGame *g, uint8_t ubIsland) { return g->padPx[ubIsland]; }
 // World 2's hangar and base pad, or world 1's: where the people run to, and the unloading
-static inline int16_t logicHangarX(const tGame *g) { return g->world ? W2_HANGAR_X : HANGAR_X; }
+static inline int16_t logicHangarX(const tGame *g) { return g->world ? (g->world == W3_WORLD ? W3_HANGAR_X : W2_HANGAR_X) : HANGAR_X; }
 uint8_t logicOnBasePad(const tGame *g, int16_t x);
+// World 3 (SPEC 13.8): the chopper's height over the floor under it (GROUND_Y - y in worlds 1 and 2; the terrain's surface under the skids in
+// world 3), never negative; x is over the base pad's bed; the nests' tell by skill (13.6) and where a nest stands (its centre x, its top y)
+uint8_t logicW3OnBasePad(int16_t x);
+uint8_t logicNestTell(const tGame *g);
+int16_t logicW3NestCx(uint8_t i);
+int16_t logicW3NestTop(uint8_t i);
 // Jets and a chopper on the ground: frames it must have sat landed (without a
 // break) before a jet may bomb it; GROUND_NEVER on skill 1-2 (they overfly it)
 uint16_t logicGroundDwell(const tGame *g);
@@ -950,6 +981,7 @@ void logicStripNew(int16_t wLo, int16_t wOldLo, uint8_t ubSpan, int16_t *pFrom, 
 static inline uint8_t logicRadarX(int16_t x) { return (uint8_t)(x >> 4); }
 // The same for world 2's 4608 px (x / 24, as a 16 x 16 multiply): x in 0..W2_W-1
 static inline uint8_t logicRadarX2(int16_t x) { return (uint8_t)(((uint32_t)(uint16_t)x * 2731u) >> 16); }
+
 
 // Mission palettes: sky gradient and band colours (copper)
 #define SKY_LINES 172

@@ -1384,6 +1384,45 @@ Measured in vAmiga (docs/WORLD3-HANDOFF.md has all of it): chip in play as in 13
 74 % (the picture after the card's world load); `disk/world3.bin` 30.3 KB, 13 KB packed; the strip streams pixel-exact against the art's
 raster at 5 camera offsets (`tools/check_w3strip.py`, a500 and a1200).
 
+### 13.8 Mission 7, Foothills, as a mission (v1.45; branch `w3-m7`)
+Status: **playable behind the debug entry** (Ctrl+L, W, 7; `WORLD_COUNT` stays 2, so the game does not walk into it). Missions 8 and 9
+keep their "not built" card on the same map (their palettes only). The map is `art/tools/make_world3_disk.py`'s `M7_PTS` through the
+art pass's planner (round 4, `w3-style` 24fbd28); the converter writes `src/world3_map.h` (heights, pad flags, lodge / pad / nest x).
+- **Map (4096 px, 256 columns).** The base pad's bed is columns 9-12 (x 144-207, the only home: unloading and the repair), the hangar
+  stands right of it on a flat bench (x 208, the people run in at its left edge + 12, as in world 2). Four sites follow, each an 8-column
+  flat bench (the lodge in its first four columns, the pad bed in the last four: they stand level), at four heights (px above
+  `GROUND_Y`): **valley floor 3, mid shelf 43, plateau 70, summit 97**, at x 640 / 1344 / 2176 / 3168. A nest stands on a flat two-column
+  rise or shelf beside each site (x 833 / 1537 / 2369 / 3361) and one, the home nest, left of the base pad (x 81, the art's first screens).
+  There is no cloud deck in mission 7, so the air-gap rule (13.2) holds trivially; `logicW3GapOk` still passes.
+- **People.** 64 people, 16 a lodge (`pBarracks[b]`, the lodge BOB: intact, shot, burning = hp 2, 1, 0; a cannon hit is 1, a bomb within
+  30 px 2). A landed chopper calls people within `W2_CALL_RANGE` (160); at most `W3_OUT_MAX` (4; world 2 has 6) are out at once; they wander about half
+  way between the lodge and its pad; they run to the hangar at 2 px a frame. Landing is on a **pad bed** only (13.5); a pad that is not
+  the base pad boards people but does not unload and does not repair. A lodge's roof (28 px above its bench) and the hangar's (40) are
+  floors to stop on, not landings. The mission ends when 64 are saved or dead and nobody is aboard.
+- **The card's first pictures** are the heaviest of the game (the strip fills under the card, every BOB is drawn for the first time, the HUD
+  types): only the base pad is drawn at first (the radar's redraw is 6 pictures in, as before), then one thing at a time: the hangar at
+  picture 9, the nests at 12, the radar's nest dots at 15, the strip map at 18 (`W3_CARD_*`; a BOB costs about 5 points of an A500
+  frame; w3pilot measured 100 % and a dropped frame with them all in the first picture). The first picture after the world's load also
+  varies by up to 15 points from run to run (the disk's last DMA): 75-91 % with the same build.
+- **The nest** (CONTENT-PLAN 4.4, "AA gun site", on a peak; SPEC 13.6): 3 HP (a cannon hit 1, a bomb within 30 px kills), 100 points,
+  30 x 24 px, standing on its flat tile (`logicW3SurfaceY(x + 15) - 24`); not drawn while less than 8 px of it is on screen. It attacks with **flak**: a tell of 18 (GODMODE) / 26 / 22 / 18
+  / 16 / 14 frames (13.6; the barrels up: frame 1), a **ranging puff** (a `BOB_SMOKE` big puff) at the chopper's position for the last
+  `AA_PUFF_MAX` (14) frames of the tell (or the whole tell when it is shorter; the muzzle flash, frame 2, shows for `AA_FLASH` frames
+  as the puff appears), then the burst at the end of the tell (a boom, radius `FLAK_RADIUS` 18: the chopper is hurt if its box is in it). The puff stays where it was: a chopper that moves
+  more than the radius in those frames is not hit. Rest after a burst: `logicAaGap` (120 / 100 / 85 / 70 / 60 by skill 1-5, +0-15).
+  Targets: the chopper alive, the nest on screen, its distance between `AA_MIN_DIST` (56) and `NEST_RANGE` (220) on x. **Fairness:**
+  R1: a landed chopper is a target only after `logicGroundDwell` frames landed (never on skill 1-2; 300 / 200 / 150 on 3-5); R2: none
+  for `JET_TAKEOFF_GRACE` (100) frames after take-off (`airGrace`); **home is safe**: a chopper landed on the base pad is never a target;
+  R3: one tell at a time on skill 1-3, two on 4-5 (`logicAaLive`), and after a tell against a landed chopper no other starts for
+  `BOAT_ATTACK_GAP` (150), against a flying one for `AA_PAIR_GAP` (40); R4: every tell is at least 14 frames (unit-tested over
+  every skill); R5: the ranging puff marks the impact. A chopper over a nest closer than 56 px is safe from it.
+- **Zone clear.** A site's nest down pays 100 (the nest) and +100 (`ZONE_CLEAR_SCORE`, the HUD's left slot says ZONE CLR for 150 frames):
+  the site is cleared. The home nest is not a site (no bonus).
+- **Not built in this cut** (no art in the world 3 set; CONTENT-PLAN 4.3): missile trucks, AA guns on the benches, jets, wind, the
+  radar peak, winch ledges. Mission 7 therefore has **one threat, the nest** (5 of them).
+- **Budgets.** No new chip beyond the lodge, nest, pad and shadow BOBs already loaded; frame load is the pilot's (26-47 % average on the
+  a500), the worst picture is the first after the card's world load. Chip floors unchanged (13.4).
+
 ## Open questions for Paul
 
 (Numbers are kept from before. Questions 2, 4, 5 and 7 are decided, decided by Paul, 2026-11-11: see v1.2.)
@@ -1442,3 +1481,4 @@ raster at 5 camera offsets (`tools/check_w3strip.py`, a500 and a1200).
 | v1.42 | 2026-11-24 | the rotor's Paula channel is claimed in ptplayer (section 9, "Rotor channel claim"): a third effect at once (the HQ drop-off) no longer takes channel 2 and leaves the "saved" arpeggio looping where the rotor was; not a design change, no rotor number changes, +2 bytes of chip; `tests/hqsound.agk`, `sound/tools/check_rotor_back.py`, debug key Ctrl+L, J; `tests/w2patrol.agk` `expect-max-load` 85 -> 90 (decided by Paul, 2026-11-25): the claim adds about 4 points (83 -> 86-87 on the a500 and a500-ks31) to the first 50-frame window after world 2 loads, where `musicFor` stops the theme and re-claims the rotor channel; steady-state load and the average (40) are unchanged and no frame drops; deferring the re-claim was tried and broke the a500 world-2 load wait, so the limit moved instead |
 | v1.43 | 2026-11-25 | the base ocean animation (section 11, "Base ocean animation"): the terrain strip water in three colour-cycled pens (swell, counter-wave, breathing), art regenerated (terrain_tiles.txt, disk/world2.bin), 3 palette MOVEs patched in quiet pictures, the two lists kept within one step of each other (flicker fix, `logicBasePenKey`, `bspread`); no chip, no copper entry, no feel numbers; tests/w2base.agk, testBaseWave, testBaseFlicker, tests/w2play.agk bspread; goldens of the strip rows (208-255) re-recorded in world 2 scenarios on all four profiles; `w2play` limit 85 -> 88 by Paul 2026-11-26 (main 84, ocean +1, rotor claim +1); a500 load 369 ticks on main, 402 here, world-2 load waits 525 |
 | v1.44 | 2026-11-25 | World 2 winch and loading polish (branch `w2-freighter-ux`; section 11, "Winch and loading polish"; Paul's playtest 2026-11-25): the winch window by skill (box 56 / 48 / 40 / 32 / 24 px wide, 36 / 32 / 28 / 24 / 20 tall, hover speed 1.5 / 1.25 / 1.0 / 0.75 / 0.5 px/frame, rope kept 24 / 18 / 12 / 6 / 0 frames out of the box, a capture ring and a settle on skill 1-3; skill 5 is as before), lamps that show the winch's state (red, fast yellow, steady yellow), and the people on deck loading one at a time (the group thins, a person runs to the rope, climbs, boards: ABOARD and the board sound per person). Same rate, no chip. Studio proposal pending Paul's playtest. (v1.42 is on the branches `hqsound-fix` and `w2-base-ocean`, not merged: expect a docs conflict in this table.) |
+| v1.45 | 2026-11-25 | World 3 mission 7 as a mission (branch `w3-m7`; section 13.8): the 4096 px map with the base, the hangar and four sites at four heights, the lodges and their people, the AA nest (tell, ranging puff, burst, ground-threat fairness, zone clear), the shadow on the terrain, `logicAltitude`, the radar at 3/64, the card and its map, the hall of fame's mission index 7-9 (`HI_VICTORY` 10). The converter re-run against the round-4 art. Debug entry only; trucks, AA guns, jets and wind not built (no art). `tests/w3m7.agk`, `tests/unit/test_logic.c` testW3M7* |

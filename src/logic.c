@@ -364,6 +364,9 @@ COLD void logicChopperRespawn(tGame *g) {
 // from afar): a stretch of sea each, the armed ones from the skill that meets them. A boat
 // keeps its slot whether it is there or not (a lower skill leaves the slot empty).
 COLD static void padsSet(tGame *g);
+COLD static void w3Place(tGame *g);
+COLD static void w3Respawn(tGame *g);
+static void w3WorldUpdate(tGame *g);
 COLD static void radarsPlace(tGame *g);
 COLD static void destroyerPlace(tGame *g);
 static uint16_t gustGap(tGame *g);
@@ -414,8 +417,8 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	g->wxDrift = 0;
 	// (world 2's barracks stand on its four islands, the people wander about half way to the pad)
 	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
-		g->pBarracks[b].x = logicIsW3(g) ? (int16_t)-1000 : logicIsW2(g) ? g_pIslands[b].barracksX : s_pBarracksX[b];   // (world 3's pilot: no barracks)
-		g->pBarracks[b].wx = logicIsW2(g) ? (int16_t)((g_pIslands[b].barracksX + g_pIslands[b].padX) >> 1) : g->pBarracks[b].x;
+		g->pBarracks[b].x = logicIsW3(g) ? (int16_t)(g_pW3LodgeX[b] + 26) : logicIsW2(g) ? g_pIslands[b].barracksX : s_pBarracksX[b];   // (world 3: the lodge's centre; its pad is 64 px right of it)
+		g->pBarracks[b].wx = logicIsW3(g) ? (int16_t)(g->pBarracks[b].x + 32) : logicIsW2(g) ? (int16_t)((g_pIslands[b].barracksX + g_pIslands[b].padX) >> 1) : g->pBarracks[b].x;
 		g->pBarracks[b].hp = 2;
 		g->pBarracks[b].released = 0;
 		g->pBarracks[b].timer = 0;
@@ -456,6 +459,7 @@ COLD void logicStartMission(tGame *g, uint8_t ubMission) {
 	boatsPlace(g);
 	radarsPlace(g);
 	destroyerPlace(g);
+	if(logicIsW3(g)) w3Place(g);
 	g->gustTell = g->gustOn = g->gustFx = 0;   // (the wind: its first tell no sooner than GUST_FIRST frames into the mission)
 	if(!g->gustSeed) g->gustSeed = 0xB5E1;
 	g->gustTimer = (uint16_t)(GUST_FIRST + gustGap(g) - GUST_GAP_MIN);
@@ -677,7 +681,7 @@ COLD static uint8_t basePadW2(const tGame *g, int16_t x) {
 
 // (world 1's base pad stays two compares: this runs every frame)
 static inline uint8_t onBasePad(const tGame *g, int16_t x) {
-	return g->world ? (logicIsW3(g) ? logicW3IsPad(x) : basePadW2(g, x)) : (x >= BASE_PAD_X0 && x <= BASE_PAD_X1);
+	return g->world ? (logicIsW3(g) ? logicW3OnBasePad(x) : basePadW2(g, x)) : (x >= BASE_PAD_X0 && x <= BASE_PAD_X1);
 }
 
 uint8_t logicOnBasePad(const tGame *g, int16_t x) {
@@ -970,7 +974,7 @@ __attribute__((noinline)) static void hostagesUpdate(tGame *g) {
 		switch(h->state) {
 			case HS_FREE: {
 				int16_t dx = (int16_t)(c->x - h->x);
-				if(isCalling && absw(dx) < (logicIsW2(g) ? W2_CALL_RANGE : HOSTAGE_CALL_RANGE)) {
+				if(isCalling && absw(dx) < (g->world ? W2_CALL_RANGE : HOSTAGE_CALL_RANGE)) {
 					h->state = HS_TO_CHOPPER;
 					break;
 				}
@@ -1010,7 +1014,7 @@ __attribute__((noinline)) static void hostagesUpdate(tGame *g) {
 				h->anim = (uint8_t)((s > 0 ? MAN_RUN0 : MAN_RUNL0) + ((g->frame >> 2) & 1));
 			} break;
 			case HS_TO_HANGAR: {
-				h->x = (int16_t)(h->x + (logicIsW2(g) ? 2 : 1));   // (world 2: a quicker run, fewer people on screen at once)
+				h->x = (int16_t)(h->x + (g->world ? 2 : 1));   // (worlds 2 and 3: a quicker run, fewer people on screen at once)
 				h->anim = (uint8_t)(MAN_RUN0 + ((g->frame >> 2) & 1));
 				if(h->x >= logicHangarX(g) + 12) {
 					h->state = HS_SAVED;
@@ -1144,7 +1148,9 @@ static void chopperDestroy(tGame *g) {
 static void w3ChopperTerrain(tGame *g, int16_t wPrevX);
 static uint8_t logicDrawW3(const tGame *g, tDraw *pOut);
 // The highest the skids may go down to at x: the ground, or a roof
+static int16_t w3Floor(const tGame *g, int16_t x, uint8_t *pIsGround);
 static int16_t floorAt(const tGame *g, int16_t x, uint8_t *pIsGround) {
+	if(g->world == W3_WORLD) return w3Floor(g, x, pIsGround);   // (world 3: the height map, the lodges' and the hangar's roofs; a landing only on a pad bed)
 	*pIsGround = 1;
 	if(g->deckOn && x >= siteLeft(g) + 3 && x < siteLeft(g) + 122) {   // the ship's deck, the freighter's hold: a floor to stop on, not a landing (the sea once it has sunk)
 		*pIsGround = 0;
@@ -1161,11 +1167,6 @@ static int16_t floorAt(const tGame *g, int16_t x, uint8_t *pIsGround) {
 		return FEET_Y - 40;
 	}
 	if(g->world) {
-		// world 3: the height map (SPEC 13.5): the skids stop at the highest surface under them, a landing only on a pad bed
-		if(g->world == W3_WORLD) {
-			*pIsGround = logicW3IsPad(x);
-			return logicW3FloorAt(x);
-		}
 		// world 2: a pad is a landing; the beach, the palms and the sea are floors to stop on
 		*pIsGround = logicPadAt(g, x) != 0xFF;
 	}
@@ -1405,14 +1406,15 @@ void logicChopperUpdate(tGame *g, const tInput *pIn) {
 static void chopperWreckUpdate(tGame *g) {
 	tChopper *c = &g->chop;
 	if(c->crashTimer) --c->crashTimer;
-	if(c->y < GROUND_Y) {
+	int16_t wGround = g->world == W3_WORLD ? logicW3FloorAt(c->x) : GROUND_Y;   // (world 3: the mountain it falls on)
+	if(c->y < wGround) {
 		c->vy = (int16_t)(c->vy + 2);
 		if(c->vy > 48) c->vy = 48;
 		subStep(&c->y, c->vy, &c->fy);
 		subStep(&c->x, c->vx, &c->fx);
-		if(c->y >= GROUND_Y) {
-			c->y = GROUND_Y;
-			boomAt(g, c->x, GROUND_Y - 10);
+		if(c->y >= wGround) {
+			c->y = wGround;
+			boomAt(g, c->x, wGround - 10);
 			hostagesBlast(g, c->x, 18);
 		}
 	}
@@ -2346,19 +2348,7 @@ __attribute__((noinline)) static void destTick(tGame *g) {
 static void worldUpdate(tGame *g) {
 	smokeUpdate(g);
 	if(g->quotaMsg) --g->quotaMsg;
-	if(logicIsW3(g)) {
-		// the pilot: terrain and the chopper's shots only (SPEC 13.7); terrain stops a shot
-		shotsUpdate(g);
-		for(uint8_t i = 0; i < SHOT_MAX; ++i) {
-			tShot *s = &g->pShots[i];
-			if(s->active && s->x >= 0 && s->x < W3_W && s->y >= logicW3SurfaceY(s->x)) {
-				s->active = 0;
-				boomAt(g, s->x, s->y);
-			}
-		}
-		boomsUpdate(g);
-		return;
-	}
+	if(logicIsW3(g)) { w3WorldUpdate(g); return; }   // (world 3: SPEC 13.8)
 	barracksUpdate(g);
 	hostagesUpdate(g);
 	shotsUpdate(g);
@@ -2566,6 +2556,7 @@ void logicUpdate(tGame *g, const tInput *pIn) {
 					for(uint8_t i = 0; i < ESHOT_MAX; ++i) g->pEShots[i].active = 0;
 					for(uint8_t i = 0; i < JET_MAX; ++i) { g->pJets[i].active = 0; g->pJets[i].cool = 150; }
 					for(uint8_t i = 0; i < MINE_MAX; ++i) g->pMines[i].active = 0;
+					if(logicIsW3(g)) w3Respawn(g);
 					setState(g, GS_PLAY, 0);
 				}
 			}
@@ -3020,7 +3011,7 @@ uint8_t logicDraw(const tGame *g, tDraw *pOut) {
 	// the chopper's shadow, on the track under it (and under the people)
 	if(logicChopperVisible(g) && !(logicIsW2(g) && logicOnWater(g->chop.x))) {
 		static const uint8_t pSize[13] = {0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3};   // by altitude / 16
-		int16_t wAlt = (int16_t)(GROUND_Y - g->chop.y);
+		int16_t wAlt = (int16_t)(GROUND_Y - g->chop.y);   // (logicAltitude's value in worlds 1 and 2, kept inline: these frames are at their limits)
 		if(wAlt < 0) wAlt = 0;
 		if(wAlt > 12 * 16) wAlt = 12 * 16;
 		int16_t sx = (int16_t)(g->chop.x - cam - 16 + (wAlt >> 4));   // the low sun pushes it right
@@ -3756,20 +3747,270 @@ uint8_t logicW3GapOk(const uint8_t *pHeight, const uint8_t *pFlags, const uint8_
 	return 1;
 }
 
-// World 3's pilot scenery (SPEC 13.7): the lodge and the AA nest stand on their benches, the pad's slab top is the bed's floor (the
-// skids rest on its second row, as world 2's). The nest idles: its tell and fire frames are the behaviour slice's.
+// ------------------------------------------------------------------------------------------------------ world 3, mission 7
+// (SPEC 13.8.) The sites (a lodge and its pad bed on one level bench, 64 px apart), the nests, the hangar and the base pad stand where the
+// converter put them (world3_map.h). Everything here is called from world 3 only; the other worlds' frames pay nothing for it.
+_Static_assert(W3_NESTS == W3_NEST_MAX && W3_SITES == BARRACKS_COUNT, "world 3: one lodge a barracks, one nest a site and the home nest");
+
+static inline int16_t w3NestCx(uint8_t i) { return (int16_t)(g_pW3NestX[i] + NEST_W_PX / 2); }
+int16_t logicW3NestCx(uint8_t i) { return i < W3_NEST_MAX ? w3NestCx(i) : 0; }
+int16_t logicW3NestTop(uint8_t i) { return i < W3_NEST_MAX ? (int16_t)(logicW3SurfaceY(w3NestCx(i)) - NEST_H_PX) : 0; }
+uint8_t logicW3OnBasePad(int16_t x) { return (uint8_t)(x >= W3_PAD_X && x < W3_PAD_X + W3_PAD_W && logicW3IsPad(x)); }
+
+// The nest's wind-up before a burst (SPEC 13.6: 26 / 22 / 18 / 16 / 14 on skill 1-5; GODMODE as normal)
+static const uint8_t s_pNestTell[DIFFICULTY_MAX + 1] = {18, 26, 22, 18, 16, 14};
+uint8_t logicNestTell(const tGame *g) { return s_pNestTell[g->difficulty]; }
+
+// The skids' floor in world 3: the terrain's, or a lodge's or the hangar's roof when it is higher (a roof is a floor to stop on, not a landing)
+static int16_t w3Roofs(const tGame *g, int16_t x, int16_t wF, uint8_t *pIsGround) {
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
+		if(absw((int16_t)(x - g->pBarracks[b].x)) < 24 + 12) {
+			int16_t wY = (int16_t)(logicW3SurfaceY(g->pBarracks[b].x) - W3_LODGE_ROOF);
+			if(wY < wF) { wF = wY; *pIsGround = 0; }
+		}
+	}
+	if(x + 14 > W3_HANGAR_X && x - 14 < W3_HANGAR_X + 64) {
+		int16_t wY = (int16_t)(logicW3SurfaceY(W3_HANGAR_X + 32) - W3_HANGAR_ROOF);
+		if(wY < wF) { wF = wY; *pIsGround = 0; }
+	}
+	return wF;
+}
+static int16_t w3Floor(const tGame *g, int16_t x, uint8_t *pIsGround) {
+	*pIsGround = logicW3IsPad(x);
+	return w3Roofs(g, x, logicW3FloorAt(x), pIsGround);
+}
+
+COLD static void w3Place(tGame *g) {
+	for(uint8_t i = 0; i < W3_NEST_MAX; ++i) {
+		g->nestHp[i] = NEST_HP;
+		g->nestTell[i] = g->nestFlash[i] = 0;
+		g->nestCool[i] = (uint8_t)(60 + 30 * i);   // (a quiet start)
+	}
+	g->siteClear = 0;
+}
+
+// After a lost chopper's respawn: no tell running, no puff in the air, no attack token held
+COLD static void w3Respawn(tGame *g) {
+	for(uint8_t i = 0; i < W3_NEST_MAX; ++i) g->nestTell[i] = g->nestFlash[i] = 0;
+	for(uint8_t k = 0; k < FLAK_MAX; ++k) g->pFlak[k].active = 0;
+	g->atkWait = g->aaWait = 0;
+}
+
+// A nest takes ubDmg (a cannon hit 1, a bomb kills): at 0 it is gone and pays; its site's zone is cleared (+100, the HUD says ZONE CLR)
+COLD static void nestHit(tGame *g, uint8_t i, uint8_t ubDmg) {
+	if(!g->nestHp[i]) return;
+	g->nestHp[i] = ubDmg >= g->nestHp[i] ? 0 : (uint8_t)(g->nestHp[i] - ubDmg);
+	if(g->nestHp[i]) return;
+	g->nestTell[i] = g->nestFlash[i] = 0;
+	boomAt(g, w3NestCx(i), (int16_t)(logicW3NestTop(i) + NEST_H_PX / 2));
+	addScore(g, NEST_SCORE);
+	int8_t bSite = g_pW3NestSite[i];
+	if(bSite >= 0 && !(g->siteClear & (1 << bSite))) {
+		g->siteClear = (uint8_t)(g->siteClear | (1 << bSite));
+		addScore(g, ZONE_CLEAR_SCORE);
+		g->bonusKind = BONUS_ZONE;
+		g->bonusMsg = BONUS_MSG_FRAMES + BONUS_DELAY;
+		g->events3 |= EV4_ZONE;
+	}
+}
+
+// The chopper's cannon shot against world 3's targets: nests, lodges (their bench is their height), people. 1 = used up
+static uint8_t w3CannonHit(tGame *g, tShot *s) {
+	int16_t sx = (int16_t)(s->x - 3), sy = (int16_t)(s->y - 1);
+	for(uint8_t i = 0; i < W3_NEST_MAX; ++i) {
+		if(g->nestHp[i] && boxHit(sx, sy, 6, 3, (int16_t)(g_pW3NestX[i]), logicW3NestTop(i), NEST_W_PX, NEST_H_PX)) {
+			nestHit(g, i, 1);
+			return 1;
+		}
+	}
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
+		tBarracks *pB = &g->pBarracks[b];
+		if(pB->hp && boxHit(sx, sy, 6, 3, (int16_t)(pB->x - 26), (int16_t)(logicW3SurfaceY(pB->x) - 32), 52, 32)) {
+			barracksDamage(g, b, 1);
+			return 1;
+		}
+	}
+	for(uint8_t k = 0; k < g->outCount; ++k) {
+		tHostage *h = &g->pHostages[g->pOut[k]];
+		if((h->state == HS_FREE || h->state == HS_TO_CHOPPER) &&
+			boxHit(sx, sy, 6, 3, (int16_t)(h->x - 3), (int16_t)(logicW3SurfaceY(h->x) - 12), 6, 12)) {
+			hostageKill(g, h);
+			return 1;
+		}
+	}
+	return 0;
+}
+
+// A bomb blows at (x, y) on the terrain or a roof: the nests and lodges near it, the people near it
+COLD static void w3Bomb(tGame *g, int16_t x, int16_t y) {
+	boomAt(g, x, (int16_t)(y - 8));
+	for(uint8_t i = 0; i < W3_NEST_MAX; ++i) {
+		if(g->nestHp[i] && absw((int16_t)(w3NestCx(i) - x)) < NEST_BOMB_R && absw((int16_t)(logicW3NestTop(i) + NEST_H_PX / 2 - y)) < 30) nestHit(g, i, NEST_HP);
+	}
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
+		if(absw((int16_t)(g->pBarracks[b].x - x)) < 30) barracksDamage(g, b, 2);
+	}
+	hostagesBlast(g, x, 14);
+}
+
+__attribute__((noinline)) static void w3ShotsUpdate(tGame *g) {
+	for(uint8_t i = 0; i < SHOT_MAX; ++i) {
+		tShot *s = &g->pShots[i];
+		if(!s->active) continue;
+		if(s->kind == SHOT_BOMB) s->vy = (int16_t)(s->vy + BOMB_GRAVITY);
+		subStep(&s->x, s->vx, &s->fx);
+		subStep(&s->y, s->vy, &s->fy);
+		if(s->x < 0 || s->x >= W3_W) { s->active = 0; continue; }
+		uint8_t isGround;
+		int16_t wFloor = w3Roofs(g, s->x, logicW3SurfaceY(s->x), &isGround);
+		if(s->kind == SHOT_BOMB) {
+			if(s->y >= wFloor) { s->active = 0; w3Bomb(g, s->x, s->y); continue; }
+		}
+		else {
+			if(w3CannonHit(g, s)) { s->active = 0; continue; }
+			if(s->y >= logicW3SurfaceY(s->x)) { s->active = 0; boomAt(g, s->x, s->y); continue; }
+		}
+		if(!--s->life) s->active = 0;
+	}
+}
+
+// Whether nest i may take the chopper as its target now (SPEC 13.8): alive, the nest on screen, its distance on x between AA_MIN_DIST and NEST_RANGE;
+// a landed chopper only after the ground grace's dwell and never on the base pad; a flying one not in the take-off grace
+COLD static uint8_t nestTarget(const tGame *g, uint8_t i) {
+	const tChopper *c = &g->chop;
+	if(!c->alive) return 0;
+	int16_t wX = w3NestCx(i);
+	int16_t ad = absw((int16_t)(c->x - wX));
+	if(ad >= NEST_RANGE || ad < AA_MIN_DIST) return 0;
+	if(wX - NEST_W_PX / 2 < g->cam || wX + NEST_W_PX / 2 > g->cam + SCREEN_W) return 0;
+	if(c->landed) {
+		if(logicW3OnBasePad(c->x)) return 0;
+		uint16_t uwDwell = logicGroundDwell(g);
+		return uwDwell != GROUND_NEVER && g->landFrames >= uwDwell;
+	}
+	return !g->airGrace;
+}
+
+// A nest's ranging puff: where the chopper is now, for its last ubLife frames; the muzzle flash
+static void nestPuff(tGame *g, uint8_t i, uint8_t ubLife) {
+	for(uint8_t k = 0; k < FLAK_MAX; ++k) {
+		tFlak *f = &g->pFlak[k];
+		if(f->active) continue;
+		f->active = 1;
+		f->x = g->chop.x;
+		f->y = (int16_t)(g->chop.y - 7);
+		f->life = ubLife;
+		break;
+	}
+	g->nestFlash[i] = AA_FLASH;
+}
+
+// The nests: flak at the chopper (a tell, a ranging puff on the aim point, the burst), under the shared ground-threat rules (SPEC 13.8)
+__attribute__((noinline)) static void nestsUpdate(tGame *g) {
+	tChopper *c = &g->chop;
+	if(g->atkWait) --g->atkWait;
+	if(g->aaWait) --g->aaWait;
+	for(uint8_t k = 0; k < FLAK_MAX; ++k) {
+		tFlak *f = &g->pFlak[k];
+		if(!f->active || --f->life) continue;
+		f->active = 0;
+		boomAt(g, f->x, f->y);
+		g->events3 |= EV4_AABURST;
+		if(chopperHurtable(c) && boxHit((int16_t)(c->x - 13), (int16_t)(c->y - 13), 26, 13, (int16_t)(f->x - FLAK_RADIUS), (int16_t)(f->y - FLAK_RADIUS), 2 * FLAK_RADIUS, 2 * FLAK_RADIUS)) chopperDestroy(g);
+	}
+	uint8_t ubTell = logicNestTell(g), ubPuff = ubTell < AA_PUFF_MAX ? ubTell : AA_PUFF_MAX;
+	uint8_t ubLive = 0;
+	for(uint8_t i = 0; i < W3_NEST_MAX; ++i) ubLive += g->nestTell[i] != 0;
+	for(uint8_t i = 0; i < W3_NEST_MAX; ++i) {
+		if(!g->nestHp[i]) continue;
+		if(g->nestFlash[i]) --g->nestFlash[i];
+		if(g->nestTell[i]) {
+			if(--g->nestTell[i] == ubPuff) nestPuff(g, i, ubPuff);
+			if(!g->nestTell[i]) g->nestCool[i] = (uint8_t)(logicAaGap(g) + (logicRandom(g) & 15));
+			continue;
+		}
+		if(g->nestCool[i]) { --g->nestCool[i]; continue; }
+		if(g->aaWait || ubLive >= logicAaLive(g) || !nestTarget(g, i)) continue;
+		if(c->landed && g->atkWait && g->atkLast != ATK_NEST + i) continue;   // (R3: one attack at a landed chopper at a time)
+		g->nestTell[i] = ubTell;
+		g->aaWait = AA_PAIR_GAP;
+		if(c->landed) { g->atkWait = BOAT_ATTACK_GAP; g->atkLast = (uint8_t)(ATK_NEST + i); }
+		++ubLive;
+		g->events3 |= EV4_AATELL;
+		if(ubTell <= ubPuff) nestPuff(g, i, ubPuff);
+	}
+}
+
+// The lodges let their people out, W3_OUT_MAX at a time (barracksUpdate's loop, for world 3: world 1 and 2's frames keep theirs as it was)
+__attribute__((noinline)) static void w3BarracksUpdate(tGame *g) {
+	for(uint8_t b = 0; b < BARRACKS_COUNT; ++b) {
+		tBarracks *pB = &g->pBarracks[b];
+		if(pB->hp || pB->released >= HOSTAGES_PER_BARRACKS) continue;
+		if(pB->timer) { --pB->timer; continue; }
+		if(g->outCount >= W3_OUT_MAX) continue;
+		pB->timer = 8;
+		tHostage *h = &g->pHostages[b * HOSTAGES_PER_BARRACKS + pB->released];
+		++pB->released;
+		if(h->state != HS_INSIDE) continue;
+		uint16_t r = logicRandom(g);
+		logicHostageOut(g, (uint8_t)(b * HOSTAGES_PER_BARRACKS + pB->released - 1), HS_FREE, (int16_t)(pB->x - 8 + (int16_t)(r & 15)));
+		h->dir = (r & 0x100) ? 1 : -1;
+		h->timer = (uint8_t)(20 + (r >> 10));
+	}
+}
+
+__attribute__((noinline)) static void w3WorldUpdate(tGame *g) {
+	tChopper *c = &g->chop;
+	// the chopper on the ground, and just off it: the nests wait (the same bookkeeping as the jets')
+	if(c->landed) {
+		if(g->landFrames < 65535) ++g->landFrames;
+		g->airGrace = 0;
+	}
+	else if(g->landFrames) {
+		g->landFrames = 0;
+		g->airGrace = JET_TAKEOFF_GRACE;
+	}
+	else if(g->airGrace) --g->airGrace;
+	w3BarracksUpdate(g);
+	hostagesUpdate(g);
+	w3ShotsUpdate(g);
+	nestsUpdate(g);
+	boomsUpdate(g);
+}
+
+// World 3's scenery (SPEC 13.8), the plain copies first (a building is drawn onto an empty buffer): the pads (the slab top is the bed's
+// floor, the skids rest on its second row), the lodges (intact, shot, burning), the hangar; then the nests
 COLD static uint8_t w3Draw(const tGame *g, tDraw *pOut, uint8_t n) {
 	int16_t cam = g->cam;
-	n = drawAddS(pOut, n, (int16_t)(W3_LODGE_X - cam), (int16_t)(logicW3SurfaceY(W3_LODGE_X + 26) - 32), BOB_W3_LODGE, 0);
-	n = drawAddS(pOut, n, (int16_t)(W3_NEST_X - cam), (int16_t)(logicW3SurfaceY(W3_NEST_X + 15) - 24), BOB_W3_NEST, 0);
 	n = drawAddS(pOut, n, (int16_t)(W3_PAD_X - cam), (int16_t)(logicW3SurfaceY(W3_PAD_X + W3_PAD_W / 2) - 2 - PAD_SLAB_ROW), BOB_PAD64, 0);
+	for(uint8_t b = 0; b < W3_SITES; ++b) {
+		const tBarracks *pB = &g->pBarracks[b];
+		n = drawAddS(pOut, n, (int16_t)(g_pW3SitePadX[b] - cam), (int16_t)(logicW3SurfaceY(g_pW3SitePadX[b] + W3_PAD_W / 2) - 2 - PAD_SLAB_ROW), BOB_PAD64, 0);
+		n = drawAddS(pOut, n, (int16_t)(g_pW3LodgeX[b] - cam), (int16_t)(logicW3SurfaceY(pB->x) - 32), BOB_W3_LODGE, (uint8_t)(pB->hp == 2 ? 0 : pB->hp == 1 ? 1 : 2));
+	}
+	if(g->state != GS_INTRO || g->stateTimer <= INTRO_FRAMES - W3_CARD_HANGAR) n = drawAddS(pOut, n, (int16_t)(W3_HANGAR_X - cam), (int16_t)(logicW3SurfaceY(W3_HANGAR_X + 32) - W3_HANGAR_ROOF), BOB_HANGAR, 0);   // (not in the card's first pictures)
 	return n;
 }
 
-// World 3's picture: its scenery, then what the chopper shoots and what burns (no shadow, hangar or barracks yet)
+// World 3's picture: its scenery, the chopper's shadow on the terrain, the nests, the people, what the chopper shoots, the ranging puffs, what burns
 COLD static uint8_t logicDrawW3(const tGame *g, tDraw *pOut) {
 	uint8_t n = w3Draw(g, pOut, 0);
 	int16_t cam = g->cam;
+	for(uint8_t i = 0; i < W3_NEST_MAX; ++i) {
+		if(!g->nestHp[i] || (g->state == GS_INTRO && g->stateTimer > INTRO_FRAMES - W3_CARD_NESTS)) continue;   // (the card's first pictures: the pad and the HUD only; see logic.h)
+		int16_t sx = (int16_t)(g_pW3NestX[i] - cam);
+		if(sx > SCREEN_W - 8 || sx < 8 - NEST_W_PX) continue;   // (less than 8 px of it on screen: not drawn, a BOB costs about 5 points of a frame)
+		uint8_t f = g->nestFlash[i] ? 2 : g->nestTell[i] ? 1 : 0;
+		n = drawAddS(pOut, n, sx, logicW3NestTop(i), BOB_W3_NEST, f);
+	}
+	for(uint8_t k = 0; k < g->outCount; ++k) {
+		const tHostage *h = &g->pHostages[g->pOut[k]];
+		uint8_t f;
+		if(h->state == HS_FREE || h->state == HS_TO_CHOPPER || h->state == HS_TO_HANGAR) f = h->anim;
+		else if(h->state == HS_DEAD && h->timer) f = MAN_DEAD;
+		else continue;
+		n = drawAdd(pOut, n, (int16_t)(h->x - 8 - cam), (int16_t)(logicW3SurfaceY(h->x) - 12), BOB_HOSTAGE, f);
+	}
 	for(uint8_t i = 0; i < SMOKE_MAX; ++i) {
 		const tSmoke *p = &g->pSmoke[i];
 		if(p->active) n = drawAdd(pOut, n, (int16_t)(p->x - 8 - cam), (int16_t)(p->y - 4), BOB_SMOKE,
@@ -3780,6 +4021,9 @@ COLD static uint8_t logicDrawW3(const tGame *g, tDraw *pOut) {
 		if(!s->active) continue;
 		if(s->kind == SHOT_CANNON) n = drawAdd(pOut, n, (int16_t)(s->x - 4 - cam), (int16_t)(s->y - 1), BOB_SHOT, 0);
 		else n = drawAdd(pOut, n, (int16_t)(s->x - 2 - cam), (int16_t)(s->y - 3), BOB_BOMB, 0);
+	}
+	for(uint8_t k = 0; k < FLAK_MAX; ++k) {
+		if(g->pFlak[k].active) n = drawAddS(pOut, n, (int16_t)(g->pFlak[k].x - 8 - cam), (int16_t)(g->pFlak[k].y - 4), BOB_SMOKE, SMOKE_BIG);
 	}
 	for(uint8_t i = 0; i < BOOM_MAX; ++i) {
 		const tBoom *b = &g->pBooms[i];

@@ -1,0 +1,116 @@
+# World 3, mission 7 (Foothills) as a mission (SPEC 13.8). Ctrl+L, W, 7 starts it behind its card (the strip map: the land, the base, four
+# lodges and their pads, the hangar). Skill 1 is pinned after the world has loaded (the longest tells, no landed attack) and the chopper is
+# in ghost mode (a burst is shown and shrugged off): the same flight every time.
+# - the base pad: the home nest is 80 px away and never fires at a chopper landed there; airborne (after the 2 s grace) it tells, the
+#   ranging puff shows on the chopper, the burst follows;
+# - Ctrl+L, J puts the chopper over the next pad (the four sites' in turn, then the base's), the camera pans to it, and it lands: site 1's, the valley floor: the lodge opens to
+#   the cannon, its 16 people come out (4 at a time) and board; then up a little, and the nest on its rise falls to the cannon (zone clear, +200);
+# - Ctrl+L, J four more times is the base pad: they unload, run into the hangar: 16 saved. The summit and the shadow on the terrain are
+#   screenshots on the way.
+# The unit tests (testW3M7*) hold the rules; this is what the player sees. No dropped frames, worst <= 85 % (the pilot's budget).
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x07
+wait-serial "AGK world 3 loaded" 400
+key 0x63
+key 0x28
+wait 5
+key 0x01
+wait 30
+key 0x63
+key 0x28
+wait 5
+key 0x24
+wait 30
+screenshot card
+press fire 2
+wait 60
+screenshot base
+# up: after the take-off grace the home nest tells
+press up 30
+wait-serial "AGK flak tell" 400
+wait 12
+screenshot tell
+wait-serial "AGK flak burst" 100
+wait 3
+screenshot burst
+# site 1's pad (the valley floor): landed, facing left; turn right and shoot the nest, then left and open the lodge
+key 0x63
+key 0x28
+wait 5
+key 0x26
+wait 150
+press down 40
+wait 10
+screenshot site1
+# the lodge first: facing left from the pad, two cannon hits open it, its people come out and board
+press fire 1
+wait 30
+press fire 1
+wait-serial "barracks open=0" 100
+wait-serial "aboard=16" 900
+screenshot boarded
+# then the nest on its rise (a shot flying level from the pad meets the slope): up a little, turn right, the cannon
+press up 12
+wait 25
+hold right
+wait 25
+release
+press fire 70
+wait-serial "AGK zone clear" 120
+wait 20
+screenshot nestdown
+# the next pads: the mid shelf's, the plateau's, the summit's (the altitude: the shadow's size and the view), then home
+key 0x63
+key 0x28
+wait 5
+key 0x26
+wait 150
+press down 40
+wait 10
+screenshot shelf
+key 0x63
+key 0x28
+wait 5
+key 0x26
+wait 150
+press down 40
+wait 10
+screenshot plateau
+press up 20
+wait 20
+screenshot plateauair
+key 0x63
+key 0x28
+wait 5
+key 0x26
+wait 150
+press down 40
+wait 10
+screenshot summit
+press up 40
+wait 20
+screenshot summitair
+key 0x63
+key 0x28
+wait 5
+key 0x26
+wait 300
+press down 40
+wait 10
+screenshot home
+wait-serial "saved=16" 900
+wait 60
+screenshot saved
+expect-serial "AGK world=3 mission=7"
+expect-serial "AGK flak tell[\s\S]*AGK flak burst"
+expect-serial "AGK zone clear"
+expect-serial "AGK barracks open=0"
+expect-no-serial "chopper lost|ERR|missing"
+expect-no-dropped-frames
+expect-max-load 85
+expect-min-chip-free 96
