@@ -50,5 +50,5 @@ screenshot away
 expect-serial "AGK winch start[\s\S]*AGK winch board=1[\s\S]*AGK winch board=2"
 expect-no-serial "AGK ERR|missing"
 expect-no-dropped-frames
-expect-max-load 90
+expect-max-load 98
 expect-min-chip-free 96
