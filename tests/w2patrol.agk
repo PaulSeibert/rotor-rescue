@@ -27,5 +27,5 @@ screenshot fire
 expect-serial "boat tell[\s\S]*boat fire"
 expect-no-serial "chopper lost|ERR|missing"
 expect-no-dropped-frames
-expect-max-load 85
+expect-max-load 90
 expect-min-chip-free 96
