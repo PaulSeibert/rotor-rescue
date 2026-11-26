@@ -299,7 +299,8 @@ static UWORD s_pSeaPenCol[MISSION_COUNT][4][3];   // the sea's pens 4-7 per miss
 static UBYTE s_ubSeaHold;                         // pictures left that hold the swell and shimmer at frame 0 after a list is written or patched
 static UWORD s_pSeaPenStep[2] = {0xFFFF, 0xFFFF};
 static UWORD s_pBaseTab[MISSION_COUNT][BASE_TAB_N];   // the base ocean pens colours per mission (world2Gradients; logicBaseColor)
-static UWORD s_pBaseStep[2] = {0xFFFF, 0xFFFF};   // the base ocean pens step each list shows (logicBaseWave)
+static UWORD s_pBaseStep[2] = {BASE_KEY_NONE, BASE_KEY_NONE};   // the base ocean pens step each list shows (logicBaseWave)
+static UBYTE s_ubBaseSpread;                      // the most the two lists' steps have differed after a write: 1 at most, or the water flickers (tests/w2play.agk)
 static UWORD s_pPalSlot[2][4];   // its PF2 palettes: clouds, far band (mountains, far islands), land or sea, islands
 
 typedef struct {
@@ -883,12 +884,20 @@ __attribute__((noinline, optimize("Os"))) static void seaPens(tCopCmd *pList, UB
 }
 
 // The base ocean (the terrain strip's water, SPEC 11): its three water pens, 1, 6 and 7 of the island palette (the
-// palette MOVEs after line 207's WAIT), run through logicBaseWave's colours, a step every 2 frames. Three MOVEs, so
-// it runs every picture the step moved, whatever the blitter has queued
+// palette MOVEs after line 207's WAIT), run through logicBaseWave's colours, a step every 2 frames. The step this list
+// shows comes from logicBasePenKey: never more than one step from the other list's (the lists are shown in turn, so a
+// bigger difference is a flicker; SPEC 11), which is the frame's step only while pictures are quiet
 __attribute__((noinline, optimize("Os"))) static void basePens(tCopCmd *pList, UBYTE ubBfr, UBYTE ubMission, UWORD uwFrame) {
-	UWORD uwKey = (UWORD)(uwFrame >> BASE_STEP_SHIFT);
+	UWORD uwKey = logicBasePenKey((UWORD)(uwFrame >> BASE_STEP_SHIFT), s_pBaseStep[ubBfr], s_pBaseStep[ubBfr ^ 1]);
 	if(uwKey == s_pBaseStep[ubBfr]) return;
 	s_pBaseStep[ubBfr] = uwKey;
+	UWORD uwOther = s_pBaseStep[ubBfr ^ 1];
+	if(uwOther != BASE_KEY_NONE) {
+		UWORD uwD = (UWORD)(uwKey - uwOther) & 0x7FFF;
+		if(uwD > 0x4000) uwD = (UWORD)(0x8000 - uwD);
+		if(uwD > s_ubBaseSpread) s_ubBaseSpread = uwD > 255 ? 255 : (UBYTE)uwD;
+	}
+	uwFrame = (UWORD)(uwKey << BASE_STEP_SHIFT);   // (the step this list shows: the other list's at most one step behind or ahead)
 	UWORD *pTab = s_pBaseTab[ubMission];
 	const UWORD *pIsl = g_pW2IslPal[ubMission];
 	UWORD uwSlot = s_pPalSlot[ubBfr][3];
@@ -1540,9 +1549,10 @@ __attribute__((noinline, optimize("Os"))) static void w2Update(tCopCmd *pList, U
 	stripUpdate(pList, ubBfr, wCam);
 	UWORD uwFrame = s_ubSeaStill ? 0 : s_sGame.frame;
 	// (the base ocean's pens: only in a picture that queued at most SEA_BLIT_MAX blits and not in a list's first pictures (the sea's
-	// hold): those are the frame budget's worst, and the wave is slow, it takes the step up in the next quiet one; a list just
-	// written shows the palette's own three pens, a still frame of the wave, until then)
-	if(!s_ubSeaHold && g_uwAgkBlitqCount <= SEA_BLIT_MAX) basePens(pList, ubBfr, s_sGame.mission, uwFrame);
+	// hold): those are the frame budget's worst (writing every picture cost 2 points of the a500's worst), and the wave is slow,
+	// it runs slower in busy pictures, with the lists kept one step apart at most; a list just written shows the palette's own
+	// three pens, a still frame of the wave, until then)
+	if(logicBasePenWrite(s_ubSeaHold, g_uwAgkBlitqCount)) basePens(pList, ubBfr, s_sGame.mission, uwFrame);
 	// (a list just written or patched: a mission's first pictures are the budget's worst, so the
 	// swell and the shimmer wait a few pictures, the water as the camera alone puts it)
 	UBYTE ubPhase = s_ubSeaHold ? SEA_NO_SWELL : logicSeaPhase(uwFrame);
@@ -4238,6 +4248,7 @@ __attribute__((noinline)) static void reportState(UBYTE ubStateBefore) {
 		agkState("rotorPer", logicRotorPeriod(g));
 		agkState("rotorHw", logicRotorHwPeriod(logicRotorPeriod(g)));
 		agkState("rotorVol", logicRotorVolume(g));
+		agkState("bspread", s_ubBaseSpread);
 		agkEnd();
 		if(g->demo && g->state != ubStateBefore) agkPrint("AGK demo\n");
 	}

@@ -1421,6 +1421,82 @@ static void testBaseWave(void) {
 		CHECK(absi(chan(logicBaseWave(0x023, 0x8DE, 0xFFF, 65535, k), 0) - chan(logicBaseWave(0x023, 0x8DE, 0xFFF, 0, k), 0)) <= 3);
 }
 
+// The base ocean's flicker (Paul's playtest, 2026-11-25: "some flicker when flying around"). The two copper lists are written
+// one a picture, and the picture shows its own list: when a picture is not written (too many blits queued) its list keeps the
+// pens of an older step, so the lists differ by one step or more and the water flips between two phases at 25 Hz, or jumps
+// many steps when a quiet picture catches up. Metric: the largest change of any water pen's channel between two consecutive
+// shown pictures; the wave itself moves at most 3 a step (testBaseWave), so anything above that is the policy's, not the wave's.
+// Measured on the a500 in tests/w2play.agk with the old policy (key = the frame's step whenever the picture was quiet): 9 levels,
+// the lists up to 14 steps apart, 29 steps behind the frame.
+// (pBlits: per picture, the blits queued when the list is patched; *pSpread: the most the two lists' steps differed in any
+// picture; *pSteps: how many steps the shown wave advanced over the run, of n / 2 when nothing is skipped)
+static int baseFlicker(const uint8_t *pBlits, int n, int *pSpread, int *pSteps) {
+	static const uint16_t pens[3] = {0x023, 0x8DE, 0xFFF};
+	uint16_t key[2] = {500, 500};   // (frame 1000's step)
+	int worst = 0, spread = 0;
+	uint16_t prev[3] = {0, 0, 0};
+	for(int i = 0; i < n; ++i) {
+		uint16_t f = (uint16_t)(1000 + i);
+		int b = i & 1;
+		if(logicBasePenWrite(0, pBlits[i])) key[b] = logicBasePenKey((uint16_t)(f >> BASE_STEP_SHIFT), key[b], key[b ^ 1]);
+		int sp = absi((int)key[0] - (int)key[1]);
+		if(sp > spread) spread = sp;
+		for(int k = 0; k < 3; ++k) {
+			uint16_t c = logicBaseWave(pens[0], pens[1], pens[2], (uint16_t)(key[b] << BASE_STEP_SHIFT), (uint8_t)k);
+			if(i) for(int ch = 0; ch < 12; ch += 4) { int d = absi(chan(c, ch) - chan(prev[k], ch)); if(d > worst) worst = d; }
+			prev[k] = c;
+		}
+	}
+	*pSpread = spread;
+	*pSteps = (key[0] > key[1] ? key[0] : key[1]) - 500;
+	return worst;
+}
+
+static void testBaseFlicker(void) {
+	uint8_t q[600];
+	int spread, steps;
+	// the key rule: a fresh pair takes the frame's step, a list behind goes to the other's, level lists go one on, never past
+	// the frame and never more than one ahead; the 15-bit counter wraps
+	CHECK(logicBasePenKey(40, BASE_KEY_NONE, BASE_KEY_NONE) == 40);
+	CHECK(logicBasePenKey(40, BASE_KEY_NONE, 37) == 37);
+	CHECK(logicBasePenKey(40, 36, 37) == 37);
+	CHECK(logicBasePenKey(40, 37, 37) == 38);
+	CHECK(logicBasePenKey(40, 38, 37) == 38);
+	CHECK(logicBasePenKey(37, 37, 37) == 37);
+	CHECK(logicBasePenKey(0, 32767, 32767) == 0);
+	CHECK(logicBasePenKey(5, 32767, 32766) == 32767);
+	CHECK(logicBasePenKey(5, 32766, 32767) == 32767);
+	// a quiet game: no skip, the shown step is the frame's, the water is as smooth as the wave
+	for(int i = 0; i < 600; ++i) q[i] = 11;
+	CHECK(baseFlicker(q, 600, &spread, &steps) <= 3);
+	CHECK(spread <= 1);
+	CHECK(steps == 299 || steps == 300);   // (the frame counter's own pace: 1 step per 2 pictures)
+	// one list's pictures busy and the other's quiet (the blit load follows the buffer: a 25 Hz pattern)
+	for(int i = 0; i < 600; ++i) q[i] = (uint8_t)((i & 1) ? 17 : 11);
+	CHECK(baseFlicker(q, 600, &spread, &steps) <= 3);
+	CHECK(spread <= 1);
+	printf("  base ocean flicker, alternating busy/quiet: max pen delta %d, lists %d apart, %d steps of 300\n",
+		baseFlicker(q, 600, &spread, &steps), spread, steps);
+	// a fly-around: hover pictures of 11-13 blits, a column coming in (3 more) every 5th, a fight's 20 for 40 pictures
+	for(int i = 0; i < 600; ++i) q[i] = (uint8_t)(11 + (i * 7) % 3 + ((i % 5) == 0 ? 3 : 0) + ((i / 40) % 3 == 1 ? 6 : 0));
+	CHECK(baseFlicker(q, 600, &spread, &steps) <= 3);
+	CHECK(spread <= 1);
+	printf("  base ocean flicker, fly-around with fights: max pen delta %d, lists %d apart, %d steps of 300\n",
+		baseFlicker(q, 600, &spread, &steps), spread, steps);
+	// the real thing: the blits each picture had queued when the copper list was patched (a500, tests/w2play.agk, the people
+	// boarding the chopper and the boats: 520 pictures, runs of 22 busy pictures with 6 quiet ones between, [blits, pictures] pairs)
+	static const uint8_t pReal[][2] = {{13,22}, {11,2}, {9,3}, {8,3}, {10,1}, {11,1}, {13,6}, {14,2}, {15,7}, {16,2}, {17,5}, {15,2}, {14,2}, {12,4}, {14,2}, {16,1}, {17,9}, {18,12}, {16,2}, {14,6}, {16,2}, {18,22}, {16,2}, {14,6}, {16,2}, {18,22}, {16,2}, {14,6}, {16,2}, {18,22}, {16,2}, {14,6}, {16,2}, {18,22}, {16,2}, {14,6}, {16,2}, {17,1}, {18,1}, {17,1}, {18,3}, {17,2}, {16,2}, {17,2}, {18,7}, {19,3}, {17,2}, {15,6}, {16,1}, {17,1}, {19,3}, {18,2}, {19,9}, {18,1}, {19,7}, {16,2}, {14,6}, {16,2}, {18,22}, {16,2}, {14,6}, {16,2}, {18,22}, {16,2}, {14,6}, {16,2}, {18,22}, {16,2}, {14,6}, {16,2}, {18,22}, {16,2}, {14,6}, {15,1}, {16,1}, {18,1}, {19,4}, {18,7}, {19,8}, {18,1}, {19,1}, {16,1}, {17,1}, {15,6}, {17,2}, {19,2}, {17,1}, {18,7}, {17,4}, {18,8}, {16,2}, {14,6}, {16,2}, {17,2}, {16,20}, {14,2}, {12,6}, {14,2}, {16,8}};
+	int n = 0;
+	for(unsigned r = 0; r < sizeof(pReal) / sizeof(pReal[0]); ++r)
+		for(int j = 0; j < pReal[r][1]; ++j) q[n++] = pReal[r][0];
+	CHECK(n == 520);
+	CHECK(baseFlicker(q, n, &spread, &steps) <= 3);
+	CHECK(spread <= 1);
+	CHECK(steps >= 60);   // (the wave still runs: it slows while pictures are busy, it does not stop)
+	printf("  base ocean flicker, w2play's boarding (measured blits): max pen delta %d, lists %d apart, %d steps of 260\n",
+		baseFlicker(q, n, &spread, &steps), spread, steps);
+}
+
 // A 24-bit gradient: its ends exact, every channel monotonic between them
 static void testGrad24(void) {
 	CHECK(logicGrad24(0x2488CC, 0xCCFFEE, 0, 156) == 0x2488CC);
@@ -6255,6 +6331,7 @@ int main(void) {
 	testSeaCameraAlone();
 	testSeaPens();
 	testBaseWave();
+	testBaseFlicker();
 	testGrad24();
 	testWorld2Start();
 	testTerrainFloor();

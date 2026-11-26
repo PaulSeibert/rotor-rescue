@@ -55,6 +55,10 @@ expect-serial "AGK splash"
 expect-serial "landed x=33\d\d"
 expect-serial "landed x=41\d\d"
 expect-no-serial "chopper lost|ERR|missing"
+# the base ocean pens (SPEC 11): the two copper lists never show water steps more than 1 apart, or the water flickers
+# (the old policy let a list that skipped a busy picture fall up to 14 steps behind the other: the pens jumped 9 levels)
+expect-no-serial "bspread=([2-9]|[1-9][0-9])"
+expect-serial "bspread=1"
 expect-no-dropped-frames
 expect-max-load 85
 expect-min-chip-free 96

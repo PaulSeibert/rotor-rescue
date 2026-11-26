@@ -3252,6 +3252,23 @@ uint16_t logicBaseColorAt(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, u
 	return logicBaseColor(uwDark, uwLight, uwWhite, dw, (uint8_t)(ubIdx - (dw << 4) - dw));
 }
 
+uint8_t logicBasePenWrite(uint8_t ubHold, uint16_t uwBlits) {
+	return (uint8_t)(!ubHold && uwBlits <= BASE_BLIT_MAX);
+}
+
+// a - b as a signed distance on the 15-bit step counter (a frame / 2 wraps at 32768)
+static int16_t baseKeyDiff(uint16_t a, uint16_t b) {
+	return (int16_t)((uint16_t)((a - b) << 1)) >> 1;
+}
+
+uint16_t logicBasePenKey(uint16_t uwTarget, uint16_t uwMine, uint16_t uwOther) {
+	if(uwOther == BASE_KEY_NONE) return uwTarget;                   // neither list has shown the wave yet: the frame's own step
+	if(uwMine == BASE_KEY_NONE || baseKeyDiff(uwMine, uwOther) < 0) return uwOther;   // a list behind (or new) goes to the other's step
+	uint16_t uwNext = (uint16_t)((uwOther + 1) & 0x7FFF);                      // level with the other: one step on, no further, and not past the frame
+	if(baseKeyDiff(uwTarget, uwNext) < 0) uwNext = uwTarget;
+	return baseKeyDiff(uwNext, uwMine) > 0 ? uwNext : uwMine;
+}
+
 uint16_t logicBaseWaveTab(const uint16_t *pTab, uint16_t uwFrame, uint8_t ubClass) {
 	return pTab[baseIndex(uwFrame, ubClass)];
 }

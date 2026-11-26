@@ -878,6 +878,19 @@ uint16_t logicBaseColor(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uin
 uint16_t logicBaseWaveTab(const uint16_t *pTab, uint16_t uwFrame, uint8_t ubClass);
 uint8_t logicBaseIndex(uint16_t uwFrame, uint8_t ubClass);   // the table index a class has at a frame
 uint16_t logicBaseColorAt(uint16_t uwDark, uint16_t uwLight, uint16_t uwWhite, uint8_t ubIdx);   // the colour an index stands for
+// Whether a picture writes the base ocean pens into its (back) list: ubHold is the list's first pictures (s_ubSeaHold), uwBlits
+// the blits the picture queued so far (a busy picture is the frame budget's worst, it writes nothing)
+#define BASE_BLIT_MAX 14   // = main.c's SEA_BLIT_MAX: the pens' writes cost 2 points of the worst picture on the a500 (w2play 85 -> 87 when every picture wrote)
+uint8_t logicBasePenWrite(uint8_t ubHold, uint16_t uwBlits);
+// The step (key, a frame / 2) a list shows when it is written. The two copper lists show the pens of two pictures in turn, so when
+// a busy picture skipped its write the lists once showed different steps, and the water flipped between them every picture, or
+// jumped many steps when a quiet picture caught up (tests/unit testBaseFlicker: up to 9 levels of a pen channel in a picture, the
+// wave moves 3 at most). The rule: a list never leaves the other list more than ONE step ahead, and a list behind goes only to the
+// other's step: so the shown pictures never differ by more than the wave's own step, and the wave runs slower while pictures are
+// busy (never faster than its own speed, so it falls behind the frame counter for good: invisible, it is a slow cycle).
+// uwTarget is the frame's step, uwMine and uwOther the lists' current ones (BASE_KEY_NONE: the list was just written)
+#define BASE_KEY_NONE 0xFFFF
+uint16_t logicBasePenKey(uint16_t uwTarget, uint16_t uwMine, uint16_t uwOther);
 // pBase (SEA_LINES words) takes the undrifted left edge of line SEA_SWELL_FROM - 1 and nearer, for logicSeaSwell: the swell
 // alone, same camera, lines SEA_SWELL_FROM and nearer (the far water is still)
 #define SEA_SWELL_FROM 12
