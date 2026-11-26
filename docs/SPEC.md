@@ -690,6 +690,24 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
 | 0, 1, 3 | effects: `sfx_channels = [1, 3]`; **no music in play** | music |
 
 - Music plays on 0, 1, 3 only (the player's mask excludes 2). Effects borrow 1 and 3.
+- **Rotor channel claim (v1.42, Paul's playtest of the integration build, 2026-11-24: "after dropping off the first set of passengers the
+  rescuees-entering-the-HQ sound persists, a high-pitched sound, and replaces the low Huey chop-chop; it never returns for the rest of the game").**
+  *Cause, found in ACE's `ptplayerSfxPlay` (automatic channel choice, which `soundPlay` uses for every effect):* `sfx_channels = [1, 3]` and
+  `ptplayerSetMusicChannelMask(0x5)` only steer it while a song's silence counts are fresh. In play there is no song (`musicFor` stops it at lift-off), the counts
+  are stale from the title theme (channels 1 and 3 positive, 0 and 2 zero), and when **both effect channels are busy and the new effect is not of higher priority than
+  either** the choice falls to the last idle channel with the best count: channel **2**. Two `saved` effects (11 frames each, 6 apart) plus a `land`,
+  `board`, `boom` or cannon shot in the same stretch is enough, which is why it came "sometimes", at a drop-off. That effect starts on the rotor's channel (new
+  pointer, length and period) and when it ends ptplayer leaves the channel on its idle loop (the effect's first words); the game only ever wrote the
+  period and volume of channel 2 after boot, so the rotor's wave was never put back, and `rotorUpdate`'s volume made whatever was there audible: the 530/795 Hz
+  "saved" arpeggio looping for the rest of the game. (The v4 note below, "nothing steals the rotor's channel", was measured with trips in which
+  two effects never overlapped a third; it was true of those runs only.)
+  *Fix:* the rotor is now also **claimed in ptplayer**: `rotorCreate` plays the loop as a looped effect of the highest priority on channel 2
+  (`ptplayerSfxPlayLooped`, volume 0; the wave has its idle word first, 4,802 bytes of chip, +2), so the automatic choice never picks it (a busy channel is
+  skipped, and no priority beats a looped one), and `musicFor` claims it again after `soundMusicStop` (`ptplayerStop` frees every channel's claim). `rotorUpdate`
+  still writes only period and volume. Sound, pitch and every rotor number are unchanged. Channel 0 stays an idle effect channel in play, as before.
+  *Proof:* `tests/hqsound.agk` (debug key Ctrl+L, B: three `saved` in one picture, an idle rotor) with `sound/tools/check_rotor_back.py` on its recording
+  (the harness's `expect-sound` is not enough: the stuck effect is audible too). Red on the build before: 36-39 % of the power above 1 kHz and 0-2 % in
+  the rotor's 30-150 Hz body after the burst, 6 of 6 windows; fixed: 1-7 % and 88-99 %, 0 of 6.
 - **Rotor, v2 (Paul's playtest, 2026-11-12; studio tuning, pending Paul's playtest):** "especially when cruising, still too annoying
   and irritating; a low, satisfying chopper thump, like an arcade Huey." Cruise and top speed were the problem (8.4 thumps a second at
   top speed, volume up to 56), so: the thump rate is capped at **6.5 a second flat out** (period 455;
@@ -1354,3 +1372,4 @@ raster at 5 camera offsets (`tools/check_w3strip.py`, a500 and a1200).
 | v1.31 | 2026-11-24 | world 2's sea is animated (Paul's native playtest 2026-11-24: "the sea layer could use some animation, to show movement in the water, more interesting and 3D"; studio decision, pending his playtest; branch `w2-sea-anim`, numbered v1.31 because other branches hold v1.19-v1.24 and v1.30). Section 11, "Sea animation": a per-line swell (the near water, lines 12-26, drifts up to 3.8 px, the camera's own 1/z ratio, a wave running toward the player; the far water is still) and a shimmer of the sea palette's pens 4-7, both pure functions of the frame counter (`logicSeaPhase`, `logicSeaDrift`, `logicSeaPen`; the 16-bit wrap is seamless), written into copper values the list already has: no new copper entry, no chip; budget rules (a blit-count gate for the swell alone, a hold after a list is written) in the section. World 1 unchanged. `logicSeaScroll` takes the phase; `tests/unit/test_logic.c`, `tests/w2sea.agk`; every world 2 golden that shows the sea changes |
 | v1.40 | 2026-11-24 | frame headroom for the skill-5 crash (section 11) and the boot logo's 46 KB freed after the splash (section 11, memory): not a design change, no golden changes (jetsload goldens recorded from the old build); `tests/jetsload.agk`, `tests/splashfree.agk`, `testDrawPeopleRunAndGroundFirst`. Other branches use v1.19-v1.24, v1.30, v1.31: expect docs conflicts, see `docs/JETS-HEADROOM-MERGE.md` |
 | v1.41 | 2026-11-24 | integration of v1.19-v1.31 with v1.40 (branch `integration`; section 11, "The merged build"): not a design change; the frame fixes above (typing plan in play and for erases, fix path, typing waits behind a radar redraw on a card, the freighter bar's shrink), world 3 kept apart from world 2's rules (`logicIsW2`), the splash free at `worldLoad` removed (the free at the title stands); goldens of 14 world 2 / world 3 scenarios re-recorded (the sea band, card text typing phase, a radar-row dot, w3load's card map); unproven on WinUAE or real hardware: see the PLAYTEST-integration checklist |
+| v1.42 | 2026-11-24 | the rotor's Paula channel is claimed in ptplayer (section 9, "Rotor channel claim"): a third effect at once (the HQ drop-off) no longer takes channel 2 and leaves the "saved" arpeggio looping where the rotor was; not a design change, no rotor number changes, +2 bytes of chip; `tests/hqsound.agk`, `sound/tools/check_rotor_back.py`, debug key Ctrl+L, B |

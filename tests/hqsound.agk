@@ -1,0 +1,26 @@
+# The rotor loop survives any number of effects at once (Paul's playtest, 2026-11-24: after the first
+# drop-off the HQ's "saved" sound hung on and the v4 chop-chop never came back). Cause: ptplayer's
+# automatic channel choice (PTPLAYER_SFX_CHANNEL_ANY) does not keep to sound.toml's sfx_channels when
+# both effect channels are busy and the new effect is not of higher priority: it takes channel 2, the
+# rotor's, and when the effect ends the channel loops ptplayer's idle word, not the rotor's wave.
+# Ctrl+L, B plays three "saved" effects in one picture (the third has no free effect channel).
+wait-serial "AGK t0" 1000
+press fire 2
+wait 125
+mark idle
+wait 30
+mark idle_end
+expect-sound idle idle_end
+regs regs_before paula
+key 0x63
+key 0x28
+wait 5
+key 0x35
+wait 120
+mark after
+wait 60
+mark after_end
+regs regs_after paula
+expect-serial "AGK sfx saved"
+expect-sound after after_end
+expect-serial "rotorPer=845 rotorHw=423 "

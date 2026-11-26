@@ -425,6 +425,12 @@ __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 		agkEnd();
 		return;
 	}
+	if(keyUse(KEY_B)) {
+		// three equal-priority effects in one picture: the hangar drop-off's worst case (tests/hqsound.agk)
+		for(UBYTE i = 0; i < 3; ++i) soundPlay(SOUND_SFX_SAVED);
+		s_ubSkillKeyWait = 0;
+		return;
+	}
 	if(keyUse(KEY_Q)) {
 		chipSqueeze(CHIP_SQUEEZE_KB);
 		s_ubSkillKeyWait = 0;
@@ -3777,8 +3783,18 @@ __attribute__((noinline)) static void weatherUpdate(void) {
 // sample-and-hold images sit at 12 kHz instead of gliding through the ears' keenest 4-8 kHz.
 // SPEC section 9 (rotor v4).
 
+// The channel is also CLAIMED in ptplayer (SPEC section 9, rotor channel claim): the rotor is a looped
+// "effect" of the highest priority there, so the automatic channel choice of an effect (soundPlay) can
+// never pick it. Without the claim, an effect with both effect channels (1, 3) busy and no higher
+// priority on them took channel 2 (reserved by the mask only when a song is playing and the stale
+// per-channel counts say so), and when it ended ptplayer left the channel looping the effect's samples:
+// the HQ's "saved" arpeggio hung on for the rest of the game and the rotor never came back.
+// ptplayer's own looped effects skip the first word of the sample (the idle word): the wave starts 2
+// bytes in.
 #define ROTOR_CHANNEL 2
-static BYTE *s_pRotorWave;   // chip RAM
+#define ROTOR_ALLOC (ROTOR_SAMPLES + 2)
+static BYTE *s_pRotorWave;   // chip RAM: an idle word, then the loop
+static tPtplayerSfx s_sRotorSfx;
 
 static UBYTE s_isRotorPending;
 
@@ -3786,24 +3802,29 @@ static UBYTE s_isRotorPending;
 // at startup it pushed AROS past the harness's boot window)
 static void rotorSetup(void) {
 	s_isRotorPending = 0;
-	logicRotorSynth((int8_t *)s_pRotorWave);
+	logicRotorSynth((int8_t *)s_pRotorWave + 2);
 	agkPerfSkip();                                    // (more than a frame of work, on purpose)
 }
 
+// (ptplayer starts the channel on its next tick: wave, length, period, volume 0; rotorUpdate then writes
+// the period and volume, the only registers it touches, from the first frame)
+static void rotorClaim(void) {
+	if(!s_pRotorWave) return;
+	ptplayerSfxPlayLooped(&s_sRotorSfx, ROTOR_CHANNEL, 0);
+}
+
 static void rotorCreate(void) {
-	s_pRotorWave = memAllocChipClear(ROTOR_SAMPLES);  // silent until rotorSetup fills it
+	s_pRotorWave = memAllocChipClear(ROTOR_ALLOC);  // silent until rotorSetup fills it
 	if(!s_pRotorWave) {
 		agkPrint("AGK ERR out of chip RAM: the rotor's wave (no rotor sound)\n");
 		return;
 	}
 	s_isRotorPending = 1;
 	ptplayerSetChannelsForPlayer(0xF & ~(1 << ROTOR_CHANNEL));
-	volatile struct AudChannel *pAud = &g_pCustom->aud[ROTOR_CHANNEL];
-	pAud->ac_ptr = (UWORD *)s_pRotorWave;
-	pAud->ac_len = ROTOR_SAMPLES / 2;
-	pAud->ac_vol = 0;
-	pAud->ac_per = logicRotorHwPeriod(591);   // (the hover; rotorUpdate takes over from the first frame)
-	g_pCustom->dmacon = DMAF_SETCLR | (DMAF_AUD0 << ROTOR_CHANNEL);
+	s_sRotorSfx.pData = (UWORD *)s_pRotorWave;
+	s_sRotorSfx.uwWordLength = ROTOR_ALLOC / 2;
+	s_sRotorSfx.uwPeriod = logicRotorHwPeriod(591);   // (the hover)
+	rotorClaim();
 }
 
 // The rules (period, volume, the spin-up) are logic.c's, unit tested
@@ -3815,9 +3836,11 @@ __attribute__((noinline)) static void rotorUpdate(void) {
 }
 
 static void rotorDestroy(void) {
+	if(!s_pRotorWave) return;
+	ptplayerSfxStopOnChannel(ROTOR_CHANNEL);
 	g_pCustom->dmacon = DMAF_AUD0 << ROTOR_CHANNEL;
 	g_pCustom->aud[ROTOR_CHANNEL].ac_vol = 0;
-	memFree(s_pRotorWave, ROTOR_SAMPLES);
+	memFree(s_pRotorWave, ROTOR_ALLOC);
 }
 
 // ---------------------------------------------------------------- sound ---
@@ -3831,7 +3854,10 @@ static void musicFor(UBYTE ubState) {
 	if(!s_isMusicOn) ubSong = 0xFF;
 	if(ubSong == s_ubSong) return;
 	s_ubSong = ubSong;
-	if(ubSong == 0xFF) soundMusicStop();
+	if(ubSong == 0xFF) {
+		soundMusicStop();
+		rotorClaim();   // (ptplayerStop frees every channel's effect claim, the rotor's too)
+	}
 	else songStart(ubSong);
 }
 
