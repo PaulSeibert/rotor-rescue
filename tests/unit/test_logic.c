@@ -5015,7 +5015,7 @@ static const uint8_t s_pWchH[6] = {28, 36, 32, 28, 24, 20};     // box height ab
 static const uint8_t s_pWchSpd[6] = {16, 24, 20, 16, 12, 8};    // hover speed limit, 1/16 px a frame
 static const uint8_t s_pWchGr[6] = {12, 24, 18, 12, 6, 0};      // frames the rope is kept out of the box
 static const uint8_t s_pWchCt[6] = {8, 12, 12, 8, 0, 0};        // the capture ring, px
-static const uint8_t s_pMusterX[2][DECK_GROUP_MAX] = {{104, 96, 88, 80, 72}, {104, 98, 92, 86, 80}};   // (the group stands aft: slot 0 the far end, slot 4 the end nearest the rope)
+static const uint8_t s_pMusterX[2][DECK_GROUP_MAX] = {{96, 88, 80}, {98, 92, 86}};   // (the group stands aft: slot 0 the far end, slot 4 the end nearest the rope)
 
 static void siteWorld(uint8_t m, uint8_t skill) { if(m == 2) frtrWorld(skill); else deckWorld(skill); }
 static void siteHold(uint8_t m, int16_t wDx, int16_t wDy) { if(m == 2) frtrHold(0, wDx, wDy); else deckHold(wDx, wDy); }
@@ -5249,7 +5249,7 @@ static void testW2DeckGroupThinsOut(void) {
 			CHECK(ubWant <= ubLast);
 			ubLast = ubWant;
 		}
-		CHECK(groupWant(16) == 5 && groupWant(13) == 5 && groupWant(12) == 4 && groupWant(9) == 3 && groupWant(6) == 2 && groupWant(3) == 1 && groupWant(0) == 0);
+		CHECK(groupWant(16) == 3 && groupWant(11) == 3 && groupWant(10) == 2 && groupWant(6) == 2 && groupWant(5) == 1 && groupWant(1) == 1 && groupWant(0) == 0);
 	}
 }
 
@@ -5297,7 +5297,7 @@ static void testW2DeckPersonRunsToTheRopeThenClimbs(void) {
 	}
 }
 
-// One board per person, the count and the board event together; over a whole load the group thins in five steps to nothing
+// One board per person, the count and the board event together; over a whole load the group thins in three steps to nothing
 static void testW2DeckLoadingCountsOnePerPerson(void) {
 	for(uint8_t m = 1; m <= 2; ++m) {
 		siteWorld(m, 3);
@@ -5319,7 +5319,7 @@ static void testW2DeckLoadingCountsOnePerPerson(void) {
 			ubShown = ubNow;
 		}
 		CHECK(iBoards == DECK_PEOPLE && g.aboard == DECK_PEOPLE && g.deckLeft == 0);
-		CHECK(iDrops == 5 && ubShown == 0);
+		CHECK(iDrops == 3 && ubShown == 0);
 	}
 }
 

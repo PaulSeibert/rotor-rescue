@@ -292,7 +292,7 @@ typedef struct { int16_t lo, hi; } tZone;
 #define DECK_ROPE_SET 12         // frames of hover before the rope is down and a person starts to climb (the hook falls 2 px a frame)
 #define DECK_PERSON_FRAMES 50    // a person's climb: 8 people take 8 s
 #define DECK_WALK_FRAMES 22      // of those 50, the run from the group to the rope's foot (the rest is the climb)
-#define DECK_GROUP_MAX 5         // people drawn waving on deck, for all those waiting
+#define DECK_GROUP_MAX 3         // people drawn waving on deck, for all those waiting (the BOBs are blitter time: 3 as before; 5 dropped frames)
 // World 2's sinking freighter (mission 6; SPEC 11, "World 2, slice 2", slice D): in the same sea gap, in place of the third barracks. A timer
 // (SINK_SECONDS by skill, in four stages: the BOB's frames) runs from the start of play; the winch box is the ship's hold, 20 px above the
 // coaming, and follows the tilt; when it sinks the people still aboard are lost

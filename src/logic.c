@@ -2844,7 +2844,7 @@ COLD static uint8_t deckDraw(const tGame *g, tDraw *pOut, uint8_t n) {
 		}
 	}
 	// the group on deck waves, thinning as the count falls; the person on the rope runs out of it for DECK_WALK_FRAMES, then climbs
-	static const uint8_t s_pMusterX[2][DECK_GROUP_MAX] = {{104, 96, 88, 80, 72}, {104, 98, 92, 86, 80}};   // (aft, slot 0 the far end)
+	static const uint8_t s_pMusterX[2][DECK_GROUP_MAX] = {{96, 88, 80}, {98, 92, 86}};   // (aft, slot 0 the far end)
 	uint8_t ubGroup = logicDeckGroup(g);
 	for(uint8_t i = 0; i < ubGroup; ++i) {
 		n = drawAddS(pOut, n, (int16_t)(wLeft + s_pMusterX[isFrtr][i] - cam), (int16_t)(wFloor - 12), BOB_HOSTAGE, (uint8_t)(((g->frame >> 3) + i) & 1 ? MAN_WAVE1 : MAN_WAVE0));

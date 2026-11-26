@@ -1,0 +1,47 @@
+# World 2's ship-deck winch, a sloppy approach (SPEC 11, "Winch and loading polish", v1.43). Ctrl+L, W, 5 starts mission 5 at the base pad; skill 1 is pinned
+# after the world has loaded (no wind, no jets) and ghost mode is on. tests/w2deck.agk flies to the exact spot (press left 771); here the stick is let
+# go six frames early (3 px a frame at cruise: the chopper comes to rest about 18 px past slice C's 24 px box, which is outside it, and inside skill 1's
+# 56 px box): with slice C's rules the winch never started ("a little klugey"), with the box of v1.43 it does, the hook falls, and people load one at a
+# time: boards at 1 s intervals, the group on deck thins. The unit tests (testW2Winch*, testW2Deck*) hold the rules.
+wait-serial "AGK t0" 1000
+key 0x63
+key 0x28
+wait 5
+key 0x11
+wait 5
+key 0x05
+wait-serial "AGK world 2 loaded" 700
+key 0x63
+key 0x28
+wait 5
+key 0x01
+wait 30
+key 0x63
+key 0x28
+wait 5
+key 0x24
+wait 30
+press fire 2
+wait 60
+press up 60
+press left 765
+press down 45
+wait 30
+wait-serial "AGK winch start" 300
+wait 30
+screenshot runs
+wait-serial "AGK winch board=1" 200
+wait 2
+screenshot board1
+wait-serial "AGK winch board=2" 200
+wait 25
+screenshot climb2
+wait-serial "AGK winch board=3" 200
+wait 2
+screenshot board3
+expect-serial "AGK winch start[\s\S]*AGK winch board=1[\s\S]*AGK winch board=2[\s\S]*AGK winch board=3"
+expect-no-serial "AGK ERR|missing"
+expect-no-dropped-frames
+# (a new scenario: the sibling world 2 scenarios assert 98; measured 92-97, none dropped)
+expect-max-load 98
+expect-min-chip-free 96
