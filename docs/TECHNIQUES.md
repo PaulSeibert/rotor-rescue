@@ -55,9 +55,24 @@ against its limit of 85, and `w2frtr` went over its limit of 98 (99 % with a dro
 parts:
 1. the per-mission table, filled lazily (above);
 2. gating, the same rule as the sea's swell: the pens are written only in a picture that queued at most
-   `SEA_BLIT_MAX` (14) blits, and not in a list's first pictures (`s_ubSeaHold`). A busy picture takes the
-   step up in the next quiet one. The step depends only on the frame counter and the blit count, so runs are
-   deterministic and Ctrl+L, S holds the frame, as it does for the sea.
+   `SEA_BLIT_MAX` (14) blits, and not in a list's first pictures (`s_ubSeaHold`). The step depends only on the frame
+   counter and the blit count, so runs are deterministic and Ctrl+L, S holds the frame, as it does for the sea.
+   Writing in every picture was measured again after the fix below and costs 2 points of the worst a500 picture
+   (`w2play` 85 -> 87 against 85): the three chip-RAM MOVEs and the lookups are not free, so the gate stays.
+
+**Flicker: gating a double-buffered write needs a rule between the lists (Paul's playtest, 2026-11-25).** The first
+gate said "a busy picture takes the step up in the next quiet one". It was wrong with two copper lists: a list that
+skips keeps the pens of its last write, and the picture shows its own list, so the water flipped between two phases
+every picture, or jumped many steps when a quiet picture caught up. Measured in `tests/w2play.agk` on the a500 (people
+boarding, boats): 31 % of the pictures were busy, in runs of 22; the lists were up to 14 steps apart, a list was up to 29
+steps behind the frame, and a pen channel jumped 9 levels in one picture (the wave moves 3 a step at most). A skip is
+fine; two lists out of step are not. The rule (`logicBasePenKey`): a list written goes to the other list's step, or one
+step past it when they are level, never past the frame's step. The lists then differ by one step at most (the wave's own
+step), at the cost of a slower wave in busy stretches (about a quarter of its pace through the boarding; it never stops
+while a picture is quiet), and the wave falls behind the frame counter for good, which nobody can see in a slow cycle.
+A catch-up that jumps to the frame's step is the same mistake as the first gate: do not add one. The metric is the
+largest change of a pen channel between two shown pictures (`testBaseFlicker`, on the measured blit counts) and in the
+game `bspread`, the lists' largest difference (`tests/w2play.agk` expects 1 at most).
 
 **Test.** `tests/w2base.agk` (synced to the game frame, as `tests/w2sea.agk`): picked strip-water pixels must
 differ between frame 288 and frame 352, on the a500 and the a1200 shots. On main before this change every
@@ -65,6 +80,7 @@ picked pixel was the same, so the test was red there.
 
 **Watch.**
 - After a list is written, the pens wait out that list's first pictures, so the change lands a picture late.
+- Any later change to the gate must keep the lists' steps within one of each other (`bspread`), whatever it skips.
 - The strip's row 0 is pens 6 and 7 only; a new art pass must keep that rule (the generator enforces it).
 - On the a500 the world 2 load waits in the test scenarios went from 400 to 700 ticks (see Open).
 - Native port: `s_pBaseStep`, `s_pBaseTab` and the `basePens` patch may need the kit's `rescue.json` rule
