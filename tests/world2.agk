@@ -18,7 +18,7 @@ wait 5
 key 0x11
 wait 5
 key 0x04
-wait-serial "AGK world 2 loaded" 700
+wait-serial "AGK world 2 loaded" 525
 wait 60
 screenshot card
 # (the flight is the display engine's, not the jets': skill 2 after the card, where they never come in mission 4; the card above is at skill 3 and says AND JETS)

@@ -14,7 +14,7 @@ wait 5
 key 0x11
 wait 5
 key 0x04
-wait-serial "AGK world 2 loaded" 700
+wait-serial "AGK world 2 loaded" 525
 wait 60
 key 0x63
 key 0x28
