@@ -425,7 +425,7 @@ __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 		agkEnd();
 		return;
 	}
-	if(keyUse(KEY_B)) {
+	if(keyUse(KEY_J)) {
 		// three equal-priority effects in one picture: the hangar drop-off's worst case (tests/hqsound.agk)
 		for(UBYTE i = 0; i < 3; ++i) soundPlay(SOUND_SFX_SAVED);
 		s_ubSkillKeyWait = 0;
