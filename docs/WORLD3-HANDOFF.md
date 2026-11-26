@@ -1,3 +1,46 @@
+# World 3 mission 7: handoff (branch `w3-m7`, 2026-11-26)
+
+Read SPEC.md section 13.8 first. The block below is what the next person needs; the hardware pilot's own notes follow it unchanged.
+
+## Built (vAmiga, a500 / a500-ks31 / a500-aros / a1200), behind the debug entry Ctrl+L, W, 7
+- **The converter re-run** against the round-4 art (`w3-style` 24fbd28): only `disk/world3.bin`'s pixels moved (tiles and fills; same size, same offsets);
+  the pilot's start-screen pixel expectations (`tests/w3pilot.agk`) and every world 3 golden moved with it.
+- **The map** (`art/tools/make_world3_disk.py`: `M7_PTS`, `M7_SITES`, `HANGAR_COL`): the art planner's columns for a polyline of ours, 256 columns.
+  The base pad (x 144), the hangar bench (x 208), four sites of one 8-column bench each (lodge, pad bed) at heights 3 / 43 / 70 / 97 px (x 640 / 1344
+  / 2176 / 3168), a nest on a flat two-column tile beside each, and the home nest (x 81). The converter asserts the contract (benches flat, a site level);
+  `src/world3_map.h` carries the heights, the pad flags and the lodge / pad / nest x; `src/world3_art.h` the base pad and hangar x.
+- **Rules** (logic.c, "world 3, mission 7"; all called from world 3 only): `w3WorldUpdate` (the landing bookkeeping the jets keep, barracks, people,
+  `w3ShotsUpdate` for cannon and bombs against nests, lodges, people, terrain and roofs, `nestsUpdate`), `floorAt` first asks world 3 (`w3Floor`: terrain,
+  lodge and hangar roofs at their own bench's height), `chopperWreckUpdate` falls onto the terrain, `onBasePad` is the base pad only (unload and repair).
+  People: `W3_OUT_MAX` 4 out at once (world 2: 6), call range 160, drawn 12 px over the terrain under them.
+- **The nest**: tell 18/26/22/18/16/14 (SPEC 13.6), a ranging puff on the chopper for the last 14 frames, the burst (radius 18); R1 ground grace
+  (never skill 1-2, 300/200/150 frames landed on 3-5), R2 take-off grace, home is safe (landed on the base pad), R3 one tell at a time (two on skill
+  4-5, `atkWait` 150 after one against a landed chopper), R4 tell >= 14 (unit test over every skill), R7 on screen, 56 <= distance <= 220. Killing it:
+  100, and its site's zone clear +100 (HUD ZONE CLR). Mutation-checked: the unit tests fail when the base-pad rule, the puff, the token or the dwell is removed.
+- **Shadow** (off by default, `g->w3Shadow`, Ctrl+L, V): see the numbers below. **`logicAltitude`**, **radar** `logicRadarX3` (x * 3 / 64), the **card** (brief,
+  strip map at x / 16, the map and the hangar / nests / nest dots a few pictures into the card), the **hall of fame** (`HI_MISSIONS` 9, `HI_VICTORY` 10: "all done"
+  was 7 = mission 7).
+- Tests: `tests/unit/test_logic.c` testW3M7* (map, rescue loop, people, roofs, wreck, nest tables / tells / fairness / hits / zone, respawn, card's first pictures, altitude, shadow,
+  radar, card and map, hall of fame, clear), `tests/w3m7.agk` (the whole loop on screen: Ctrl+L, J hovers over the next pad), `tests/w3pilot.agk` (pixels moved).
+
+## Numbers (vAmiga a500)
+- Chip free in play in world 3: 155,592 B (unchanged: the world adds none); copper 631 / 661 (OCS), as the pilot; executable +9 KB over main (the AROS boot guard 2300 holds: see the gate).
+- **Frame load**: a world 3 picture with the base pad, hangar and a nest runs 48-65 % average (the pilot's empty flight 26-47 %). **Every BOB drawn costs about 5 points of an A500 frame**
+  (the A500's 6-plane lines leave the blitter little bus and every queued blit is an interrupt): measured by removing one at a time (w3pilot's first window 75 -> 100 % with the hangar, the
+  shadow, the map and the nest dots all in the card's first picture; 91 % with them all arriving in one picture; 73 % staggered). The shadow alone is 7 points average, 9 at the peaks.
+  Hence: the card draws the base pad only at first (hangar 9, nests 12, nest dots 15, map 18 pictures in), a nest with under 8 px on screen is not drawn, four people out at once,
+  and the shadow is a switch. The picture after the world's load also varies 75-91 % between runs of the same build (the disk's DMA).
+- w3m7 worst 80 %, w3pilot worst 79 % (limit 85 on both, nothing loosened), no dropped frame.
+
+## For the next slices
+- The shadow: Paul decides (SPEC open question 17). Turn it on with `g->w3Shadow` defaulted to 1 (logicInit), re-record the world 3 goldens and move the limits if he accepts it.
+- Trucks, AA guns on the benches, jets, wind, the radar peak, winch ledges: no art in the world 3 set; the unit-tested rules for them are world 1 / 2's (CONTENT-PLAN 4.3).
+- A big-BOB edge pop-in as world 2's hull (a 64 px pad or hangar appears whole inside the buffer's 48 px margins): none seen on the card's strip, not looked for in flight.
+- Map streaming / flight over the new map is checked by `tools/check_w3strip.py` (shadow and people pixels are not masked there: up to 0.3 % of the rock pixels differ).
+- amiga-hw (unchanged): the cloud ceiling strip, the M8 tunnel roof, per-mission list layout, the PF2 switch at line 129/130 on real hardware.
+
+---
+
 # World 3 hardware pilot: handoff (branch `w3-pilot`, 2026-11-24)
 
 Read SPEC.md section 13 first. This is what is built, where it stopped, and what is for the next person.
