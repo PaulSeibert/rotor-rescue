@@ -4,7 +4,7 @@ Techniques this game uses that the next game can copy. Each entry says what it i
 what to watch. The engine-side write-up is in the kit (`docs/colourcycle.md`); the rules of the sea and
 the strip are in `docs/SPEC.md` section 11.
 
-## Colour-cycled water with phase-assigned pens (base ocean, SPEC v1.42)
+## Colour-cycled water with phase-assigned pens (base ocean, SPEC v1.43)
 
 **What it is.** The terrain strip's water (lines 208-255, where the islands and ships stand) moves with no
 new copper entry and no chip bytes. The water is drawn in three palette pens (1, 6 and 7), and the copper
@@ -50,7 +50,7 @@ list, and only when the step has moved. No entries are added to the list and no 
 needs them, not at the world load.
 
 **Frame budget: what it cost, and the fix.** The first build computed the three colours in full every picture.
-On an A500 that cost 2 to 5 points of the worst picture (SPEC v1.42 measured it): `w2play` went 85 -> 90
+On an A500 that cost 2 to 5 points of the worst picture (SPEC v1.43 measured it): `w2play` went 85 -> 90
 against its limit of 85, and `w2frtr` went over its limit of 98 (99 % with a dropped frame). The fix has two
 parts:
 1. the per-mission table, filled lazily (above);
