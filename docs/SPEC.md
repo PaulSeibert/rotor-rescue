@@ -972,7 +972,7 @@ jet 32x12, mine 16x12, shot 16x3, bomb 16x6, shell 16x4, explosion 32x32, flag 1
       first and measured: +6 % average and +14 % in the swell's pictures, 12 points more worst load in
       `tests/w2play.agk` (82 -> 94, over its 85) and a dropped frame at the mission start; the far water is calm
       for that reason.
-  - **Base ocean animation** (v1.42; Paul's queued item: "animate the base ocean layer", the water of the terrain
+  - **Base ocean animation** (v1.43; Paul's queued item: "animate the base ocean layer", the water of the terrain
     strip, lines 208-255, where the islands and ships stand; world 2 only; `tests/unit/test_logic.c` `testBaseWave`,
     `tests/w2base.agk`). The sea above the strip moves already (v1.31); the strip's water was still. **No new copper
     entry, no chip byte, no bitplane or blitter work, no swell of the strip's lines** (a swell would shear the islands,
