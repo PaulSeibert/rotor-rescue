@@ -428,6 +428,9 @@ __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 		agkEnd();
 		return;
 	}
+	// (ONE keyUse per key per picture: ACE's keys are written live by the CIA-A interrupt, keyProcess does nothing on the Amiga, and a scenario's key lands
+	// a few raster lines into the picture, where the a1200 is already in this function. A key read at two places here can be 0 at the first and 1 at the
+	// second: with J in a separate function the HQ sound test lost its press on the a1200 only, 2026-11-26)
 	if(keyUse(KEY_J)) {
 		s_ubSkillKeyWait = 0;
 		if(s_sGame.world == W3_WORLD) {
