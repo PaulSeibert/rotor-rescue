@@ -383,7 +383,6 @@ static void chipSqueeze(ULONG ulKb) {
 	else agkPrint("AGK chip squeeze failed\n");
 }
 
-static UBYTE skillKeysW3(void);
 __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 	static UBYTE s_ubWorldKeyWait;   // Ctrl+L, W: frames left to press 1-6 (a mission, testing)
 	if(keyCheck(KEY_CONTROL) && keyUse(KEY_L)) s_ubSkillKeyWait = 100;
@@ -429,10 +428,29 @@ __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 		agkEnd();
 		return;
 	}
-	if(s_sGame.world != W3_WORLD && keyUse(KEY_J)) {   // (world 3: J is its hover over the next pad, skillKeysW3)
-		// three equal-priority effects in one picture: the hangar drop-off's worst case (tests/hqsound.agk)
-		for(UBYTE i = 0; i < 3; ++i) soundPlay(SOUND_SFX_SAVED);
+	if(keyUse(KEY_J)) {
 		s_ubSkillKeyWait = 0;
+		if(s_sGame.world == W3_WORLD) {
+			// world 3 (tests/w3m7.agk): hovering 30 px over the next pad, facing left: the four sites' pads, then the base pad, round again
+			static UBYTE s_ubJump;
+			int16_t x = s_ubJump < BARRACKS_COUNT ? (int16_t)(s_sGame.pBarracks[s_ubJump].x + 64) : (int16_t)W3_START_X;
+			s_ubJump = (UBYTE)(s_ubJump >= BARRACKS_COUNT ? 0 : s_ubJump + 1);
+			s_sGame.chop.x = x; s_sGame.chop.y = (int16_t)(logicW3FloorAt(x) - 30); s_sGame.chop.vx = s_sGame.chop.vy = 0; s_sGame.chop.landed = 0;
+			s_sGame.chop.face = s_sGame.chop.faceTarget = FACE_LEFT;
+			s_sGame.landFrames = 0; s_sGame.airGrace = 0;   // (the camera pans to it as after a respawn: a jump would draw the whole ring in one picture)
+		}
+		else {
+			// three equal-priority effects in one picture: the hangar drop-off's worst case (tests/hqsound.agk)
+			for(UBYTE i = 0; i < 3; ++i) soundPlay(SOUND_SFX_SAVED);
+		}
+		return;
+	}
+	if(keyUse(KEY_V)) {
+		// world 3's shadow on the terrain, off by default (SPEC 13.8: it costs about 7 points of frame load); on, to look at it and its cost
+		s_sGame.w3Shadow = !s_sGame.w3Shadow;
+		s_ubSkillKeyWait = 0;
+		agkState("w3 shadow", s_sGame.w3Shadow);
+		agkEnd();
 		return;
 	}
 	if(keyUse(KEY_Q)) {
@@ -508,7 +526,6 @@ __attribute__((noinline, optimize("Os"))) static void skillKeys(void) {
 		s_ubSkillKeyWait = 0;
 		return;
 	}
-	if(skillKeysW3()) return;   // (Ctrl+L, V and J: world 3's hooks, at the end of the file)
 	if(keyUse(KEY_H)) {
 		// the hall of fame read from the disk again, as at boot (tests)
 		s_ubSkillKeyWait = 0;
@@ -4589,29 +4606,3 @@ __attribute__((noinline)) static void radarUpdate3(UBYTE ubBfr) {
 }
 #undef ROW
 #undef RXW
-
-// Ctrl+L, then V / J (the window skillKeys opened): the shadow on and off, and tests/w3m7.agk's hover over the next pad; 1: the key was one of them
-__attribute__((noinline, optimize("Os"))) static UBYTE skillKeysW3(void) {
-	if(keyUse(KEY_V)) {
-		// world 3's shadow on the terrain, off by default (SPEC 13.8: it costs about 7 points of frame load); on, to look at it and its cost
-		s_sGame.w3Shadow = !s_sGame.w3Shadow;
-		s_ubSkillKeyWait = 0;
-		agkState("w3 shadow", s_sGame.w3Shadow);
-		agkEnd();
-		return 1;
-	}
-	if(keyUse(KEY_J)) {
-		// world 3 (tests/w3m7.agk): hovering 30 px over the next pad, facing left: the four sites' pads, then the base pad, round again
-		static UBYTE s_ubJump;
-		if(s_sGame.world == W3_WORLD) {
-			int16_t x = s_ubJump < BARRACKS_COUNT ? (int16_t)(s_sGame.pBarracks[s_ubJump].x + 64) : (int16_t)W3_START_X;
-			s_ubJump = (UBYTE)(s_ubJump >= BARRACKS_COUNT ? 0 : s_ubJump + 1);
-			s_sGame.chop.x = x; s_sGame.chop.y = (int16_t)(logicW3FloorAt(x) - 30); s_sGame.chop.vx = s_sGame.chop.vy = 0; s_sGame.chop.landed = 0;
-			s_sGame.chop.face = s_sGame.chop.faceTarget = FACE_LEFT;
-			s_sGame.landFrames = 0; s_sGame.airGrace = 0;   // (the camera pans to it as after a respawn: a jump would draw the whole ring in one picture)
-		}
-		s_ubSkillKeyWait = 0;
-		return 1;
-	}
-	return 0;
-}
