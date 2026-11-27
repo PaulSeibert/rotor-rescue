@@ -2785,7 +2785,9 @@ static inline uint8_t onScreen(int16_t sx, uint8_t w) {
 	return sx > -(int16_t)w && sx < SCREEN_W;
 }
 
-static uint8_t drawAdd(tDraw *pOut, uint8_t n, int16_t sx, int16_t sy, uint8_t bob, uint8_t frame) {
+// (always_inline: with a plain `static` GCC inlines this at its ~35 hot calls only while the unit's call count stays under its growth limit; the shadow's one
+// more call in d92ddc0 tipped it, drawAdd became a real function and every world 1-2 frame paid about 5 raster lines of call overhead: 1.5 points of load)
+static inline __attribute__((always_inline)) uint8_t drawAdd(tDraw *pOut, uint8_t n, int16_t sx, int16_t sy, uint8_t bob, uint8_t frame) {
 	if(n >= DRAW_MAX || !onScreen(sx, g_pBobW[bob])) return n;
 	pOut[n].x = sx;
 	pOut[n].y = sy;
